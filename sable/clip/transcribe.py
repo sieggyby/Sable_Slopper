@@ -28,7 +28,7 @@ def _cache_path(video_path: Path) -> Path:
 
 def require_whisper() -> str:
     """Find whisper-cpp binary."""
-    for name in ("whisper-cpp", "whisper", "main"):
+    for name in ("whisper-cli", "whisper-cpp", "whisper", "main"):
         path = shutil.which(name)
         if path:
             return path
@@ -104,8 +104,9 @@ def _find_model(model: str) -> str:
     import os
     search_dirs = [
         Path.home() / ".sable" / "models",
-        Path("/usr/local/share/whisper"),
+        Path("/opt/homebrew/share/whisper-cpp"),   # brew install whisper-cpp
         Path("/opt/homebrew/share/whisper-cpp/models"),
+        Path("/usr/local/share/whisper"),
         Path.home() / "Library" / "Application Support" / "whisper.cpp",
     ]
     model_filename = f"ggml-{model}.bin"
