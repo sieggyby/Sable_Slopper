@@ -35,6 +35,12 @@ def templates_dir() -> Path:
     return d
 
 
+def wojaks_dir() -> Path:
+    d = sable_home() / "wojaks"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def face_library_dir() -> Path:
     d = sable_home() / "face_library"
     d.mkdir(parents=True, exist_ok=True)
@@ -74,3 +80,10 @@ def brainrot_dir() -> Path:
 
 def pulse_db_path() -> Path:
     return sable_home() / "pulse.db"
+
+
+def downloads_dir() -> Path:
+    """~/sable-workspace/downloads — cached yt-dlp downloads"""
+    d = workspace() / "downloads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d

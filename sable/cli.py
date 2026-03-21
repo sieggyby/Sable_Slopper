@@ -52,9 +52,11 @@ from sable.clip.cli import clip_group
 from sable.meme.cli import meme_group
 from sable.face.cli import face_group
 from sable.pulse.cli import pulse_group
+from sable.wojak.cli import wojak_group
 
 main.add_command(roster_group)
 main.add_command(clip_group)
 main.add_command(meme_group)
 main.add_command(face_group)
 main.add_command(pulse_group)
+main.add_command(wojak_group)

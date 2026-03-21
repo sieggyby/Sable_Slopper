@@ -1,13 +1,51 @@
 """FFmpeg assembly of stacked 9:16 clips with brainrot and captions."""
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from sable.shared.ffmpeg import extract_clip, stack_videos, get_duration
+from sable.shared.ffmpeg import extract_clip, stack_videos, require_ffmpeg
 from sable.clip.brainrot import pick as pick_brainrot, loop_to_duration
 from sable.clip.captions import generate_word_captions
+from sable.clip.thumbnail import generate_thumbnail
+
+PLATFORM_PROFILES = {
+    "twitter":  {"width": 720,  "half_height": 640,  "crf": 26, "preset": "fast", "audio_bitrate": "128k", "video_maxrate": None},
+    "discord":  {"width": 720,  "half_height": 640,  "crf": 28, "preset": "fast", "audio_bitrate": "128k", "video_maxrate": "4M"},
+    "telegram": {"width": 1080, "half_height": 960,  "crf": 23, "preset": "fast", "audio_bitrate": "192k", "video_maxrate": None},
+}
+
+_DISCORD_SIZE_WARN_BYTES = 23 * 1024 * 1024
+
+
+def _auto_caption_color(source_video: Path, sample_time: float) -> str:
+    """Sample a frame at sample_time and return 'yellow' or 'black' based on brightness."""
+    try:
+        from PIL import Image
+        import io
+
+        ffmpeg = require_ffmpeg()
+        result = subprocess.run(
+            [
+                ffmpeg, "-ss", str(sample_time), "-i", str(source_video),
+                "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-",
+            ],
+            capture_output=True, check=True,
+        )
+        img = Image.open(io.BytesIO(result.stdout)).convert("L")
+        w, h = img.size
+        cx, cy = w // 2, h // 2
+        region = img.crop((cx - w // 4, cy - h // 4, cx + w // 4, cy + h // 4))
+        import statistics
+        brightness = statistics.mean(region.getdata())
+        return "black" if brightness >= 128 else "yellow"
+    except Exception:
+        return "yellow"
 
 
 def assemble_clip(
@@ -19,7 +57,12 @@ def assemble_clip(
     brainrot_energy: str = "medium",
     caption_style: str = "word",
     captions_segments: Optional[list[dict]] = None,
+    image_overlay_path: Optional[str | Path] = None,
+    caption_color: Optional[str] = None,
+    caption_hint: Optional[str] = None,
     dry_run: bool = False,
+    platform: str = "twitter",
+    highlight_active: bool = True,
 ) -> dict:
     """
     Full assembly pipeline:
@@ -34,6 +77,15 @@ def assemble_clip(
     output_path = Path(output_path)
     clip_duration = end - start
 
+    # Resolve caption color (auto-detect if not specified)
+    if caption_color is None:
+        sample_time = start + clip_duration / 2
+        resolved_color = _auto_caption_color(source_video, sample_time)
+    else:
+        resolved_color = caption_color
+
+    profile = PLATFORM_PROFILES.get(platform, PLATFORM_PROFILES["twitter"])
+
     meta = {
         "source": str(source_video),
         "output": str(output_path),
@@ -42,7 +94,12 @@ def assemble_clip(
         "duration": clip_duration,
         "brainrot_energy": brainrot_energy,
         "caption_style": caption_style,
+        "caption_color": resolved_color,
+        "image_overlay_path": str(image_overlay_path) if image_overlay_path else None,
+        "platform": platform,
         "dry_run": dry_run,
+        "highlight_active": highlight_active,
+        "caption": caption_hint or "",
     }
 
     if dry_run:
@@ -63,6 +120,7 @@ def assemble_clip(
                 "Add some with: sable clip brainrot add <video> --energy medium"
             )
 
+        meta["brainrot_source"] = brainrot_src
         brainrot_looped = tmp_path / "brainrot_looped.mp4"
         loop_to_duration(brainrot_src, clip_duration, brainrot_looped)
 
@@ -77,10 +135,41 @@ def assemble_clip(
             ]
             if adjusted:
                 subtitle_path = tmp_path / "captions.ass"
-                generate_word_captions(adjusted, subtitle_path, style=caption_style)
+                generate_word_captions(adjusted, subtitle_path, style=caption_style, color=resolved_color,
+                                       highlight_active=highlight_active)
 
         # 4. Stack and encode
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        stack_videos(source_clip, brainrot_looped, output_path, subtitle_path=subtitle_path)
+        stack_videos(
+            source_clip, brainrot_looped, output_path,
+            subtitle_path=subtitle_path,
+            image_overlay_path=image_overlay_path,
+            profile=profile,
+        )
+
+    # Generate thumbnail
+    thumb_path = output_path.with_suffix(".thumbnail.png")
+    generate_thumbnail(
+        headline_hint=meta.get("caption", "")[:200],
+        output_path=thumb_path,
+        source_video=source_video,
+        clip_start=start,
+        clip_end=end,
+    )
+    meta["thumbnail"] = str(thumb_path)
+
+    # Discord file-size warning
+    if platform == "discord" and output_path.stat().st_size > _DISCORD_SIZE_WARN_BYTES:
+        print(
+            "\033[33mWarning: clip exceeds 23 MB — may hit Discord's 25 MB free-tier limit. "
+            "Consider keeping --platform discord clips under 30 s.\033[0m",
+            file=sys.stderr,
+        )
+
+    # Write sidecar metadata so bad brainrot can be traced later
+    meta["assembled_at"] = datetime.now(timezone.utc).isoformat()
+    meta_path = output_path.with_suffix(".meta.json")
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
 
     return meta

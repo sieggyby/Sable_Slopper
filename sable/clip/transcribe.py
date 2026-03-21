@@ -1,15 +1,10 @@
-"""Whisper-cpp integration with audio extraction and transcript caching."""
+"""faster-whisper transcription backend with transcript caching."""
 from __future__ import annotations
 
 import hashlib
 import json
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
-from typing import Optional
 
-from sable.shared.ffmpeg import extract_audio
 from sable.shared.paths import transcript_cache_dir
 
 
@@ -21,21 +16,17 @@ def _file_hash(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
-def _cache_path(video_path: Path) -> Path:
+_CACHE_VERSION = "v3"
+
+
+def _cache_path(video_path: Path, model: str) -> Path:
     key = _file_hash(video_path)
-    return transcript_cache_dir() / f"{key}.json"
+    return transcript_cache_dir() / f"{key}-{model}-{_CACHE_VERSION}.json"
 
 
-def require_whisper() -> str:
-    """Find whisper-cpp binary."""
-    for name in ("whisper-cli", "whisper-cpp", "whisper", "main"):
-        path = shutil.which(name)
-        if path:
-            return path
-    raise RuntimeError(
-        "whisper-cpp not found. Install it: brew install whisper-cpp  "
-        "or build from https://github.com/ggerganov/whisper.cpp"
-    )
+def _load_model(model: str):
+    from faster_whisper import WhisperModel
+    return WhisperModel(model, device="auto", compute_type="int8")
 
 
 def transcribe(
@@ -46,105 +37,80 @@ def transcribe(
     """
     Transcribe a video file. Returns a dict with:
       - text: full transcript string
-      - segments: list of {start, end, text} dicts (word-level if available)
+      - segments: list of {start, end, text} dicts (phrase-level)
+      - words: list of {start, end, text} dicts (word-level)
 
     Results are cached by file hash.
     """
     video_path = Path(video_path)
-    cache = _cache_path(video_path)
+    cache = _cache_path(video_path, model)
 
     if cache.exists() and not force:
         with open(cache) as f:
             return json.load(f)
 
-    whisper = require_whisper()
+    wm = _load_model(model)
+    segments_iter, _info = wm.transcribe(
+        str(video_path),
+        word_timestamps=True,
+        language="en" if model.endswith(".en") else None,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 500},
+    )
 
-    with tempfile.TemporaryDirectory() as tmp:
-        audio = Path(tmp) / "audio.wav"
-        extract_audio(video_path, audio)
+    transcript = _normalize_faster_whisper(segments_iter)
 
-        output_json = Path(tmp) / "transcript"
-        result = subprocess.run(
-            [
-                whisper,
-                "-m", _find_model(model),
-                "-f", str(audio),
-                "--output-json",
-                "--output-file", str(output_json),
-                "--word-thold", "0.01",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Whisper failed:\n{result.stderr}\n\n"
-                "Make sure whisper-cpp is installed and the model file exists.\n"
-                "Download models: bash scripts/setup_whisper.sh"
-            )
-
-        json_file = Path(tmp) / "transcript.json"
-        if not json_file.exists():
-            # Fallback: parse text output
-            transcript = {"text": result.stdout.strip(), "segments": []}
-        else:
-            with open(json_file) as f:
-                raw = json.load(f)
-            transcript = _normalize_whisper_output(raw)
-
-    # Cache it
     with open(cache, "w") as f:
         json.dump(transcript, f)
 
     return transcript
 
 
-def _find_model(model: str) -> str:
-    """Locate a whisper model file."""
-    import os
-    search_dirs = [
-        Path.home() / ".sable" / "models",
-        Path("/opt/homebrew/share/whisper-cpp"),   # brew install whisper-cpp
-        Path("/opt/homebrew/share/whisper-cpp/models"),
-        Path("/usr/local/share/whisper"),
-        Path.home() / "Library" / "Application Support" / "whisper.cpp",
-    ]
-    model_filename = f"ggml-{model}.bin"
-    for d in search_dirs:
-        candidate = d / model_filename
-        if candidate.exists():
-            return str(candidate)
+def _normalize_faster_whisper(segments_iter) -> dict:
+    phrase_segments = []
+    word_segments = []
 
-    # Try as-is (user might pass full path)
-    if Path(model).exists():
-        return model
+    for seg in segments_iter:
+        text = seg.text.strip()
+        if not text:
+            continue
+        phrase_segments.append({"start": seg.start, "end": seg.end, "text": text})
+        for w in (seg.words or []):
+            word_text = w.word.strip()
+            if word_text:
+                word_segments.append({"start": w.start, "end": w.end, "text": word_text})
 
-    raise RuntimeError(
-        f"Whisper model '{model}' not found.\n"
-        f"Download: whisper-cpp --download-model {model}\n"
-        f"Or place ggml-{model}.bin in ~/.sable/models/"
-    )
+    word_segments = _fix_word_timing(word_segments)
+
+    full_text = " ".join(s["text"] for s in phrase_segments).strip()
+    return {"text": full_text, "segments": phrase_segments, "words": word_segments}
 
 
-def _normalize_whisper_output(raw: dict) -> dict:
-    """Normalize whisper.cpp JSON output to standard format."""
-    segments = []
-    for seg in raw.get("transcription", []):
-        tokens = seg.get("tokens", [])
-        if tokens:
-            for tok in tokens:
-                if tok.get("text", "").strip():
-                    segments.append({
-                        "start": tok.get("offsets", {}).get("from", 0) / 1000.0,
-                        "end": tok.get("offsets", {}).get("to", 0) / 1000.0,
-                        "text": tok["text"],
-                    })
-        else:
-            segments.append({
-                "start": seg.get("offsets", {}).get("from", 0) / 1000.0,
-                "end": seg.get("offsets", {}).get("to", 0) / 1000.0,
-                "text": seg.get("text", ""),
-            })
+_MIN_WORD_MS = 100    # words shorter than this get extended
+_MICRO_GAP_MS = 0.08  # gaps under 80ms get filled (seconds)
 
-    full_text = " ".join(s["text"] for s in segments).strip()
-    return {"text": full_text, "segments": segments}
+
+def _fix_word_timing(words: list[dict]) -> list[dict]:
+    """Overlap removal, micro-gap fill, minimum duration enforcement."""
+    if not words:
+        return words
+    words = [w.copy() for w in words]
+
+    for i in range(len(words) - 1):
+        cur, nxt = words[i], words[i + 1]
+        if cur["end"] > nxt["start"]:
+            mid = (cur["end"] + nxt["start"]) / 2
+            cur["end"] = mid
+            nxt["start"] = mid
+        elif nxt["start"] - cur["end"] < _MICRO_GAP_MS:
+            cur["end"] = nxt["start"]
+
+    for i, w in enumerate(words):
+        min_dur = _MIN_WORD_MS / 1000
+        if w["end"] - w["start"] < min_dur:
+            new_end = w["start"] + min_dur
+            if i + 1 < len(words) and new_end > words[i + 1]["start"]:
+                new_end = words[i + 1]["start"]
+            w["end"] = new_end
+
+    return words

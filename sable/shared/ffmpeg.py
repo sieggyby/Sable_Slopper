@@ -110,34 +110,123 @@ def stack_videos(
     bottom_path: str | Path,
     output_path: str | Path,
     subtitle_path: Optional[str | Path] = None,
+    image_overlay_path: Optional[str | Path] = None,
+    profile: Optional[dict] = None,
+    interview_audio_vol: float = 1.0,
+    brainrot_audio_vol: float = 0.0,
 ) -> None:
     """
-    Stack two videos vertically into 1080x1920 (9:16).
-    Top = source (960px tall), Bottom = brainrot (960px tall).
-    Audio from top only.
+    Stack two videos vertically into a 9:16 portrait layout.
+    Top = brainrot (input 1), Bottom = source/interview (input 0).
+    Audio: interview (input 0) through loudnorm; brainrot audio silent by default.
+    Profile controls resolution and encoding (defaults to 1080x1920, CRF 23, 192k).
     """
+    p = profile or {
+        "width": 1080, "half_height": 960,
+        "crf": 23, "preset": "fast",
+        "audio_bitrate": "192k", "video_maxrate": None,
+    }
+    w, hh = p["width"], p["half_height"]
+    full_h = hh * 2
+
     ffmpeg = require_ffmpeg()
     filter_graph = (
-        "[0:v]scale=1080:960:force_original_aspect_ratio=decrease,"
-        "pad=1080:960:(ow-iw)/2:(oh-ih)/2:black[top];"
-        "[1:v]scale=1080:960:force_original_aspect_ratio=increase,"
-        "crop=1080:960[bottom];"
+        f"[1:v]setpts=PTS-STARTPTS,fps=30,scale={w}:{hh}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{hh}[top];"
+        f"[0:v]setpts=PTS-STARTPTS,fps=30,scale={w}:{hh}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{hh}[bottom];"
         "[top][bottom]vstack=inputs=2[stacked]"
     )
 
+    inputs = ["-i", str(top_path), "-i", str(bottom_path)]
+
+    # Audio: interview (input 0) loud + normalized; brainrot (input 1) optionally mixed
+    if brainrot_audio_vol > 0:
+        audio_filter = (
+            "[0:a]asetpts=PTS-STARTPTS,dynaudnorm=f=150:g=15[interview_norm];"
+            f"[1:a]volume={brainrot_audio_vol}[ambient];"
+            "[interview_norm][ambient]amix=inputs=2:normalize=0[audio_out]"
+        )
+    else:
+        audio_filter = "[0:a]asetpts=PTS-STARTPTS,dynaudnorm=f=150:g=15[audio_out]"
+    filter_graph += f";{audio_filter}"
+
+    current = "[stacked]"
+
+    if image_overlay_path:
+        inputs += ["-i", str(image_overlay_path)]
+        img_stream = f"[{len(inputs) // 2 - 1}:v]"
+        filter_graph += (
+            f";{img_stream}scale=200:-1[img];"
+            f"{current}[img]overlay=x=20:y=H-h-20[overlaid]"
+        )
+        current = "[overlaid]"
+
     if subtitle_path:
-        filter_graph += f";[stacked]ass={subtitle_path}[out]"
+        filter_graph += f";{current}ass={subtitle_path}[out]"
         output_map = "[out]"
     else:
-        output_map = "[stacked]"
+        output_map = current
+
+    encode_flags = [
+        "-c:v", "libx264", "-preset", p["preset"], "-crf", str(p["crf"]),
+        "-c:a", "aac", "-b:a", p["audio_bitrate"],
+    ]
+    if p.get("video_maxrate"):
+        encode_flags += ["-maxrate", p["video_maxrate"], "-bufsize", _double_rate(p["video_maxrate"])]
 
     run([
         ffmpeg, "-y",
-        "-i", str(top_path),
-        "-i", str(bottom_path),
+        *inputs,
         "-filter_complex", filter_graph,
         "-map", output_map,
-        "-map", "0:a",
+        "-map", "[audio_out]",
+        "-shortest",
+        *encode_flags,
+        str(output_path),
+    ], capture=True)
+
+
+def _double_rate(rate: str) -> str:
+    """Double a bitrate string like '4M' → '8M' for bufsize."""
+    if rate.endswith("M"):
+        return f"{int(rate[:-1]) * 2}M"
+    if rate.endswith("k"):
+        return f"{int(rate[:-1]) * 2}k"
+    return str(int(rate) * 2)
+
+
+def overlay_image_on_video(
+    video_path: str | Path,
+    image_path: str | Path,
+    output_path: str | Path,
+    position: str = "bottom-left",
+    padding: int = 20,
+    scale: int = 200,
+) -> None:
+    """Overlay a PNG image onto a video. Default position: bottom-left."""
+    ffmpeg = require_ffmpeg()
+
+    if position == "bottom-left":
+        x, y = padding, f"H-h-{padding}"
+    elif position == "bottom-right":
+        x, y = f"W-w-{padding}", f"H-h-{padding}"
+    elif position == "top-left":
+        x, y = padding, padding
+    elif position == "top-right":
+        x, y = f"W-w-{padding}", padding
+    else:
+        x, y = padding, f"H-h-{padding}"
+
+    filter_graph = f"[1:v]scale={scale}:-1[img];[0:v][img]overlay=x={x}:y={y}[out]"
+
+    run([
+        ffmpeg, "-y",
+        "-i", str(video_path),
+        "-i", str(image_path),
+        "-filter_complex", filter_graph,
+        "-map", "[out]",
+        "-map", "0:a?",
         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
         "-c:a", "aac", "-b:a", "192k",
         str(output_path),

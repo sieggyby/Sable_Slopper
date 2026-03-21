@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from sable.shared.paths import brainrot_dir
-from sable.shared.ffmpeg import get_duration
+from sable.shared.ffmpeg import get_duration, run, require_ffmpeg
 
 _INDEX_FILE = "_index.yaml"
 
@@ -60,6 +60,15 @@ def add_video(
         "filename": path.name,
         "energy": energy,
         "duration": round(duration, 2),
+        # TODO: Add 'theme' tag support for content-aware brainrot pairing
+        # (e.g. theme=space, theme=nature) so clips about singularity/tech get
+        # matched to thematically fitting brainrot footage. Future: reviewer UI
+        # to assign themes after watching assembled clips.
+        # TODO: Add 'aspect_ratio' tag support for platform-aware brainrot selection.
+        # Native ratio (e.g. '9:16', '16:9', '1:1') can be auto-detected at add time
+        # via get_video_dimensions() → width/height → nearest standard ratio, stored as
+        # e.g. tags=['aspect:9:16']. Future: pick() filters by aspect_ratio when the
+        # output layout requires a specific source shape.
         "tags": tags or [],
     }
     index = load_index()
@@ -122,8 +131,6 @@ def list_videos(energy: Optional[str] = None) -> list[dict]:
 
 def loop_to_duration(video_path: str | Path, target_duration: float, output_path: str | Path) -> None:
     """Loop a brainrot video to match target duration using ffmpeg."""
-    from sable.shared.ffmpeg import run, require_ffmpeg, get_duration
-
     src_duration = get_duration(video_path)
     if src_duration <= 0:
         raise ValueError(f"Cannot determine duration of {video_path}")
