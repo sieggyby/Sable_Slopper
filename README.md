@@ -11,6 +11,7 @@ High-volume crypto Twitter content production toolkit. CLI-driven, Claude-powere
 | `sable meme` | Template-based meme generation |
 | `sable face` | Replicate-powered face swap |
 | `sable pulse` | Performance tracking + AI recommendations |
+| `sable character-explainer` | Brainrot explainer videos with famous character voices |
 
 ## Quick Start
 
@@ -241,6 +242,114 @@ sable pulse recommend --account @tig_intern --update-roster
 # Export data
 sable pulse export --account @tig_intern --format csv --output report.csv
 ```
+
+## Character Explainer
+
+Generates short explainer videos where a famous character explains a user-supplied topic
+in their own voice, over brainrot background footage with karaoke subtitles. Supports
+landscape (1280×720) and portrait (720×1280) output. Optionally animates the character's
+mouth in sync with speech (requires PNG images in the character profile).
+
+**Characters:** `peter_griffin`, `donald_trump`, `ishowspeed`
+
+```bash
+# List available characters
+sable character-explainer list-characters
+
+# Generate a video (ElevenLabs TTS)
+sable character-explainer generate \
+  --topic "What is a DAO and why do most of them fail" \
+  --character peter_griffin \
+  --bg-video ~/.sable/brainrot/minecraft.mp4 \
+  --tts-backend elevenlabs \
+  --output ~/Desktop/dao_peter.mp4
+
+# With optional markdown context file
+sable character-explainer generate \
+  --topic "Liquid staking" \
+  --character donald_trump \
+  --background-md context/lido_overview.md \
+  --tts-backend elevenlabs
+```
+
+### CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--topic` | required | Topic to explain |
+| `--character` | required | Character ID (see `list-characters`) |
+| `--bg-video` | random clip from `~/.sable/brainrot/` | Brainrot background video; if omitted, a random file is picked and trimmed to the audio length |
+| `--output` | `~/sable-workspace/output/@explainer/{slug}/{character}.mp4` | Output path |
+| `--background-md` | — | Markdown context file injected into the script prompt |
+| `--tts-backend` | character default | `local` (F5-TTS) or `elevenlabs` |
+| `--target-duration` | `30` | Target video length in seconds |
+| `--orientation` | `landscape` | `landscape` (1280×720) or `portrait` (720×1280) |
+| `--platform` | `twitter` | Encoding preset: `twitter`, `youtube`, `discord`, `telegram` |
+| `--no-talking-head` | — | Disable mouth animation even if character has PNG images configured |
+
+### TTS backends
+
+- **`local`** — [F5-TTS](https://github.com/SWivid/F5-TTS) zero-shot voice cloning; requires `local_voice_sample_path` (15–25s clean WAV) in the character profile; word timestamps derived via Whisper transcription of output. Install: `pip install f5-tts soundfile torch torchaudio`
+- **`elevenlabs`** — fast, high-quality hosted API; requires `ELEVENLABS_API_KEY` env var and a voice ID set in the character's `profile.yaml`
+
+### Adding a character
+
+Create `sable/character_explainer/characters/{id}/profile.yaml`:
+
+```yaml
+id: your_character
+display_name: Your Character
+tts_backend: elevenlabs
+elevenlabs_voice_id: "abc123"   # from ElevenLabs dashboard
+speaking_speed_modifier: 1.0
+explanation_style: >
+  How this character explains things...
+system_prompt: >
+  You are [character]. [detailed in-character instructions]
+speech_quirks:
+  - "catchphrase one"
+```
+
+`speech_quirks` entries are injected into the Claude script-generation prompt; 2–3 are woven into each script naturally.
+
+### Setting up a character voice (local TTS)
+
+If using the `local` TTS backend, you need a reference voice sample and optionally mouth-animation PNGs:
+
+```bash
+sable character-explainer setup-voice \
+  --character peter_griffin \
+  --source "https://www.youtube.com/watch?v=..." \
+  --start 10 --end 35          # optional: trim to clean speech segment
+
+# Or from a local file
+sable character-explainer setup-voice \
+  --character peter_griffin \
+  --source ~/Downloads/peter_clip.mp4
+```
+
+This downloads/copies the source, extracts a 15–25s audio segment, and saves it to
+`~/.sable/voice_samples/{character}.wav`. Optionally, pass `--mouth-open` and `--mouth-closed`
+PNG image paths to install mouth animation images and update the character profile automatically.
+
+### Talking head animation
+
+If a character profile defines `image_open_mouth` and `image_closed_mouth` (paths to PNG files with
+transparency), the pipeline will animate the character's mouth in sync with speech and composite it
+into the lower-left corner of the video. Disable with `--no-talking-head`.
+
+Mouth images should be:
+- PNG with alpha channel (RGBA)
+- Same dimensions for both open/closed variants
+- Stored at `~/.sable/character_images/{character}/mouth_open.png` and `mouth_closed.png`
+
+Currently only `peter_griffin` has mouth images configured.
+
+### Output
+
+Each run produces two files alongside each other:
+- `{slug}/{character}.mp4` — the video
+- `{slug}/{character}.mp4_meta.json` — metadata (script, word count, TTS backend, topic)
 
 ## Workspace
 
