@@ -53,6 +53,13 @@ from sable.meme.cli import meme_group
 from sable.face.cli import face_group
 from sable.pulse.cli import pulse_group
 from sable.wojak.cli import wojak_group
+from sable.character_explainer.cli import explainer_group
+from sable.vault.cli import vault_group
+from sable.platform.cli import org_group, entity_group, job_group, db_group, resume_command
+from sable.commands.playbook import playbook_group
+from sable.commands.tracking import tracking_group
+from sable.commands.advise import advise_command
+from sable.commands.onboard import onboard_command
 
 main.add_command(roster_group)
 main.add_command(clip_group)
@@ -60,3 +67,14 @@ main.add_command(meme_group)
 main.add_command(face_group)
 main.add_command(pulse_group)
 main.add_command(wojak_group)
+main.add_command(explainer_group)
+main.add_command(vault_group)
+main.add_command(org_group)
+main.add_command(entity_group)
+main.add_command(job_group)
+main.add_command(db_group)
+main.add_command(resume_command)
+main.add_command(playbook_group)
+main.add_command(tracking_group)
+main.add_command(advise_command)
+main.add_command(onboard_command)
