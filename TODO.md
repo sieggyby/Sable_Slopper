@@ -1,40 +1,39 @@
 # TODO
 
-## score_brainrot.py — Automatic Brainrot Library Populator
+## Platform Layer — Upcoming Rounds
 
-- [x] Implement `scripts/score_brainrot.py`
-  - [x] Audio energy signal via librosa (weight 0.55)
-  - [x] Motion density signal via OpenCV at 2fps (weight 0.45)
-  - [x] Graceful fallback: no audio → motion-only; no OpenCV → audio-only
-  - [x] Combined signal with 3s rolling smooth
-  - [x] Need-score calculation from existing library
-  - [x] Per-tier window scoring with quality percentile threshold
-  - [x] Greedy non-overlapping window selection
-  - [x] Energy classification (high / medium / low)
-  - [x] Collision-safe output naming (_v2, _v3...)
-  - [x] `--dry-run` support with plan table
-  - [x] Register clips via `add_video()`
-- [x] Add `score` optional dep group to `pyproject.toml` (librosa, opencv-python, numpy)
-- [x] Document `score_brainrot.py` in `README.md`
+### Round 2 — Cult Doctor (community health grader)
+- Read `sable.db` entities/tags per org to produce health scores
+- Write `diagnostic_runs` rows + `artifacts` (playbook, strategy brief)
+- Gate all Claude calls through `check_budget()` + model ladder
+- CLI: `sable cult-doctor run <org_id>`
 
-## `--clip-only` Mode — Clip Without Brainrot
+### Round 3 — SableTracking integration
+- Bridge SableTracking Discord data → `sable.db` entities + handles
+- Write `sync_runs` rows per ingest
+- Trigger `mark_artifacts_stale()` on new data arrival
+- CLI: `sable tracking sync <org_id>`
 
-**Status:** `--no-brainrot` flag exists but is broken (passes `energy="none"` to `pick_brainrot()`,
-which raises RuntimeError when no matching videos are found).
+---
 
-**Planned behavior:**
-When `--no-brainrot` is passed:
-1. Extract source clip segment (same as current)
-2. Skip brainrot selection and looping entirely
-3. Scale source clip to full 9:16 portrait (no split — source takes full frame)
-4. Burn ASS captions on full frame
-5. Encode with same platform profile
+## Vault — Non-MVP Features (Phase 2+)
 
-**Implementation notes:**
-- Fix `assemble_clip()` in `assembler.py`: check `brainrot_energy == "none"` or add `clip_only: bool` param
-- Add `stack_videos_clip_only()` to `ffmpeg.py` (or modify `stack_videos` to accept `top_path=None`):
-  - Filter: `[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}[out]`
-  - Audio: interview audio with loudnorm (same as brainrot mode)
-- Captions burn on full frame (adjust PlayResY to full height, not split)
-- Hook overlay same as brainrot mode
-- Output naming: `clip_01_cliponly.mp4` or same name under different subfolder
+Extracted from vault spec. Not implemented in Phase 1 CLI.
+
+- **Phase 2 — Web UI (`sable serve`)**
+  - FastAPI app in `sable/serve/app.py` wrapping all vault functions
+  - Cloudflare Tunnel for team/client access
+  - Role-based access control via `sable/vault/permissions.py` (currently stub)
+  - Token auth middleware + `~/.sable/vault_users.yaml` user store
+  - Web views: dashboard, content browser, search, reply suggest, posting log
+  - See `docs/ROLES.md` for permission matrix, `docs/ROADMAP.md` for architecture
+
+- **Phase 3 — VPS**
+  - Docker + systemd, Postgres backend, multi-org S3 vault storage
+  - Webhook receivers for pulse data push + tweet notifications
+  - Scheduled sync via cron
+
+- **Phase 4 — Scale**
+  - Multi-tenant auth, vault-as-API, real-time enrichment queue (Celery/Redis)
+  - Automated gap-fill suggestions triggered by pulse performance data
+  - Client portal with read-only dashboard + export access

@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Sable Slopper is a CLI toolkit with 11 subsystems sharing a common config layer, two SQLite databases, and three external API integrations.
+Sable Slopper is a CLI toolkit with 11 subsystems sharing a common config layer, three SQLite databases, and three external API integrations.
 
 ---
 
@@ -10,6 +10,20 @@ Sable Slopper is a CLI toolkit with 11 subsystems sharing a common config layer,
 sable/
 ├── cli.py               ← main entry point; registers all subcommands
 ├── config.py            ← shared config loading (file + env var overrides)
+│
+├── db/
+│   └── migrations/001_initial.sql  ← 15-table schema for sable.db
+│
+├── platform/                        ← shared cross-tool data layer
+│   ├── db.py                        ← get_db(), ensure_schema()
+│   ├── errors.py                    ← SableError + 16 error codes
+│   ├── entities.py                  ← entity CRUD
+│   ├── tags.py                      ← tag helpers (replace-current / append-history)
+│   ├── merge.py                     ← merge candidate + execute_merge
+│   ├── jobs.py                      ← job/step lifecycle + resume state machine
+│   ├── cost.py                      ← cost logging + budget enforcement
+│   ├── stale.py                     ← mark_artifacts_stale()
+│   └── cli.py                       ← org, entity, job, db, resume commands
 │
 ├── roster/              ← account management + markdown profile system
 ├── clip/                ← video transcription → vertical clip pipeline
@@ -62,14 +76,15 @@ sable/pulse/meta/
 
 ## Databases
 
-Two SQLite databases, both stored in `$SABLE_HOME/` (default `~/.sable/`).
+Three SQLite databases, all stored in `$SABLE_HOME/` (default `~/.sable/`).
 
 | File | Contains | Written by |
 |------|---------|-----------|
 | `pulse.db` | Tweet performance data, posting log, roster accounts | `sable pulse track`, `sable pulse log`, `sable roster` |
 | `meta.db` | Watchlist tweet cache, per-author baselines, incremental scan cursors, format baseline history | `sable pulse meta scan` |
+| `sable.db` | Orgs, entities, handles, tags, merge candidates, jobs, cost events, artifacts | `sable/platform/` modules |
 
-The databases do not share tables; `pulse meta` reads roster data from `pulse.db` for org membership but writes only to `meta.db`.
+`pulse.db` and `meta.db` do not share tables; `pulse meta` reads roster data from `pulse.db` for org membership but writes only to `meta.db`. `sable.db` is entirely separate and written only through `sable/platform/`.
 
 ---
 
@@ -153,8 +168,9 @@ Source video / URL
 | Config loading | `sable/config.py` | Everything |
 | Path resolution | `sable/shared/paths.py` | Everything that touches `SABLE_HOME` or `SABLE_WORKSPACE` |
 | Brainrot library | `sable/clip/brainrot.py` | `clip`, `character-explainer` |
+| `sable.db` connection | `sable/platform/db.py` | `sable/platform/` CLI commands |
 
-DB access is direct via `sable/pulse/db.py` (pulse data) and `sable/pulse/meta/db.py` (meta intelligence); there is no shared connection factory.
+DB access for pulse/meta is direct via `sable/pulse/db.py` and `sable/pulse/meta/db.py`. `sable.db` goes through `sable/platform/db.py` (`get_db()`).
 
 ---
 
