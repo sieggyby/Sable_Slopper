@@ -24,7 +24,10 @@ and wojak commands are implemented.
 **Platform layer (Round 1) is complete.** `sable.db` is live at `~/.sable/sable.db`.
 `sable/platform/` provides shared entity, tag, merge, job, cost, and error helpers.
 Five new CLI commands: `sable org`, `sable entity`, `sable job`, `sable db`, `sable resume`.
-This is the foundation Cult Doctor (Round 2) and SableTracking (Round 3) write to.
+
+**Cult Doctor (Round 2) is complete.** Cult Grader now writes to sable.db after every run (via `platform_sync.py` in Sable_Cult_Grader). New: DB migrations 002+003 extend `sync_runs` and `diagnostic_runs` schemas. Discord playbook generator (`playbook/`) and operator bot (`bot/`) are live in Sable_Cult_Grader. Schema version is now 3.
+
+**SableTracking (Round 3) is planned but not started.**
 
 **Phase 2 (local web UI) is planned but not started.**
 - Entry point: `sable serve` → FastAPI app in `sable/serve/`

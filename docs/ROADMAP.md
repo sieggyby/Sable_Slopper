@@ -23,9 +23,15 @@
 
 ## Platform Rounds (cross-tool integrations writing to sable.db)
 
-### Round 2 — Cult Doctor
-Community health prospecting tool. Reads sable.db entities/tags, runs diagnostic pipeline,
-writes diagnostic_runs + artifacts (playbook, strategy brief). Gates all AI spend via cost.py.
+### Round 2 — Cult Doctor ✅ COMPLETE (2026-03-23)
+Implemented in Sable_Cult_Grader (not in this repo directly):
+- `platform_sync.py`: post-run entity graph sync → sable.db (cultist candidates, bridge nodes, team members, diagnostic_runs, artifacts, sync_runs)
+- `playbook/`: two-stage Discord engagement playbook generator ($0.15 cap, weekly cache, budget degradation)
+- `bot/`: operator Discord bot with 6 slash commands (`/entity search`, `/merge`, `/run status`, `/playbook latest`)
+- `sable_org` field on ProspectConfig: gates sync
+- DB migrations 002+003: extended `sync_runs` + `diagnostic_runs` schemas
+- Schema version: 3
+- Tests: 50 passing (`pytest tests/` in Sable_Cult_Grader)
 
 ### Round 3 — SableTracking
 Bridges Discord community data into sable.db entity/handle records. Writes sync_runs.

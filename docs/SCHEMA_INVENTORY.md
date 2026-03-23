@@ -428,7 +428,7 @@ orgs:
 
 | Table              | Purpose                                              |
 |--------------------|------------------------------------------------------|
-| `schema_version`   | Single-row version tracker (currently v1)            |
+| `schema_version`   | Single-row version tracker (currently 3, after migrations 001–003) |
 | `orgs`             | Registered client orgs (org_id, display_name, config)|
 | `entities`         | Known community members per org                      |
 | `entity_handles`   | Platform handles per entity (twitter, discord, etc.) |
@@ -437,12 +437,57 @@ orgs:
 | `merge_candidates` | Potential duplicate entity pairs + confidence scores |
 | `merge_events`     | Audit log of completed merges                        |
 | `content_items`    | Content pieces linked to entities                    |
-| `diagnostic_runs`  | Audit log of cult-doctor / health-check runs         |
+| `diagnostic_runs`  | Audit log of cult-doctor / health-check runs (extended by migration 003) |
 | `jobs`             | Top-level job records per org                        |
 | `job_steps`        | Individual steps per job with retry tracking         |
 | `artifacts`        | Output files/blobs produced by jobs                  |
 | `cost_events`      | Per-call AI/API cost tracking                        |
-| `sync_runs`        | Audit log of SableTracking sync operations           |
+| `sync_runs`        | Audit log of platform sync operations (extended by migration 002) |
+
+#### sync_runs (migration 002 adds columns, schema_version → 3)
+```sql
+sync_id               INTEGER PRIMARY KEY AUTOINCREMENT
+org_id                TEXT REFERENCES orgs
+sync_type             TEXT  -- 'cult_doctor' | 'sable_tracking' | ...
+status                TEXT  -- 'running' | 'completed' | 'failed'
+started_at            TEXT  -- datetime
+completed_at          TEXT  -- datetime (nullable)
+records_synced        INTEGER  -- entities_created + tags_added
+error                 TEXT  -- nullable
+-- added by migration 002:
+cult_run_id           TEXT  -- nullable; FK to Cult Grader run_id
+entities_created      INTEGER DEFAULT 0
+entities_updated      INTEGER DEFAULT 0
+handles_added         INTEGER DEFAULT 0
+tags_added            INTEGER DEFAULT 0
+tags_replaced         INTEGER DEFAULT 0
+merge_candidates_created INTEGER DEFAULT 0
+```
+Indexes: `idx_sync_org`, `idx_sync_cult_run_id`
+
+#### diagnostic_runs (migration 003 adds columns, schema_version → 3)
+```sql
+run_id               INTEGER PRIMARY KEY AUTOINCREMENT
+org_id               TEXT REFERENCES orgs
+run_type             TEXT  -- 'cult_doctor' | ...
+status               TEXT  -- 'running' | 'completed' | 'failed'
+started_at           TEXT  -- datetime
+completed_at         TEXT  -- datetime (nullable)
+result_json          TEXT  -- nullable
+error                TEXT  -- nullable
+-- added by migration 003:
+cult_run_id          TEXT UNIQUE  -- nullable; Cult Grader run_meta.run_id
+project_slug         TEXT  -- nullable
+run_date             TEXT  -- YYYY-MM-DD
+research_mode        TEXT  -- 'training' | 'web'
+checkpoint_path      TEXT  -- absolute path to run dir
+overall_grade        TEXT  -- A–F
+fit_score            INTEGER  -- 1–10
+recommended_action   TEXT  -- 'pursue' | 'monitor' | 'pass'
+sable_verdict        TEXT  -- nullable
+total_cost_usd       REAL  -- nullable
+```
+Indexes: `idx_diagnostic_org`, `idx_diagnostic_cult_run_id` (UNIQUE), `idx_diagnostic_slug`
 
 ---
 
