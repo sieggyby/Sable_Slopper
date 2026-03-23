@@ -12,6 +12,8 @@ High-volume crypto Twitter content production toolkit. CLI-driven, Claude-powere
 | `sable face` | Replicate-powered face swap |
 | `sable pulse` | Performance tracking + AI recommendations |
 | `sable character-explainer` | Brainrot explainer videos with famous character voices |
+| `sable vault` | Content catalog, search engine, and client knowledge base |
+| `sable wojak` | Wojak asset library and Claude-driven scene compositor |
 
 ## Quick Start
 
@@ -243,6 +245,53 @@ sable pulse recommend --account @tig_intern --update-roster
 sable pulse export --account @tig_intern --format csv --output report.csv
 ```
 
+## Pulse Meta
+
+Content shape intelligence: which format buckets (threads, clips, images, etc.) are overperforming in your niche right now, and what topics are worth covering.
+
+### One-time setup
+
+```bash
+# Set SocialData API key (required for all tweet fetching)
+sable config set socialdata_api_key sd_...
+
+# Build a watchlist of 20+ accounts in your niche
+sable pulse meta watchlist add @kaito_crypto --niche "crypto research"
+sable pulse meta watchlist add @cobie --niche "crypto alpha"
+# ...repeat for 20+ accounts
+```
+
+### Running analysis
+
+```bash
+# Full pipeline: scan + trend analysis + topic signals + Claude recommendations
+sable pulse meta --org multisynq
+
+# Scan only (no Claude, cheaper)
+sable pulse meta scan --org multisynq --cheap
+
+# Force full 48h rescan (ignore incremental cursors)
+sable pulse meta scan --org multisynq --full
+
+# Cost estimate before committing
+sable pulse meta scan --org multisynq --dry-run
+```
+
+### Watchlist management
+
+```bash
+sable pulse meta watchlist list [--org ORG]
+sable pulse meta watchlist add @handle [--org ORG] [--niche NICHE]
+sable pulse meta watchlist remove @handle [--org ORG]
+sable pulse meta watchlist health --org multisynq   # coverage + staleness diagnostics
+```
+
+### Output
+
+A three-pane report: **format trends** (8 buckets with lift vs 30d/7d baselines), **topic signals** (what the niche is talking about in high-lift posts), and **recommendations** (what to create, stop doing, or double down on). Results are also saved to `~/.sable-vault/{org}/pulse_meta_report.md`.
+
+See `docs/PULSE_META.md` for full documentation including output interpretation and config tuning.
+
 ## Character Explainer
 
 Generates short explainer videos where a famous character explains a user-supplied topic
@@ -351,8 +400,85 @@ Each run produces two files alongside each other:
 - `{slug}/{character}.mp4` — the video
 - `{slug}/{character}.mp4_meta.json` — metadata (script, word count, TTS backend, topic)
 
+## Vault
+
+Obsidian-compatible markdown vault for content ops. Indexes every clip, meme, and asset produced by other tools into a searchable knowledge base, then surfaces relevant pieces for reply suggestions, topic gap analysis, and client exports.
+
+### Quick start
+
+```bash
+# Initialize vault for an org
+sable vault init --org multisynq
+
+# Index workspace output into vault
+sable vault sync --org multisynq
+
+# Re-run AI enrichment on pending notes
+sable vault enrich --org multisynq
+
+# Search for relevant content
+sable vault search "liquid staking explainer" --org multisynq
+
+# Log that a piece of content was posted
+sable vault log content_abc123 --account @tig_intern --tweet-id 1234567890 --org multisynq
+```
+
+### Command reference
+
+| Command | Description |
+|---------|-------------|
+| `vault init --org ORG [--vault PATH]` | Initialize vault directory structure for org |
+| `vault sync --org ORG [--workspace PATH] [--vault PATH] [--dry-run]` | Index workspace content into vault |
+| `vault enrich --org ORG [--vault PATH]` | Re-run AI enrichment on pending notes |
+| `vault status --org ORG [--vault PATH]` | Show vault inventory summary |
+| `vault search QUERY --org ORG [--depth] [--type] [--available-for] [--reply-to] [--format]` | Search by relevance; `--format` filters by format bucket |
+| `vault suggest --org ORG [--tweet-text] [--tweet-url] [--account]` | Generate reply suggestions from vault content |
+| `vault log [CONTENT_ID] --account --tweet-id --org [--sync-from-pulse] [--bulk CSV]` | Log posted content; `--bulk` accepts a CSV of multiple posts |
+| `vault assign CONTENT_ID --account --org [--caption]` | Assign content to account queue |
+| `vault gaps --org ORG` | Show topic coverage gaps |
+| `vault export --org ORG [--output] [--include-media]` | Export as client-ready zip |
+| `vault topic add SLUG --display-name --org` | Add topic hub page |
+| `vault topic list --org ORG` | List topic hubs |
+| `vault topic refresh --org ORG` | Refresh topic→content links + FAQ linking |
+
+Vault notes are stored at `~/.sable-vault/{org}/` and are Obsidian-compatible.
+
+## Wojak
+
+Wojak meme compositor. Maintains a local library of wojak PNGs and uses Claude to generate scene specs, which are then rendered into finished meme images.
+
+```bash
+# Library management
+sable wojak list
+sable wojak add https://example.com/wojak.png --id crying_wojak --name "Crying Wojak" \
+  --emotion sad --tags "loss,regret" --description "Classic crying face"
+sable wojak download-missing   # Download any library images not yet on disk
+
+# Scene generation (Claude writes the spec)
+sable wojak scene generate --account @tig_intern --topic "L2 fees going up"
+
+# Render a pre-written YAML spec
+sable wojak scene render spec.yaml --account @tig_intern --output ~/Desktop/meme.png
+```
+
+`scene generate` calls Claude to produce a YAML scene spec and then renders it. `scene render` takes an existing YAML spec and renders it directly, skipping the Claude call.
+
 ## Workspace
 
 Default output location: `~/sable-workspace/output/@handle/`
 
 Override: `export SABLE_WORKSPACE=/path/to/workspace`
+
+## Environment Variables
+
+| Variable | Required for | Notes |
+|----------|-------------|-------|
+| `ANTHROPIC_API_KEY` | clip, meme, pulse recommend, pulse meta (analysis), vault suggest/search | Can also be set via `sable config set anthropic_api_key` |
+| `REPLICATE_API_TOKEN` | `sable face` | Can also be set via `sable config set replicate_api_key` |
+| `SOCIALDATA_API_KEY` | `sable pulse meta`, `sable pulse track`, `sable pulse trends` | Can also be set via `sable config set socialdata_api_key` |
+| `ELEVENLABS_API_KEY` | `sable character-explainer` with `--tts-backend elevenlabs` | Read from env only; not stored in config.yaml |
+| `SABLE_HOME` | Optional | Override config/DB directory (default: `~/.sable/`). Set to a temp dir for testing |
+| `SABLE_WORKSPACE` | Optional | Override output directory (default: `~/sable-workspace/`) |
+| `EDITOR` | Optional | Used by `sable roster profile edit` (falls back to `vi`) |
+
+See `docs/ENV_VARS.md` for full details including local dev patterns.
