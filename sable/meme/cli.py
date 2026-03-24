@@ -90,12 +90,28 @@ def meme_generate(account, template, topic, vibe, output, style, dry_run, save_b
     with console.status("Rendering meme..."):
         out_path = render_meme(template, texts, output, style=style)
 
+    # Write sidecar metadata
+    import json as _json
+    from datetime import datetime, timezone
+    _meta = {
+        "id": f"meme-{Path(out_path).stem}",
+        "type": "meme",
+        "source_tool": "sable-meme",
+        "account": acc.handle,
+        "template": template,
+        "topic": topic or "",
+        "texts": texts,
+        "output": str(out_path),
+        "assembled_at": datetime.now(timezone.utc).isoformat(),
+    }
+    Path(str(out_path) + "_meta.json").write_text(_json.dumps(_meta, indent=2))
+
     console.print(f"\n[green]✓ Saved:[/green] {out_path}")
 
     if save_bank:
         caption = texts.get("caption") or texts.get("bottom") or list(texts.values())[-1]
         save_to_bank(acc.handle, caption)
-        console.print(f"[dim]Caption saved to tweet bank[/dim]")
+        console.print("[dim]Caption saved to tweet bank[/dim]")
 
 
 @meme_group.command("batch")
@@ -146,6 +162,20 @@ def meme_batch(account, count, topics, do_render, approve):
         if do_render or approve:
             out_path = out_dir / f"{tmpl}_{int(time.time())}_{i}.png"
             render_meme(tmpl, texts, out_path)
+            import json as _json
+            from datetime import datetime, timezone
+            _meta = {
+                "id": f"meme-{out_path.stem}",
+                "type": "meme",
+                "source_tool": "sable-meme",
+                "account": acc.handle,
+                "template": tmpl,
+                "topic": topic,
+                "texts": texts,
+                "output": str(out_path),
+                "assembled_at": datetime.now(timezone.utc).isoformat(),
+            }
+            Path(str(out_path) + "_meta.json").write_text(_json.dumps(_meta, indent=2))
             console.print(f"  [green]✓[/green] {out_path}")
 
     console.print(f"\n[bold]Done.[/bold] Memes in {out_dir}")

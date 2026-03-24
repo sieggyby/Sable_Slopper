@@ -2,10 +2,19 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
+
+_FFMPEG_SPECIAL = re.compile(r'[;:\[\]=]')
+
+
+def _validate_subtitle_path(path) -> None:
+    if _FFMPEG_SPECIAL.search(str(path)):
+        from sable.platform.errors import SableError, INVALID_PATH
+        raise SableError(INVALID_PATH, f"Subtitle path has FFmpeg special chars: {path!r}")
 
 
 def require_ffmpeg() -> str:
@@ -127,7 +136,6 @@ def stack_videos(
         "audio_bitrate": "192k", "video_maxrate": None,
     }
     w, hh = p["width"], p["half_height"]
-    full_h = hh * 2
 
     ffmpeg = require_ffmpeg()
     filter_graph = (
@@ -163,6 +171,132 @@ def stack_videos(
         current = "[overlaid]"
 
     if subtitle_path:
+        _validate_subtitle_path(subtitle_path)
+        filter_graph += f";{current}ass={subtitle_path}[out]"
+        output_map = "[out]"
+    else:
+        output_map = current
+
+    encode_flags = [
+        "-c:v", "libx264", "-preset", p["preset"], "-crf", str(p["crf"]),
+        "-c:a", "aac", "-b:a", p["audio_bitrate"],
+    ]
+    if p.get("video_maxrate"):
+        encode_flags += ["-maxrate", p["video_maxrate"], "-bufsize", _double_rate(p["video_maxrate"])]
+
+    run([
+        ffmpeg, "-y",
+        *inputs,
+        "-filter_complex", filter_graph,
+        "-map", output_map,
+        "-map", "[audio_out]",
+        "-shortest",
+        *encode_flags,
+        str(output_path),
+    ], capture=True)
+
+
+def encode_clip_only(
+    source_path: str | Path,
+    output_path: str | Path,
+    subtitle_path: Optional[str | Path] = None,
+    image_overlay_path: Optional[str | Path] = None,
+    profile: Optional[dict] = None,
+) -> None:
+    """
+    Encode source clip to full 9:16 portrait (no brainrot split).
+    Source is scaled and cropped to fill the entire frame.
+    Audio: source through dynaudnorm. Captions and image overlay optional.
+    """
+    p = profile or {
+        "width": 1080, "half_height": 960,
+        "crf": 23, "preset": "fast",
+        "audio_bitrate": "192k", "video_maxrate": None,
+    }
+    w, full_h = p["width"], p["half_height"] * 2
+
+    ffmpeg = require_ffmpeg()
+    filter_graph = (
+        f"[0:v]setpts=PTS-STARTPTS,fps=30,scale={w}:{full_h}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{full_h}[scaled]"
+    )
+    filter_graph += ";[0:a]asetpts=PTS-STARTPTS,dynaudnorm=f=150:g=15[audio_out]"
+
+    inputs = ["-i", str(source_path)]
+    current = "[scaled]"
+
+    if image_overlay_path:
+        inputs += ["-i", str(image_overlay_path)]
+        img_stream = f"[{len(inputs) // 2 - 1}:v]"
+        filter_graph += (
+            f";{img_stream}scale=200:-1[img];"
+            f"{current}[img]overlay=x=20:y=H-h-20[overlaid]"
+        )
+        current = "[overlaid]"
+
+    if subtitle_path:
+        _validate_subtitle_path(subtitle_path)
+        filter_graph += f";{current}ass={subtitle_path}[out]"
+        output_map = "[out]"
+    else:
+        output_map = current
+
+    encode_flags = [
+        "-c:v", "libx264", "-preset", p["preset"], "-crf", str(p["crf"]),
+        "-c:a", "aac", "-b:a", p["audio_bitrate"],
+    ]
+    if p.get("video_maxrate"):
+        encode_flags += ["-maxrate", p["video_maxrate"], "-bufsize", _double_rate(p["video_maxrate"])]
+
+    run([
+        ffmpeg, "-y",
+        *inputs,
+        "-filter_complex", filter_graph,
+        "-map", output_map,
+        "-map", "[audio_out]",
+        *encode_flags,
+        str(output_path),
+    ], capture=True)
+
+
+def encode_audio_over_brainrot(
+    source_clip: str,
+    brainrot_clip: str,
+    output_path: str,
+    subtitle_path: Optional[str | Path] = None,
+    image_overlay_path: Optional[str | Path] = None,
+    platform: str = "twitter",
+) -> None:
+    """
+    Audio-only mode: brainrot fills full 9:16 frame; source contributes audio only.
+    Use for podcasts and screen-share recordings with no usable video content.
+    """
+    from sable.clip.assembler import PLATFORM_PROFILES
+    p = PLATFORM_PROFILES.get(platform, PLATFORM_PROFILES["twitter"])
+    w = p["width"]
+    full_h = p["half_height"] * 2
+
+    ffmpeg = require_ffmpeg()
+    filter_graph = (
+        f"[0:v]setpts=PTS-STARTPTS,fps=30,scale={w}:{full_h}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{full_h}[bg]"
+    )
+    filter_graph += ";[1:a]asetpts=PTS-STARTPTS,dynaudnorm=f=150:g=15[audio_out]"
+
+    inputs = ["-i", str(brainrot_clip), "-i", str(source_clip)]
+    current = "[bg]"
+
+    if image_overlay_path:
+        inputs += ["-i", str(image_overlay_path)]
+        img_stream = f"[{len(inputs) // 2 - 1}:v]"
+        filter_graph += (
+            f";{img_stream}scale=200:-1[img];"
+            f"{current}[img]overlay=x=20:y=H-h-20[overlaid]"
+        )
+        current = "[overlaid]"
+
+    if subtitle_path:
+        _validate_subtitle_path(subtitle_path)
         filter_graph += f";{current}ass={subtitle_path}[out]"
         output_map = "[out]"
     else:

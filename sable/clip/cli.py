@@ -39,10 +39,12 @@ def clip_group():
               help="Output encoding profile (affects resolution and file size)")
 @click.option("--no-highlight", is_flag=True,
               help="Disable active-word highlight (karaoke effect) on captions")
+@click.option("--audio-only", is_flag=True,
+              help="Use source audio only — brainrot fills the full frame (for podcasts, screen-shares)")
 def clip_process(
     video, account, num_clips, min_duration, max_duration,
     caption_style, caption_color, brainrot_energy, whisper_model, dry_run, no_brainrot,
-    image_overlay, target_duration, clip_sizes, platform, no_highlight,
+    image_overlay, target_duration, clip_sizes, platform, no_highlight, audio_only,
 ):
     """Process a video into short-form vertical clips for an account."""
     from sable.shared.download import maybe_download
@@ -149,6 +151,7 @@ def clip_process(
             caption_hint=clip.get("caption_hint"),
             platform=platform,
             highlight_active=not no_highlight,
+            audio_only=audio_only,
         )
         console.print(f"  [green]✓[/green] {out_file}")
         if meta.get("thumbnail"):
@@ -216,7 +219,6 @@ def brainrot_remove(filename, delete):
     index = load_index()
     # Match by filename or basename of path
     basename = Path(filename).name
-    before = len(index)
     removed = [e for e in index if e.get("filename") == basename or Path(e.get("path", "")).name == basename]
     index = [e for e in index if e.get("filename") != basename and Path(e.get("path", "")).name != basename]
 

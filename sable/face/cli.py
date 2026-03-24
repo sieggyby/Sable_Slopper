@@ -105,6 +105,22 @@ def face_swap(target, account, reference, output, quality, max_cost, dry_run, sk
     if "swapped_frames" in meta:
         console.print(f"  Frames: {meta['swapped_frames']}/{meta['total_frames']}")
 
+    # Write sidecar metadata
+    import json as _json
+    from datetime import datetime, timezone
+    _out = str(meta["output"])
+    _face_meta = {
+        "id": f"faceswap-{Path(_out).stem}",
+        "type": "faceswap",
+        "source_tool": "sable-face",
+        "account": acc.handle,
+        "target": str(target_path),
+        "output": _out,
+        "strategy": meta.get("strategy", "image"),
+        "assembled_at": datetime.now(timezone.utc).isoformat(),
+    }
+    Path(_out + "_meta.json").write_text(_json.dumps(_face_meta, indent=2))
+
 
 # ---------------------------------------------------------------------------
 # Library management
@@ -124,7 +140,7 @@ def library_group():
 def library_add(image, name, consent, notes, no_copy):
     """Add a reference face image."""
     from sable.face.library import add_reference
-    entry = add_reference(image, name=name, consent=consent, notes=notes, copy=not no_copy)
+    add_reference(image, name=name, consent=consent, notes=notes, copy=not no_copy)
     status = "[green]consented[/green]" if consent else "[yellow]no consent flag[/yellow]"
     console.print(f"[green]✓ Added[/green] {name} ({status})")
 

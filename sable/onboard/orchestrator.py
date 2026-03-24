@@ -56,7 +56,6 @@ def _step_create_org(conn, job_id: str, step_id: int, org_id: str, prospect: dic
 def _step_run_cult_doctor(conn, job_id: str, step_id: int, org_id: str, prospect_yaml_path: Path) -> None:
     """Step 2: Run Cult Doctor pipeline as subprocess (skip if recent run exists)."""
     # Check for recent run (within 30 days)
-    project_slug = prospect_yaml_path.stem
     recent = conn.execute(
         """SELECT 1 FROM diagnostic_runs
            WHERE org_id=? AND status='completed'

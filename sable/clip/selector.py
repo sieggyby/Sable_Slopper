@@ -2,13 +2,76 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from sable.roster.models import Account
 from sable.shared.api import build_account_context, call_claude_json
+from sable.shared.retry import retry_with_backoff
 
+_logger = logging.getLogger(__name__)
 
 _PAUSE_THRESHOLD = 0.8      # seconds of silence between words → window boundary
 _MIN_WINDOW_DURATION = 5.0  # discard windows shorter than this
+_MAX_EVAL_BATCH = 20        # maximum clips per single Claude eval call
+
+
+def _candidate_endpoints(
+    start: float,
+    words: list[dict],
+    segments: list[dict],
+    min_dur: float = 8.0,
+    max_dur: float = 90.0,
+) -> list[float]:
+    """
+    Collect all sentence+pause boundaries between start+min_dur and start+max_dur.
+    A qualifying boundary: segment ends with .?! and pause after >= 0.3s (if words available).
+    Returns list sorted ascending.
+    """
+    lo = start + min_dur
+    hi = start + max_dur
+
+    def pause_after(t: float) -> float:
+        before = [w for w in words if w["end"] <= t + 0.05]
+        after = [w for w in words if w["start"] > t + 0.05]
+        if not before or not after:
+            return 0.0
+        return after[0]["start"] - before[-1]["end"]
+
+    candidates = []
+    for s in segments:
+        if not s["text"].strip().endswith((".", "?", "!")):
+            continue
+        t = s["end"]
+        if t < lo or t > hi:
+            continue
+        if words and pause_after(t) < 0.15:
+            continue
+        candidates.append(t)
+
+    # Fallback: if fewer than 3 candidates, lower bar to any detectable pause (0.05s)
+    # This ensures short/medium/long have real variance rather than collapsing to one endpoint.
+    if len(candidates) < 3:
+        all_sentence_ends = [
+            s["end"] for s in segments
+            if s["text"].strip().endswith((".", "?", "!"))
+            and lo <= s["end"] <= hi
+        ]
+        extras = [
+            t for t in all_sentence_ends
+            if t not in candidates and (not words or pause_after(t) >= 0.05)
+        ]
+        candidates = sorted(set(candidates) | set(extras))
+
+    return sorted(set(candidates))
+
+
+def _clip_text(start: float, end: float, segments: list[dict]) -> str:
+    """Extract transcript text for segments whose center falls within [start, end]."""
+    overlap = [
+        s for s in segments
+        if (s["start"] + s["end"]) / 2 >= start and (s["start"] + s["end"]) / 2 <= end
+    ]
+    return " ".join(s["text"].strip() for s in overlap).strip()
 
 
 def _snap_to_sentence_end(end: float, segments: list[dict], tolerance: float = 8.0) -> float:
@@ -95,11 +158,12 @@ def _resolve_clip(
     max_dur: float = 90.0,
 ) -> dict | None:
     """
-    Resolve a Claude selection (window indices) to precise timestamps.
+    Resolve a Claude selection (window indices) to short/medium/long variant timestamps.
     - start = windows[min_idx].start
-    - end = windows[max_idx].end, snapped to nearest sentence+pause boundary
-    - Skip if resolved duration < min_dur
-    - Trim to max_dur hard cap if over
+    - Candidates = sentence+pause boundaries between start+min_dur and start+max_dur
+    - short = first candidate, medium = middle, long = last
+    - Falls back to current single-snap behavior if no candidates found
+    Returns dict with 'variants' key, or None if unresolvable.
     """
     indices = selection.get("windows", [])
     if not indices:
@@ -111,33 +175,47 @@ def _resolve_clip(
         return None
 
     start = windows[lo]["start"]
-    end = windows[hi]["end"]
 
-    # Try to snap end to a sentence boundary followed by a pause >= 0.3s
-    snapped = _snap_to_pause_backed_sentence(end, words, segments, pause_min=0.3)
-    if snapped is not None:
-        end = snapped
+    # Collect sentence+pause boundaries in the valid duration range
+    candidates = _candidate_endpoints(start, words, segments, min_dur=min_dur, max_dur=max_dur)
+
+    if candidates:
+        n = len(candidates)
+        short_end = candidates[0]
+        medium_end = candidates[n // 2]
+        long_end = candidates[-1]
     else:
-        end = _snap_to_sentence_end(end, segments, tolerance=8.0)
-
-    dur = end - start
-    if dur < min_dur:
-        return None
-
-    if dur > max_dur:
-        trim_target = start + max_dur
-        trimmed = _snap_to_pause_backed_sentence(trim_target, words, segments, pause_min=0.3)
-        if trimmed is not None and (trimmed - start) <= max_dur + 2.0:
-            end = trimmed
+        # Fall back to current single-snap behavior
+        end = windows[hi]["end"]
+        snapped = _snap_to_pause_backed_sentence(end, words, segments, pause_min=0.3)
+        if snapped is not None:
+            end = snapped
         else:
-            # Try sentence snap within a small window
-            end = _snap_to_sentence_end(trim_target, segments, tolerance=5.0)
-            if end - start > max_dur + 2.0:
-                end = trim_target  # hard cut
+            end = _snap_to_sentence_end(end, segments, tolerance=8.0)
+
+        dur = end - start
+        if dur < min_dur:
+            return None
+
+        if dur > max_dur:
+            trim_target = start + max_dur
+            trimmed = _snap_to_pause_backed_sentence(trim_target, words, segments, pause_min=0.3)
+            if trimmed is not None and (trimmed - start) <= max_dur + 2.0:
+                end = trimmed
+            else:
+                end = _snap_to_sentence_end(trim_target, segments, tolerance=5.0)
+                if end - start > max_dur + 2.0:
+                    end = trim_target
+
+        short_end = medium_end = long_end = end
 
     return {
         "start": start,
-        "end": end,
+        "variants": {
+            "short":  {"start": start, "end": short_end},
+            "medium": {"start": start, "end": medium_end},
+            "long":   {"start": start, "end": long_end},
+        },
         "reason": selection.get("reason", ""),
         "hook": selection.get("hook", ""),
         "caption_hint": selection.get("caption_hint", ""),
@@ -197,6 +275,156 @@ def _snap_to_pause_backed_sentence(
         return min(close_after)
 
     return None
+
+
+def _evaluate_variants_batch(
+    clips_with_variants: list[dict],
+    segments: list[dict],
+    words: list[dict] = None,
+    max_dur: float = 90.0,
+) -> list[dict]:
+    """
+    One Claude call to pick the best duration variant per clip.
+    Supports kill (discard unusable clips) and extend (search beyond long endpoint).
+    Returns resolved clips with start/end chosen from the winning variant.
+    If len(clips_with_variants) > _MAX_EVAL_BATCH, splits into batches of _MAX_EVAL_BATCH.
+    """
+    if not clips_with_variants:
+        return []
+
+    if len(clips_with_variants) > _MAX_EVAL_BATCH:
+        _logger.warning(
+            "Clip batch size %d exceeds cap %d; batching into groups",
+            len(clips_with_variants), _MAX_EVAL_BATCH,
+        )
+        results = []
+        for offset in range(0, len(clips_with_variants), _MAX_EVAL_BATCH):
+            batch = clips_with_variants[offset:offset + _MAX_EVAL_BATCH]
+            results.extend(_evaluate_variants_batch(batch, segments, words=words, max_dur=max_dur))
+        return results
+
+    clip_descriptions = []
+    for i, clip in enumerate(clips_with_variants):
+        v = clip["variants"]
+        parts = [f"Clip {i}: {clip.get('reason', '')}"]
+        for label in ("short", "medium", "long"):
+            vv = v[label]
+            dur = vv["end"] - vv["start"]
+            text = _clip_text(vv["start"], vv["end"], segments)
+            if len(text) <= 350:
+                display = text
+            else:
+                display = text[:150] + " [...] " + text[-200:]
+            parts.append(f'  {label} ({dur:.0f}s): "{display}"')
+        clip_descriptions.append("\n".join(parts))
+
+    clips_text = "\n\n".join(clip_descriptions)
+
+    prompt = f"""You are evaluating clip duration variants for crypto Twitter virality.
+
+For each clip below, pick the variant (short/medium/long) that hits hardest.
+
+Criteria:
+- The clip makes a complete, self-contained point
+- The clip does NOT end while the speaker is mid-thought or mid-sentence
+- SHORT IS BETTER. If the short variant ends on a complete sentence that makes a standalone point, pick short — 15-25s clips outperform 45s on TikTok/Reels. Only go medium/long if short genuinely cuts off mid-argument.
+- When in doubt between short and medium: pick short.
+
+{clips_text}
+
+Return a JSON array with one object per clip:
+[{{
+  "clip": 0,
+  "chosen": "short"|"medium"|"long",
+  "kill": false,
+  "kill_reason": null,
+  "lands": true,
+  "extend": false,
+  "reason": "..."
+}}]
+
+Kill a clip (kill=true) if:
+- It is pure introduction/setup with no concluding point
+- It requires context the viewer cannot possibly have
+- The speaker is clearly in the middle of an unresolvable back-and-forth with no resolution in any variant
+- It is a meandering explanation that builds toward a trivia fact rather than a genuine insight, reframe, or surprise — i.e., the payoff is a number or statistic with no emotional stakes, no "I can't believe that" moment. A viewer would not share this clip unprompted.
+
+Set extend=true if chosen="long" and the argument still hasn't fully resolved (the speaker is still working toward the payoff). We will try to find a later endpoint.
+
+Set lands=false when the chosen variant cuts off before the rhetorical point is complete."""
+
+    raw = retry_with_backoff(lambda: call_claude_json(prompt, max_tokens=1024))  # budget-exempt: clip pipeline has no org context at eval time
+
+    try:
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+        evaluations = json.loads(raw)
+        if not isinstance(evaluations, list):
+            evaluations = []
+    except json.JSONDecodeError:
+        _logger.warning("Claude eval parse failed, raw=%r", raw[:500])
+        # AR5-27: single retry before falling back to []
+        try:
+            raw2 = call_claude_json(prompt, max_tokens=1024)  # budget-exempt: clip pipeline has no org context at eval time
+            raw2 = raw2.strip()
+            if raw2.startswith("```"):
+                raw2 = raw2.split("\n", 1)[1].rsplit("```", 1)[0]
+            evaluations = json.loads(raw2)
+            if not isinstance(evaluations, list):
+                evaluations = []
+        except Exception:
+            evaluations = []
+
+    eval_map: dict[int, dict] = {}
+    for ev in evaluations:
+        idx = ev.get("clip")
+        if isinstance(idx, int):
+            eval_map[idx] = ev
+
+    resolved = []
+    for i, clip in enumerate(clips_with_variants):
+        ev = eval_map.get(i, {})
+        chosen = ev.get("chosen", "long")
+        if chosen not in ("short", "medium", "long"):
+            chosen = "long"
+
+        # Kill: discard clips that can't work
+        if ev.get("kill"):
+            kill_reason = ev.get("kill_reason") or "no reason given"
+            print(f"  [kill] clip {i} discarded: {kill_reason}")
+            continue
+
+        vv = clip["variants"][chosen]
+        end = vv["end"]
+
+        # Extend: chosen is long and still cuts off mid-argument — search further
+        should_extend = (ev.get("extend") or not ev.get("lands", True)) and chosen == "long"
+        if should_extend and words:
+            long_end = clip["variants"]["long"]["end"]
+            extend_target = long_end + 5.0
+            hard_cap = long_end + 20.0
+            if hard_cap <= clip["start"] + max_dur + 20.0:
+                extended = _snap_to_pause_backed_sentence(
+                    extend_target, words, segments,
+                    pause_min=0.2, search_radius=20.0,
+                )
+                if extended is not None and extended <= hard_cap:
+                    print(f"  [extend] clip {i} extended from {long_end:.1f}s to {extended:.1f}s")
+                    end = extended
+
+        resolved.append({
+            "start": vv["start"],
+            "end": end,
+            "reason": clip.get("reason", ""),
+            "hook": clip.get("hook", ""),
+            "caption_hint": clip.get("caption_hint", ""),
+            "score": clip.get("score", 5),
+            "variant": chosen,
+            "lands": ev.get("lands", True),
+        })
+
+    return resolved
 
 
 def select_clips(
@@ -284,10 +512,15 @@ The viewer must feel a question in their head within the first 2 seconds or they
 - Requires prior context to make sense
 - Trails off into a new topic instead of landing a point
 - Only partially covers a thought — merges adjacent windows if needed
+- Meanders through explanation to arrive at a statistic or factoid — data without stakes is not a clip
 
 **Merging windows:**
 If a complete thought spans two or three consecutive windows, list all their indices.
 Example: "windows": [3, 4] merges window 3 and 4 into one clip.
+
+**Format:**
+Most clips are "standard" (30–60s arguments). Tag a clip "micro" only when the entire point is delivered in a single sentence or two — a one-liner reframe, a punchy counterintuitive claim, a quick zinger. Micro clips should feel complete at 10–20s. Do NOT tag a clip micro if it takes more than two sentences to land the point.
+Examples of micro moments: a speaker says one sentence that flips the frame ("the opt-out doesn't work — everyone else keeps going anyway"), then stops or pivots. That's a micro clip. An explanation that builds toward a conclusion is standard, even if the conclusion is sharp.
 
 **Scoring:**
 Rate each clip 1–10. Only include clips you'd score 6 or higher.
@@ -300,13 +533,14 @@ Return a JSON array only. Each element:
   "reason": "<why this clip works for this account>",
   "hook": "<the first line/hook for the caption>",
   "caption_hint": "<suggested tweet text>",
-  "score": <1-10>
+  "score": <1-10>,
+  "format": "standard"|"micro"
 }}
 
 Sort by score descending. Return [] if nothing qualifies."""
 
     max_tokens = min(max(2048, len(windows) * 80), 8192)
-    raw = call_claude_json(prompt, max_tokens=max_tokens)
+    raw = call_claude_json(prompt, max_tokens=max_tokens)  # budget-exempt: clip pipeline has no org context at eval time
 
     try:
         raw = raw.strip()
@@ -323,12 +557,20 @@ Sort by score descending. Return [] if nothing qualifies."""
     # Sort by score descending
     selections.sort(key=lambda s: s.get("score", 0), reverse=True)
 
-    # Resolve each selection to precise timestamps
-    clips = []
+    # Resolve each selection to short/medium/long variant timestamps
+    clips_with_variants = []
     for sel in selections:
-        clip = _resolve_clip(sel, windows, words, segments, min_dur=min_duration, max_dur=max_duration)
+        is_micro = sel.get("format") == "micro"
+        clip = _resolve_clip(
+            sel, windows, words, segments,
+            min_dur=5.0 if is_micro else min_duration,
+            max_dur=22.0 if is_micro else max_duration,
+        )
         if clip is not None:
-            clips.append(clip)
+            clips_with_variants.append(clip)
+
+    # One Claude call to pick the best duration variant per clip
+    clips = _evaluate_variants_batch(clips_with_variants, segments, words=words, max_dur=max_duration)
 
     # Apply max_clips cap if provided
     if max_clips is not None:

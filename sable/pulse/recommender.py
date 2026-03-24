@@ -84,13 +84,13 @@ Return JSON:
 }}
 """
 
-    raw = call_claude_json(prompt, max_tokens=2048)
+    raw = call_claude_json(prompt, max_tokens=2048)  # budget-exempt: recommender called from pulse pipeline without sable.db connection
     try:
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
         result = json.loads(raw)
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError:
         result = {"summary": raw[:500], "recommendations": [], "content_ideas": [], "avoid": []}
 
     # Save to DB

@@ -40,6 +40,28 @@ def _atomic_write(path: Path, content: str) -> None:
         raise
 
 
+def _write_to_temp(path: Path, content: str) -> Path:
+    """Write content to a temp file in path's parent dir. Return the temp Path.
+    Does NOT rename to final — caller is responsible for os.replace or cleanup."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp_new_", suffix=".md")
+    try:
+        os.write(fd, content.encode("utf-8"))
+        os.close(fd)
+        return Path(tmp)
+    except Exception:
+        os.close(fd)
+        os.unlink(tmp)
+        raise
+
+
+def _write_partial_sync_sentinel(vault_root: Path) -> None:
+    try:
+        (vault_root / "_PARTIAL_SYNC").write_text("", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _safe_vault_root(org_id: str) -> Path:
     from sable.shared.paths import vault_dir
     return vault_dir(org_id)
@@ -118,7 +140,6 @@ def _build_entity_note(entity: dict, handles: list[dict], tags: list[dict],
             result = json.loads(run["result_json"] or "{}")
         except Exception:
             pass
-        entity_id = entity["entity_id"]
         # Look for entity in cultist_candidates, bridge_nodes, team_members
         for role in ("cultist_candidates", "bridge_nodes", "team_members"):
             for item in result.get(role, []):
@@ -233,6 +254,10 @@ def _build_diagnostic_history_entry(org: dict, r: dict) -> str:
     return "".join(lines)
 
 
+import logging as _logging
+_logger = _logging.getLogger(__name__)
+
+
 def platform_vault_sync(org_id: str) -> dict:
     """
     Regenerate the Obsidian vault for org_id from sable.db.
@@ -240,6 +265,16 @@ def platform_vault_sync(org_id: str) -> dict:
     Returns a summary dict: {entities_written, index_written, diagnostics_written, ...}
     """
     conn = get_db()
+
+    # Detect and clear _PARTIAL_SYNC sentinel from any previous interrupted sync
+    vault_root_early = _safe_vault_root(org_id)
+    sentinel = vault_root_early / "_PARTIAL_SYNC"
+    if sentinel.exists():
+        _logger.warning(
+            "Partial sync sentinel detected for org '%s' — previous sync was interrupted. "
+            "Clearing sentinel and retrying.", org_id
+        )
+        sentinel.unlink(missing_ok=True)
 
     # Verify org
     org = conn.execute("SELECT * FROM orgs WHERE org_id=?", (org_id,)).fetchone()
@@ -276,40 +311,33 @@ def platform_vault_sync(org_id: str) -> dict:
 def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
     org_id = org["org_id"]
 
-    # --- Step 1: Safe delete previously generated vault artifacts ---
+    # --- Step 1: Record old vault artifacts — defer deletion until after generation succeeds ---
     old_artifacts = conn.execute(
         f"SELECT * FROM artifacts WHERE org_id=? AND artifact_type IN ({','.join(['?']*len(_VAULT_ARTIFACT_TYPES))})",
         [org_id, *list(_VAULT_ARTIFACT_TYPES)]
     ).fetchall()
 
-    deleted_files = 0
-    deleted_artifact_ids = []
+    old_artifact_ids = []
+    old_artifact_paths: set[str] = set()
     for art in old_artifacts:
         fp = art["path"]
         if fp and _is_inside_vault_root(fp, vault_root):
-            try:
-                Path(fp).unlink(missing_ok=True)
-                deleted_files += 1
-            except Exception:
-                pass
-            deleted_artifact_ids.append(art["artifact_id"])
-        else:
-            # Log warning, skip
-            pass
+            old_artifact_ids.append(art["artifact_id"])
+            old_artifact_paths.add(fp)
 
-    if deleted_artifact_ids:
-        placeholders = ",".join("?" * len(deleted_artifact_ids))
-        conn.execute(
-            f"DELETE FROM artifacts WHERE artifact_id IN ({placeholders})",
-            deleted_artifact_ids
-        )
-        conn.commit()
-
-    # --- Step 2: Query all data for org ---
-    entities = [dict(r) for r in conn.execute(
-        "SELECT * FROM entities WHERE org_id=? AND status != 'archived' ORDER BY display_name",
-        (org_id,)
-    ).fetchall()]
+    # --- Step 2: Query all data for org (AR5-12: paginated with LIMIT 500 OFFSET n) ---
+    entities: list[dict] = []
+    _page_size = 500
+    _offset = 0
+    while True:
+        page = [dict(r) for r in conn.execute(
+            "SELECT * FROM entities WHERE org_id=? AND status != 'archived' ORDER BY display_name LIMIT ? OFFSET ?",
+            (org_id, _page_size, _offset)
+        ).fetchall()]
+        entities.extend(page)
+        if len(page) < _page_size:
+            break
+        _offset += _page_size
 
     # Load handles, tags, notes, content_items per entity
     entity_handles_map = {}
@@ -368,80 +396,125 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
         "SELECT COUNT(*) FROM artifacts WHERE org_id=? AND stale=1", (org_id,)
     ).fetchone()[0]
 
-    now_iso = _now_iso()
     new_artifact_rows = []
+    temp_writes: list[tuple[Path, Path]] = []
 
-    # --- Step 3: Generate entity notes ---
-    entities_dir = vault_root / "entities"
-    entities_dir.mkdir(parents=True, exist_ok=True)
+    # --- Steps 3-5: Phase A — write all generated content to temp files ---
+    try:
+        # --- Step 3: Generate entity notes ---
+        entities_dir = vault_root / "entities"
+        entities_dir.mkdir(parents=True, exist_ok=True)
 
-    for e in entities:
-        eid = e["entity_id"]
-        content = _build_entity_note(
-            e, entity_handles_map[eid], entity_tags_map[eid],
-            entity_notes_map[eid], entity_content_map[eid],
-            diag_runs, org_id
-        )
-        note_path = entities_dir / f"{eid}.md"
-        _atomic_write(note_path, content)
-        new_artifact_rows.append((org_id, job_id, "vault_entity_note", str(note_path),
-                                   json.dumps({"entity_id": eid}), 0))
+        for e in entities:
+            eid = e["entity_id"]
+            content = _build_entity_note(
+                e, entity_handles_map[eid], entity_tags_map[eid],
+                entity_notes_map[eid], entity_content_map[eid],
+                diag_runs, org_id
+            )
+            note_path = entities_dir / f"{eid}.md"
+            tmp = _write_to_temp(note_path, content)
+            temp_writes.append((tmp, note_path))
+            new_artifact_rows.append((org_id, job_id, "vault_entity_note", str(note_path),
+                                       json.dumps({"entity_id": eid}), 0))
 
-    # --- Step 4: Generate index ---
-    index_path = vault_root / "_index.md"
-    index_content = _build_index(org, entities, diag_runs, total_artifacts, stale_artifacts)
-    _atomic_write(index_path, index_content)
-    new_artifact_rows.append((org_id, job_id, "vault_index", str(index_path), "{}", 0))
+        # --- Step 4: Generate index ---
+        index_path = vault_root / "_index.md"
+        index_content = _build_index(org, entities, diag_runs, total_artifacts, stale_artifacts)
+        tmp = _write_to_temp(index_path, index_content)
+        temp_writes.append((tmp, index_path))
+        new_artifact_rows.append((org_id, job_id, "vault_index", str(index_path), "{}", 0))
 
-    # --- Step 5: Generate diagnostic files ---
-    diag_dir = vault_root / "diagnostics"
-    diag_dir.mkdir(parents=True, exist_ok=True)
-    history_dir = diag_dir / "history"
-    history_dir.mkdir(parents=True, exist_ok=True)
+        # --- Step 5: Generate diagnostic files ---
+        diag_dir = vault_root / "diagnostics"
+        diag_dir.mkdir(parents=True, exist_ok=True)
+        history_dir = diag_dir / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
 
-    # latest.md
-    latest_path = diag_dir / "latest.md"
-    latest_content = _build_diagnostic_summary(org, diag_runs)
-    _atomic_write(latest_path, latest_content)
-    new_artifact_rows.append((org_id, job_id, "vault_diagnostic_summary", str(latest_path), "{}", 0))
+        # latest.md
+        latest_path = diag_dir / "latest.md"
+        latest_content = _build_diagnostic_summary(org, diag_runs)
+        tmp = _write_to_temp(latest_path, latest_content)
+        temp_writes.append((tmp, latest_path))
+        new_artifact_rows.append((org_id, job_id, "vault_diagnostic_summary", str(latest_path), "{}", 0))
 
-    # history/{run_id}.md for each run
-    for r in diag_runs:
-        run_id = r["run_id"]
-        hist_path = history_dir / f"{run_id}.md"
-        hist_content = _build_diagnostic_history_entry(org, r)
-        _atomic_write(hist_path, hist_content)
-        new_artifact_rows.append((org_id, job_id, "vault_diagnostic_history", str(hist_path),
-                                   json.dumps({"run_id": run_id}), 0))
+        # history/{run_id}.md for each run
+        for r in diag_runs:
+            run_id = r["run_id"]
+            hist_path = history_dir / f"{run_id}.md"
+            hist_content = _build_diagnostic_history_entry(org, r)
+            tmp = _write_to_temp(hist_path, hist_content)
+            temp_writes.append((tmp, hist_path))
+            new_artifact_rows.append((org_id, job_id, "vault_diagnostic_history", str(hist_path),
+                                       json.dumps({"run_id": run_id}), 0))
 
-    # --- Step 6: Copy latest pulse meta report ---
-    pulse_dir = vault_root / "pulse"
-    pulse_dir.mkdir(parents=True, exist_ok=True)
-    meta_report_dest = pulse_dir / "meta_report.md"
+    except Exception:
+        for tmp, _ in temp_writes:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+        raise
 
-    pulse_meta_artifact = conn.execute(
-        """SELECT * FROM artifacts WHERE org_id=? AND artifact_type='pulse_meta_report'
-           ORDER BY created_at DESC LIMIT 1""",
-        (org_id,)
-    ).fetchone()
+    try:
+        # --- Phase B: batch rename all temp files to their final paths ---
+        for tmp, final in temp_writes:
+            os.replace(str(tmp), str(final))
 
-    if pulse_meta_artifact and pulse_meta_artifact["path"]:
-        src = Path(pulse_meta_artifact["path"])
-        if src.exists():
-            import shutil
-            shutil.copy2(str(src), str(meta_report_dest))
+        # --- Step 6: Copy latest pulse meta report (via temp file) ---
+        pulse_dir = vault_root / "pulse"
+        pulse_dir.mkdir(parents=True, exist_ok=True)
+        meta_report_dest = pulse_dir / "meta_report.md"
+
+        pulse_meta_artifact = conn.execute(
+            """SELECT * FROM artifacts WHERE org_id=? AND artifact_type='pulse_meta_report'
+               ORDER BY created_at DESC LIMIT 1""",
+            (org_id,)
+        ).fetchone()
+
+        if pulse_meta_artifact and pulse_meta_artifact["path"]:
+            src = Path(pulse_meta_artifact["path"])
+            if src.exists():
+                pulse_content = src.read_text(encoding="utf-8")
+                pulse_tmp = _write_to_temp(meta_report_dest, pulse_content)
+                temp_writes.append((pulse_tmp, meta_report_dest))
+                os.replace(str(pulse_tmp), str(meta_report_dest))
+            else:
+                meta_report_dest.unlink(missing_ok=True)
         else:
             meta_report_dest.unlink(missing_ok=True)
-    else:
-        meta_report_dest.unlink(missing_ok=True)
 
-    # --- Step 7: Insert artifact rows ---
-    conn.executemany(
-        """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        new_artifact_rows
-    )
-    conn.commit()
+        # --- Step 7: All generation succeeded — now delete old artifacts that were not regenerated ---
+        new_paths = {row[3] for row in new_artifact_rows}
+        for fp in old_artifact_paths:
+            if fp not in new_paths:
+                try:
+                    Path(fp).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        if old_artifact_ids:
+            placeholders = ",".join("?" * len(old_artifact_ids))
+            conn.execute(
+                f"DELETE FROM artifacts WHERE artifact_id IN ({placeholders})",
+                old_artifact_ids
+            )
+
+        # --- Step 8: Insert new artifact rows ---
+        conn.executemany(
+            """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            new_artifact_rows
+        )
+        conn.commit()
+    except Exception:
+        for tmp, _ in temp_writes:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+        _write_partial_sync_sentinel(vault_root)
+        raise
 
     return {
         "entities_written": len(entities),

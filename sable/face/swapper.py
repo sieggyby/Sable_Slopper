@@ -54,7 +54,7 @@ def swap_image(
             continue
 
     raise RuntimeError(
-        f"All face swap models failed:\n" + "\n".join(errors)
+        "All face swap models failed:\n" + "\n".join(errors)
     )
 
 

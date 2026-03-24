@@ -39,17 +39,10 @@ def similarity_ratio(a: str, b: str) -> float:
 
 def auto_link_posts(threshold: float = 70.0) -> list[dict]:
     """
-    Find unlinked posts and attempt to match them to sable content
-    using caption similarity.
-    Returns list of {post_id, matched_path, similarity} dicts.
+    Placeholder — always returns []. Manual linking via 'sable vault assign' is the supported path.
+    Do not build callers that expect this to return matches.
     """
     conn = get_conn()
-    unlinked = conn.execute(
-        "SELECT id, text FROM posts WHERE sable_content_path = '' OR sable_content_path IS NULL"
-    ).fetchall()
-
-    # Get all known captions from meme/clip outputs (would be tracked in production)
-    # For now, return empty — manual linking is the primary path
     conn.close()
     return []
 

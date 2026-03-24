@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _now_utc() -> datetime:
@@ -41,6 +44,7 @@ def _compute_lift(row) -> float:
     quotes = row["quotes"] or 0
     bookmarks = row["bookmarks"] or 0
     views = row["views"] or 0
+    # why: weights reflect signal strength — quotes > reposts > replies > bookmarks > likes > views
     return (likes * 1.0) + (replies * 3.0) + (retweets * 4.0) + (quotes * 5.0) + (bookmarks * 2.0) + (views * 0.5)
 
 
@@ -123,7 +127,9 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
             ).fetchone()[0]
             result["data_freshness"]["pulse_last_track"] = latest_snap
             result["post_freshness"] = latest_snap
-        except Exception:
+        except Exception as e:
+            logger.warning("pulse.db read failed: %s", e, exc_info=True)
+            result.setdefault("failed_sources", []).append("pulse.db")
             result["pulse_available"] = False
         finally:
             pulse_conn.close()
@@ -149,8 +155,10 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
             latest = datetime.fromisoformat(result["post_freshness"].replace("Z", "+00:00"))
             if _now_utc() - latest > timedelta(days=14):
                 result["pulse_available"] = False  # treat as stale
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("stage1 pulse freshness parse failed for org %s: %s", org_id, e, exc_info=True)
+            result["pulse_available"] = False
+            result.setdefault("failed_sources", []).append("pulse.freshness")
 
     # --- meta.db ---
     meta_conn = _open_db_readonly(meta_db_path())
@@ -173,7 +181,8 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                     scan_dt = datetime.fromisoformat((scan_date or "").replace("Z", "+00:00"))
                     if _now_utc() - scan_dt > timedelta(days=7):
                         result["meta_stale"] = True
-                except Exception:
+                except Exception as e:
+                    logger.warning("stage1 meta scan-date parse failed for org %s: %s", org_id, e, exc_info=True)
                     result["meta_stale"] = True
 
                 # Topic signals
@@ -193,12 +202,15 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                     (org_id,)
                 ).fetchall()
                 result["formats"] = [dict(f) for f in formats]
-        except Exception:
+        except Exception as e:
+            logger.warning("meta.db read failed: %s", e, exc_info=True)
+            result.setdefault("failed_sources", []).append("meta.db")
             result["meta_available"] = False
         finally:
             meta_conn.close()
 
     # --- sable.db: entities ---
+    platform_ok = True
     try:
         priority_tags = ["cultist_candidate", "bridge_node", "top_contributor"]
         entity_rows = []
@@ -235,8 +247,11 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                         "tags": [r["tag"] for r in tags_rows],
                     })
         result["entities"] = entity_rows
-    except Exception:
+    except Exception as e:
+        logger.warning("sable.db entity read failed: %s", e, exc_info=True)
+        result.setdefault("failed_sources", []).append("sable.db entity")
         result["entities"] = []
+        platform_ok = False
 
     # --- sable.db: content_items ---
     try:
@@ -252,7 +267,8 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
         for row in content_rows:
             try:
                 meta = json.loads(row["metadata_json"] or "{}")
-            except Exception:
+            except Exception as e:
+                logger.warning("stage1 tracker metadata_json parse failed (row skipped): %s", e, exc_info=True)
                 meta = {}
             if meta.get("source_tool") == "sable_tracking":
                 items.append({
@@ -262,8 +278,11 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                     "entity_id": row["entity_id"],
                 })
         result["content_items"] = items
-    except Exception:
+    except Exception as e:
+        logger.warning("sable.db entity read failed: %s", e, exc_info=True)
+        result.setdefault("failed_sources", []).append("sable.db content")
         result["content_items"] = []
+        platform_ok = False
 
     # --- tracking last sync ---
     try:
@@ -273,8 +292,16 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
             (org_id,)
         ).fetchone()
         result["data_freshness"]["tracking_last_sync"] = sync_row[0] if sync_row else None
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("tracking read failed: %s", e, exc_info=True)
+        result.setdefault("failed_sources", []).append("tracking")
+        platform_ok = False
+
+    result["data_quality"] = {
+        "pulse_ok": result["pulse_available"],
+        "meta_ok": result["meta_available"],
+        "platform_ok": platform_ok,
+    }
 
     return result
 
@@ -282,7 +309,6 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
 def render_summary(data: dict) -> str:
     """Build the structured text summary for Claude."""
     lines = []
-    handle = data["handle"]
     profile = data["profile"]
 
     # Profile
@@ -298,8 +324,8 @@ def render_summary(data: dict) -> str:
     freshness = data.get("data_freshness", {})
 
     if not pulse_available and freshness.get("pulse_last_track"):
-        lines.append(f"## Post Performance")
-        lines.append(f"*Performance data stale. Run 'sable pulse track' to refresh.*")
+        lines.append("## Post Performance")
+        lines.append("*Performance data stale. Run 'sable pulse track' to refresh.*")
         lines.append("")
     elif pulse_available and len(posts) >= 5:
         lines.append(f"## Post Performance ({len(posts)} posts, last 14 days)")

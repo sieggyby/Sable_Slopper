@@ -42,7 +42,7 @@ body {{
 .gradient-overlay {{
     position:absolute; inset:0;
     background:linear-gradient(
-        to right,
+        {gradient_dir},
         rgba(0,0,0,0.88) 0%,
         rgba(0,0,0,0.78) 20%,
         rgba(0,0,0,0.50) 38%,
@@ -56,7 +56,7 @@ body {{
     mix-blend-mode:screen;
 }}
 .text-zone {{
-    position:absolute; left:48px; top:0; bottom:8px; width:620px;
+    position:absolute; {text_zone_side}:48px; top:0; bottom:8px; width:620px;
     display:flex; flex-direction:column; justify-content:center;
 }}
 .headline {{
@@ -97,7 +97,7 @@ def _get_headline_and_palette(hint: str) -> tuple[str, str]:
         f"Clip text: {hint or 'crypto community discussion'}\n\n"
         'Return JSON: {"headline": "...", "palette": "<red|blue|green|orange|purple|teal>"}'
     )
-    raw = call_claude_json(prompt, max_tokens=256)
+    raw = call_claude_json(prompt, max_tokens=256)  # budget-exempt: thumbnail generation has no org context
     try:
         data = json.loads(raw)
         headline = str(data.get("headline", "Something Big Is Coming")).strip()
@@ -357,30 +357,45 @@ def _compose_split(
     canvas_w: int = 1280,
     canvas_h: int = 720,
     blend_zone: int = 80,
+    text_left: bool = False,
 ):
-    """Compose face (left) + gradient+text (right) with alpha-fade seam."""
+    """Compose face + gradient+text panels with alpha-fade seam.
+
+    text_left=False (default): face on left, text on right.
+    text_left=True: face on right, text on left (face is on left side of source frame).
+    """
     from PIL import Image, ImageDraw
 
     # Full gradient as base
     canvas = _make_gradient(canvas_w, canvas_h, top_rgb, bottom_rgb)
 
-    # Build seam mask: white (opaque) on left, ramps to 0 at right edge
-    mask = Image.new("L", (FACE_W, canvas_h), 255)
-    mask_pixels = mask.load()
-    blend_start = FACE_W - blend_zone
-    for x in range(blend_start, FACE_W):
-        alpha = int(255 * (1.0 - (x - blend_start) / blend_zone))
-        for y in range(canvas_h):
-            mask_pixels[x, y] = alpha
-
-    # Paste face with seam mask
-    canvas.paste(face_img, (0, 0), mask=mask)
-
-    # Draw text on right panel only
-    draw = ImageDraw.Draw(canvas)
-    right_zone_x = FACE_W
-    right_zone_w = canvas_w - FACE_W
-    _draw_headline_centered(draw, headline, right_zone_x, right_zone_w, canvas_h)
+    if text_left:
+        # Face on right: paste at x = canvas_w - FACE_W
+        face_x = canvas_w - FACE_W
+        # Build seam mask: ramps from 0 at left edge to 255 (opaque) on right
+        mask = Image.new("L", (FACE_W, canvas_h), 255)
+        mask_pixels = mask.load()
+        for x in range(blend_zone):
+            alpha = int(255 * (x / blend_zone))
+            for y in range(canvas_h):
+                mask_pixels[x, y] = alpha
+        canvas.paste(face_img, (face_x, 0), mask=mask)
+        # Text on left panel
+        draw = ImageDraw.Draw(canvas)
+        _draw_headline_centered(draw, headline, 0, canvas_w - FACE_W, canvas_h)
+    else:
+        # Face on left: paste at x = 0
+        mask = Image.new("L", (FACE_W, canvas_h), 255)
+        mask_pixels = mask.load()
+        blend_start = FACE_W - blend_zone
+        for x in range(blend_start, FACE_W):
+            alpha = int(255 * (1.0 - (x - blend_start) / blend_zone))
+            for y in range(canvas_h):
+                mask_pixels[x, y] = alpha
+        canvas.paste(face_img, (0, 0), mask=mask)
+        # Text on right panel
+        draw = ImageDraw.Draw(canvas)
+        _draw_headline_centered(draw, headline, FACE_W, canvas_w - FACE_W, canvas_h)
 
     return canvas
 
@@ -450,6 +465,7 @@ def _compose_playwright(
     headline: str,
     top_rgb: tuple,
     output_path: Path,
+    face_on_left: bool = False,
 ) -> bool:
     """Render full-bleed HTML thumbnail. Returns True on success."""
     try:
@@ -461,12 +477,17 @@ def _compose_playwright(
         escaped_headline = html.escape(headline)
         font_size = _font_size_for_headline(headline)
 
+        gradient_dir   = "to left"  if face_on_left else "to right"
+        text_zone_side = "right"    if face_on_left else "left"
+
         rendered = _HTML_TEMPLATE.format(
             bg_data_uri=bg_data_uri,
             tint_r=top_rgb[0], tint_g=top_rgb[1], tint_b=top_rgb[2],
             font_size=font_size,
             accent_r=accent[0], accent_g=accent[1], accent_b=accent[2],
             headline=escaped_headline,
+            gradient_dir=gradient_dir,
+            text_zone_side=text_zone_side,
         )
 
         _render_html_to_png(rendered, output_path)
@@ -505,6 +526,7 @@ def generate_thumbnail(
 
     best_frame: Optional[Path] = None
     face_img = None
+    face_on_left = False
 
     if source_video and Path(source_video).exists() and clip_end > clip_start:
         try:
@@ -515,6 +537,12 @@ def generate_thumbnail(
                 if frames:
                     best_frame_tmp, face_loc = _pick_best_frame(frames)
                     face_img = _crop_face_portrait(best_frame_tmp, face_loc, FACE_W, H)
+                    # Detect which side the face is on
+                    if face_loc is not None:
+                        from PIL import Image as _PImage
+                        _fw = _PImage.open(best_frame_tmp).width
+                        face_center_x = (face_loc[1] + face_loc[3]) / 2  # (right + left) / 2
+                        face_on_left = face_center_x < _fw / 2
                     # Copy frame out before tempdir evaporates
                     kept = Path(output_path).with_suffix(".thumb_frame.png")
                     shutil.copy2(best_frame_tmp, kept)
@@ -522,11 +550,13 @@ def generate_thumbnail(
         except Exception:
             best_frame = None
             face_img = None
+            face_on_left = False
 
     # Try Playwright first
     playwright_ok = False
     if best_frame is not None and _playwright_available():
-        playwright_ok = _compose_playwright(best_frame, headline, top_rgb, Path(output_path))
+        playwright_ok = _compose_playwright(best_frame, headline, top_rgb, Path(output_path),
+                                            face_on_left=face_on_left)
 
     # Clean up temp frame regardless of path taken
     if best_frame is not None and best_frame.exists():
@@ -535,7 +565,7 @@ def generate_thumbnail(
     if not playwright_ok:
         from PIL import ImageDraw
         if face_img is not None:
-            img = _compose_split(face_img, headline, top_rgb, bottom_rgb)
+            img = _compose_split(face_img, headline, top_rgb, bottom_rgb, text_left=face_on_left)
         else:
             img = _make_gradient(W, H, top_rgb, bottom_rgb)
             _draw_headline_centered(ImageDraw.Draw(img), headline, 0, W, H)

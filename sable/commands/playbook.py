@@ -31,11 +31,11 @@ def playbook_discord(org_id, force, cheap, dry_run):
     try:
         result = generate_discord_playbook(org_id, force=force, cheap=cheap, dry_run=dry_run)
         if dry_run:
-            click.echo(f"Dry run complete. No artifact generated.")
+            click.echo("Dry run complete. No artifact generated.")
         elif isinstance(result, str) and result:
             click.echo(f"Playbook generated: {result}")
         else:
-            click.echo(f"Playbook generated.")
+            click.echo("Playbook generated.")
     except SableError as e:
         click.echo(f"Error [{e.code}]: {e.message}", err=True)
         sys.exit(1)

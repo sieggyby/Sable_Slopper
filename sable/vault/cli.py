@@ -10,6 +10,7 @@ from rich.table import Table
 from rich import box
 
 console = Console()
+err_console = Console(stderr=True)
 
 
 def _resolve_vault(org: str, vault_override: str | None = None) -> Path:
@@ -88,13 +89,13 @@ def vault_sync(org_id, org, workspace_override, vault, dry_run):
                 f"{stats.get('diagnostics_written', 0)} diagnostics"
             )
         except SableError as e:
-            console.print(f"[red]{e}[/red]", err=True)
+            err_console.print(f"[red]{e}[/red]")
             sys.exit(1)
         return
 
     # Legacy meta.json sync
     if not org:
-        console.print("[red]Provide ORG_ID as argument or --org flag[/red]", err=True)
+        err_console.print("[red]Provide ORG_ID as argument or --org flag[/red]")
         sys.exit(1)
 
     from sable.vault.sync import sync
@@ -453,7 +454,7 @@ def vault_assign(content_id, account, caption, org, vault):
     if ok:
         console.print(f"[green]✓ Assigned[/green] {content_id} → {account}")
         if caption:
-            console.print(f"  Caption added to tweet bank.")
+            console.print("  Caption added to tweet bank.")
     else:
         console.print(f"[red]Content note not found: {content_id}[/red]")
         sys.exit(1)

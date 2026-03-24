@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sable.platform.db import get_db
-from sable.platform.errors import SableError, HANDLE_NOT_IN_ROSTER, NO_ORG_FOR_HANDLE, ORG_NOT_FOUND, BUDGET_EXCEEDED
+from sable.platform.errors import SableError, HANDLE_NOT_IN_ROSTER, NO_ORG_FOR_HANDLE, ORG_NOT_FOUND, BUDGET_EXCEEDED, BRIEF_CAP_EXCEEDED
 from sable.platform.jobs import create_job, add_step, start_step, complete_step, fail_step
 from sable.platform.cost import log_cost, check_budget
 from sable.advise.stage1 import assemble_input, render_summary
@@ -55,7 +57,8 @@ def _check_cache(conn, org_id: str, normalized_handle: str, force: bool) -> tupl
                         return True, row["path"]
                 except Exception:
                     pass
-        except Exception:
+        except (json.JSONDecodeError, KeyError):
+            conn.execute("UPDATE artifacts SET stale=1 WHERE artifact_id=?", (row["artifact_id"],))
             continue
 
     return False, None
@@ -163,15 +166,27 @@ def generate_advise(
     try:
         summary_text = render_summary(assembled)
 
+        # Per-brief cost cap enforcement (live runs only)
+        if model not in ("template_only",) and not budget_exceeded:
+            est_in = len(summary_text) // 4
+            est_out = 1500
+            if "haiku" in model.lower():
+                est_cost = (est_in * 0.25 + est_out * 1.25) / 1_000_000
+            else:
+                est_cost = (est_in * 3.0 + est_out * 15.0) / 1_000_000
+            if est_cost > per_brief_cap:
+                raise SableError(
+                    BRIEF_CAP_EXCEEDED,
+                    f"Estimated brief cost ${est_cost:.4f} exceeds cap ${per_brief_cap:.4f}",
+                )
+
         if model == "template_only" or budget_exceeded:
             brief_body = render_fallback(assembled, budget_reason or "template_only")
         else:
             system_prompt = build_system_prompt(assembled["profile"])
             brief_body, cost_usd, input_tokens, output_tokens = synthesize(
-                system_prompt, summary_text, model=model, max_tokens=1500
+                system_prompt, summary_text, model=model, max_tokens=1500, org_id=org_id
             )
-            log_cost(conn, org_id, "advise", cost_usd, model=model,
-                     input_tokens=input_tokens, output_tokens=output_tokens, job_id=job_id)
 
         complete_step(conn, s2_step)
     except Exception as e:
@@ -183,6 +198,22 @@ def generate_advise(
         conn.commit()
         raise
 
+    # --- Deterministic data caveats block ---
+    data_quality = assembled.get("data_quality", {})
+    caveat_lines = []
+    if not data_quality.get("pulse_ok", True):
+        caveat_lines.append("- **Pulse performance data** is stale or unavailable — engagement trends may not reflect current state.")
+    if not data_quality.get("meta_ok", True):
+        caveat_lines.append("- **Pulse-meta trend data** is stale or unavailable — format and topic signals may be outdated.")
+    if not data_quality.get("platform_ok", True):
+        caveat_lines.append("- **Platform/entity data** (community members, tracking content) is incomplete or unavailable.")
+    if assembled.get("failed_sources"):
+        failed = ", ".join(assembled["failed_sources"])
+        caveat_lines.append(f"- **Data sources that failed during assembly:** {failed}")
+    if caveat_lines:
+        caveat_block = "## Data Caveats\n\n" + "\n".join(caveat_lines) + "\n\n"
+        brief_body = caveat_block + brief_body
+
     # Write output file
     from sable.shared.paths import vault_dir
     import yaml
@@ -193,6 +224,9 @@ def generate_advise(
     out_path = playbooks_dir / f"twitter_{normalized_handle}.md"
 
     freshness = assembled.get("data_freshness", {})
+    data_quality = assembled.get("data_quality", {})
+    stale = not data_quality.get("pulse_ok", True) or not data_quality.get("meta_ok", True)
+    degraded = not data_quality.get("platform_ok", True)
     frontmatter = {
         "handle": normalized_handle,
         "org": org_id,
@@ -204,29 +238,53 @@ def generate_advise(
         },
         "model_used": model,
         "cost_usd": cost_usd,
-        "stale": False,
+        "stale": stale,
+        "degraded": degraded,
     }
 
     fm_yaml = yaml.dump(frontmatter, default_flow_style=False, allow_unicode=True, sort_keys=False)
     content = f"---\n{fm_yaml}---\n\n{brief_body}\n"
-    out_path.write_text(content, encoding="utf-8")
 
-    # Insert artifact row
-    meta = json.dumps({
-        "input_refs_json": json.dumps({"handle": normalized_handle}),
-        "cost_usd": cost_usd,
-    })
-    conn.execute(
-        """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale)
-           VALUES (?, ?, 'twitter_strategy_brief', ?, ?, 0)""",
-        (org_id, job_id, str(out_path), meta)
-    )
+    tmp_path = out_path.with_suffix(".md.tmp")
+    bak_path = out_path.with_suffix(".md.bak")
+    prior_existed = out_path.exists()
 
-    # Complete job
-    conn.execute(
-        "UPDATE jobs SET status='completed', completed_at=datetime('now') WHERE job_id=?",
-        (job_id,)
-    )
-    conn.commit()
+    # Write new content to temp
+    tmp_path.write_text(content, encoding="utf-8")
+
+    # Backup prior file if it exists
+    if prior_existed:
+        shutil.copy2(out_path, bak_path)
+
+    try:
+        os.replace(tmp_path, out_path)  # atomic swap: new content now at final path
+        # Insert artifact row
+        meta = json.dumps({
+            "input_refs_json": json.dumps({"handle": normalized_handle}),
+            "cost_usd": cost_usd,
+        })
+        conn.execute(
+            """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale, degraded)
+               VALUES (?, ?, 'twitter_strategy_brief', ?, ?, ?, ?)""",
+            (org_id, job_id, str(out_path), meta, int(stale), int(degraded))
+        )
+        conn.execute(
+            "UPDATE jobs SET status='completed', completed_at=datetime('now') WHERE job_id=?",
+            (job_id,)
+        )
+        conn.commit()
+    except Exception:
+        # Restore prior state
+        if prior_existed:
+            os.replace(bak_path, out_path)
+        elif out_path.exists():
+            out_path.unlink(missing_ok=True)
+        raise
+    finally:
+        # Clean up temp/backup files
+        if bak_path.exists():
+            bak_path.unlink()
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
     return str(out_path)

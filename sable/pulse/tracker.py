@@ -122,18 +122,21 @@ def snapshot_account(handle: str, mock: bool = False) -> list[dict]:
     handle = handle if handle.startswith("@") else f"@{handle}"
     tweets = fetch_user_tweets(handle, count=50, mock=mock)
 
+    new_count = 0
     for tweet in tweets:
         post_id = tweet.get("id_str", tweet.get("id", ""))
         if not post_id:
             continue
 
-        db.insert_post(
+        is_new = db.insert_post(
             post_id=str(post_id),
             account_handle=handle,
             text=tweet.get("full_text", tweet.get("text", "")),
             url=f"https://twitter.com/i/web/status/{post_id}",
             posted_at=tweet.get("created_at", ""),
         )
+        if is_new:
+            new_count += 1
 
         db.insert_snapshot(
             post_id=str(post_id),
@@ -154,5 +157,11 @@ def snapshot_account(handle: str, mock: bool = False) -> list[dict]:
             following=user.get("friends_count", 0),
             tweet_count=user.get("statuses_count", 0),
         )
+
+    import logging as _logging
+    _logging.getLogger(__name__).info(
+        "snapshot_account %s: %d tweets fetched, %d new posts inserted",
+        handle, len(tweets), new_count,
+    )
 
     return tweets

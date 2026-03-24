@@ -1,8 +1,10 @@
 """Tests for the advise stage1, stage2, fallback, and generate modules."""
 import json
+import sqlite3
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,6 +12,7 @@ import pytest
 from sable.advise.stage1 import assemble_input, render_summary, _compute_lift, _read_profile_file
 from sable.advise.template_fallback import render_fallback
 from sable.advise.stage2 import build_system_prompt, OUTPUT_FORMAT_CONTRACT
+import sable.advise.stage2 as _stage2
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -374,3 +377,386 @@ def test_assemble_input_pulse_not_available_when_missing(conn, tmp_path, monkeyp
     result = assemble_input("alice", "testorg", conn)
     assert result["pulse_available"] is False
     assert result["posts"] == []
+
+
+# ─────────────────────────────────────────────────────────────────────
+# T2a: assemble_input marks data_quality.pulse_ok=False when pulse unavailable
+# ─────────────────────────────────────────────────────────────────────
+
+def test_assemble_input_pulse_failure_marks_degraded(conn, tmp_path, monkeypatch):
+    """data_quality.pulse_ok is False when pulse.db does not exist."""
+    monkeypatch.setattr("sable.shared.paths.sable_home", lambda: tmp_path)
+    # pulse.db is absent from tmp_path — _open_db_readonly returns None
+
+    result = assemble_input("alice", "testorg", conn)
+    assert "data_quality" in result
+    assert result["data_quality"]["pulse_ok"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────
+# T2b: generate_advise sets stale=1 in artifact when pulse is unavailable
+# ─────────────────────────────────────────────────────────────────────
+
+def test_generate_marks_stale_when_pulse_unavailable(conn, tmp_path, monkeypatch):
+    """artifact row has stale=1 when data_quality.pulse_ok=False."""
+    from sable.advise.generate import generate_advise
+    from sable.roster.models import Account, Persona, ContentSettings
+
+    mock_account = Account(handle="alice", org="testorg", display_name="Alice",
+                           persona=Persona(), content=ContentSettings())
+    monkeypatch.setattr("sable.roster.manager.load_roster", lambda: {"alice": mock_account})
+    monkeypatch.setattr("sable.advise.generate.get_db", lambda: conn)
+    monkeypatch.setattr("sable.advise.generate.check_budget", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "sable.shared.paths.vault_dir",
+        lambda org="": tmp_path / "vault" / (org or "default"),
+    )
+
+    degraded = _make_assembled_base()
+    degraded["data_quality"] = {"pulse_ok": False, "meta_ok": True, "platform_ok": True}
+    monkeypatch.setattr("sable.advise.generate.assemble_input", lambda *a, **kw: degraded)
+    monkeypatch.setattr("sable.advise.generate.synthesize",
+                        lambda *a, **kw: ("brief body", 0.001, 10, 5))
+
+    import sable.config as sable_cfg
+    monkeypatch.setattr(sable_cfg, "load_config", lambda: {
+        "platform": {"cost_caps": {"max_ai_usd_per_strategy_brief": 1.00}, "degrade_mode": "fallback"}
+    })
+
+    generate_advise("alice")
+
+    row = conn.execute(
+        "SELECT stale FROM artifacts WHERE org_id='testorg' AND artifact_type='twitter_strategy_brief'"
+    ).fetchone()
+    assert row is not None, "Expected artifact row to be inserted"
+    assert row["stale"] == 1, f"Expected stale=1 when pulse_ok=False, got stale={row['stale']}"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# T3: stage2.synthesize uses the shared Claude wrapper
+# ─────────────────────────────────────────────────────────────────────
+
+def test_stage2_uses_shared_wrapper(monkeypatch):
+    """synthesize() routes through the shared Claude wrapper and forwards org context."""
+    wrapper_calls = []
+
+    def fake_call_claude_with_usage(prompt, **kwargs):
+        wrapper_calls.append({"prompt": prompt, **kwargs})
+        return SimpleNamespace(
+            text="response text",
+            cost_usd=0.00105,
+            input_tokens=100,
+            output_tokens=50,
+        )
+
+    monkeypatch.setattr(_stage2, "call_claude_with_usage", fake_call_claude_with_usage)
+
+    from sable.advise.stage2 import synthesize
+    result = synthesize(
+        "system prompt",
+        "user summary",
+        model="claude-sonnet-4-20250514",
+        org_id="testorg",
+    )
+
+    assert result == ("response text", 0.00105, 100, 50)
+    assert wrapper_calls == [{
+        "prompt": "user summary",
+        "system": "system prompt",
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1500,
+        "org_id": "testorg",
+        "call_type": "advise",
+    }]
+
+
+def test_generate_advise_passes_org_id_to_synthesize(conn, tmp_path, monkeypatch):
+    """generate_advise() passes account org_id into stage2 synthesis."""
+    from sable.advise.generate import generate_advise
+    from sable.roster.models import Account, Persona, ContentSettings
+
+    mock_account = Account(handle="alice", org="testorg", display_name="Alice",
+                           persona=Persona(), content=ContentSettings())
+    monkeypatch.setattr("sable.roster.manager.load_roster", lambda: {"alice": mock_account})
+    monkeypatch.setattr("sable.advise.generate.get_db", lambda: conn)
+    monkeypatch.setattr("sable.advise.generate.check_budget", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "sable.shared.paths.vault_dir",
+        lambda org="": tmp_path / "vault" / (org or "default"),
+    )
+
+    assembled = _make_assembled_base()
+    assembled["pulse_available"] = True
+    assembled["data_quality"] = {"pulse_ok": True, "meta_ok": True, "platform_ok": True}
+    monkeypatch.setattr("sable.advise.generate.assemble_input", lambda *a, **kw: assembled)
+
+    synthesize_calls = []
+
+    def fake_synthesize(system_prompt, assembled_summary, model="claude-sonnet-4-20250514",
+                        max_tokens=1500, org_id=None):
+        synthesize_calls.append({
+            "system_prompt": system_prompt,
+            "assembled_summary": assembled_summary,
+            "model": model,
+            "max_tokens": max_tokens,
+            "org_id": org_id,
+        })
+        return "brief body", 0.001, 10, 5
+
+    monkeypatch.setattr("sable.advise.generate.synthesize", fake_synthesize)
+
+    import sable.config as sable_cfg
+    monkeypatch.setattr(sable_cfg, "load_config", lambda: {
+        "platform": {"cost_caps": {"max_ai_usd_per_strategy_brief": 1.00}, "degrade_mode": "fallback"}
+    })
+
+    generate_advise("alice")
+
+    assert len(synthesize_calls) == 1
+    assert synthesize_calls[0]["org_id"] == "testorg"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# T4: generate_advise raises BRIEF_CAP_EXCEEDED when estimated cost exceeds cap
+# ─────────────────────────────────────────────────────────────────────
+
+def test_generate_raises_when_brief_cost_exceeds_cap(conn, tmp_path, monkeypatch):
+    """SableError(BRIEF_CAP_EXCEEDED) raised when estimated cost > per-brief cap."""
+    from sable.advise.generate import generate_advise
+    from sable.platform.errors import SableError
+    from sable.roster.models import Account, Persona, ContentSettings
+
+    mock_account = Account(handle="alice", org="testorg", display_name="Alice",
+                           persona=Persona(), content=ContentSettings())
+    monkeypatch.setattr("sable.roster.manager.load_roster", lambda: {"alice": mock_account})
+    monkeypatch.setattr("sable.advise.generate.get_db", lambda: conn)
+    monkeypatch.setattr("sable.advise.generate.check_budget", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "sable.shared.paths.vault_dir",
+        lambda org="": tmp_path / "vault" / (org or "default"),
+    )
+
+    # Large assembled input so render_summary produces enough tokens to exceed a tiny cap
+    large_assembled = _make_assembled_base()
+    large_assembled["pulse_available"] = True
+    large_assembled["posts"] = [
+        _make_post("x" * 200, lift=float(i)) for i in range(20)
+    ]
+    large_assembled["data_quality"] = {"pulse_ok": True, "meta_ok": True, "platform_ok": True}
+    monkeypatch.setattr("sable.advise.generate.assemble_input", lambda *a, **kw: large_assembled)
+
+    # Tiny cap that any non-trivial summary will exceed
+    import sable.config as sable_cfg
+    monkeypatch.setattr(sable_cfg, "load_config", lambda: {
+        "platform": {"cost_caps": {"max_ai_usd_per_strategy_brief": 0.000001}, "degrade_mode": "fallback"}
+    })
+
+    with pytest.raises(SableError) as exc_info:
+        generate_advise("alice")
+
+    assert exc_info.value.code == "BRIEF_CAP_EXCEEDED"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# AR-3a: assemble_input marks platform_ok=False when content_items query fails
+# ─────────────────────────────────────────────────────────────────────
+
+def test_assemble_input_content_items_failure_marks_platform_degraded(conn, tmp_path, monkeypatch):
+    """data_quality.platform_ok is False when content_items query raises."""
+    import sqlite3 as _sqlite3
+    monkeypatch.setattr("sable.shared.paths.sable_home", lambda: tmp_path)
+
+    class _FailOnContentItems:
+        def __init__(self, real_conn):
+            self._real = real_conn
+            self.row_factory = real_conn.row_factory
+
+        def execute(self, sql, *args, **kwargs):
+            if "content_items" in sql:
+                raise _sqlite3.OperationalError("injected failure")
+            return self._real.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    result = assemble_input("alice", "testorg", _FailOnContentItems(conn))
+    assert result["data_quality"]["platform_ok"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────
+# AR-3b: generate_advise sets degraded=1 in artifact when platform_ok=False
+# ─────────────────────────────────────────────────────────────────────
+
+def test_generate_marks_degraded_when_platform_unavailable(conn, tmp_path, monkeypatch):
+    """artifact row has degraded=1 when data_quality.platform_ok=False."""
+    import yaml
+    from sable.advise.generate import generate_advise
+    from sable.roster.models import Account, Persona, ContentSettings
+
+    mock_account = Account(handle="alice", org="testorg", display_name="Alice",
+                           persona=Persona(), content=ContentSettings())
+    monkeypatch.setattr("sable.roster.manager.load_roster", lambda: {"alice": mock_account})
+    monkeypatch.setattr("sable.advise.generate.get_db", lambda: conn)
+    monkeypatch.setattr("sable.advise.generate.check_budget", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "sable.shared.paths.vault_dir",
+        lambda org="": tmp_path / "vault" / (org or "default"),
+    )
+
+    platform_degraded = _make_assembled_base()
+    platform_degraded["data_quality"] = {"pulse_ok": True, "meta_ok": True, "platform_ok": False}
+    monkeypatch.setattr("sable.advise.generate.assemble_input", lambda *a, **kw: platform_degraded)
+    monkeypatch.setattr("sable.advise.generate.synthesize",
+                        lambda *a, **kw: ("brief body", 0.001, 10, 5))
+
+    import sable.config as sable_cfg
+    monkeypatch.setattr(sable_cfg, "load_config", lambda: {
+        "platform": {"cost_caps": {"max_ai_usd_per_strategy_brief": 1.00}, "degrade_mode": "fallback"}
+    })
+
+    generate_advise("alice")
+
+    row = conn.execute(
+        "SELECT stale, degraded FROM artifacts WHERE org_id='testorg' AND artifact_type='twitter_strategy_brief'"
+    ).fetchone()
+    assert row is not None, "Expected artifact row to be inserted"
+    assert row["stale"] == 0, f"Expected stale=0, got {row['stale']}"
+    assert row["degraded"] == 1, f"Expected degraded=1 when platform_ok=False, got {row['degraded']}"
+
+    content = (tmp_path / "vault" / "testorg" / "playbooks" / "twitter_alice.md").read_text()
+    fm_end = content.index("---", 4)
+    fm = yaml.safe_load(content[4:fm_end])
+    assert fm["degraded"] is True, f"Expected degraded=true in frontmatter, got {fm.get('degraded')}"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# NEW: generate.py partial-write recovery tests
+# ─────────────────────────────────────────────────────────────────────
+
+def _setup_generate_mocks(monkeypatch, conn, tmp_path, assembled_override=None):
+    """Common setup for generate_advise tests."""
+    from sable.advise.generate import generate_advise  # noqa: F401
+    from sable.roster.models import Account, Persona, ContentSettings
+    import sable.config as sable_cfg
+
+    mock_account = Account(handle="alice", org="testorg", display_name="Alice",
+                           persona=Persona(), content=ContentSettings())
+    monkeypatch.setattr("sable.roster.manager.load_roster", lambda: {"alice": mock_account})
+    monkeypatch.setattr("sable.advise.generate.get_db", lambda: conn)
+    monkeypatch.setattr("sable.advise.generate.check_budget", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "sable.shared.paths.vault_dir",
+        lambda org="": tmp_path / "vault" / (org or "default"),
+    )
+    assembled = assembled_override or _make_assembled_base()
+    if "data_quality" not in assembled:
+        assembled["data_quality"] = {"pulse_ok": True, "meta_ok": True, "platform_ok": True}
+    monkeypatch.setattr("sable.advise.generate.assemble_input", lambda *a, **kw: assembled)
+    monkeypatch.setattr("sable.advise.generate.synthesize",
+                        lambda *a, **kw: ("brief body", 0.001, 10, 5))
+    monkeypatch.setattr(sable_cfg, "load_config", lambda: {
+        "platform": {"cost_caps": {"max_ai_usd_per_strategy_brief": 1.00}, "degrade_mode": "fallback"}
+    })
+
+
+class _FailAfterNConn:
+    """sqlite3.Connection wrapper that raises OperationalError on commit() after N calls."""
+
+    def __init__(self, real_conn, fail_after: int = 1):
+        self._c = real_conn
+        self._commits = 0
+        self._fail_after = fail_after
+        self.row_factory = real_conn.row_factory
+
+    def execute(self, *a, **kw):
+        return self._c.execute(*a, **kw)
+
+    def executescript(self, *a, **kw):
+        return self._c.executescript(*a, **kw)
+
+    def commit(self):
+        self._commits += 1
+        if self._commits > self._fail_after:
+            raise sqlite3.OperationalError("injected commit failure")
+        return self._c.commit()
+
+    def close(self):
+        return self._c.close()
+
+    def __getattr__(self, name):
+        return getattr(self._c, name)
+
+
+def test_generate_db_failure_restores_prior_file(conn, tmp_path, monkeypatch):
+    """When conn.commit() raises, prior brief file content is restored."""
+    from sable.advise.generate import generate_advise
+
+    failing_conn = _FailAfterNConn(conn, fail_after=1)
+    _setup_generate_mocks(monkeypatch, failing_conn, tmp_path)
+    monkeypatch.setattr("sable.advise.generate.get_db", lambda: failing_conn)
+
+    # Create a prior brief at the expected path
+    playbooks_dir = tmp_path / "vault" / "testorg" / "playbooks"
+    playbooks_dir.mkdir(parents=True, exist_ok=True)
+    prior_path = playbooks_dir / "twitter_alice.md"
+    prior_content = "---\nprior: true\n---\n\nPrior brief content.\n"
+    prior_path.write_text(prior_content, encoding="utf-8")
+
+    with pytest.raises(sqlite3.OperationalError):
+        generate_advise("alice")
+
+    # Prior content must be restored
+    assert prior_path.exists(), "File should still exist after rollback"
+    assert prior_path.read_text(encoding="utf-8") == prior_content, "Prior content should be restored"
+
+    # No temp or bak files remain
+    assert not prior_path.with_suffix(".md.tmp").exists(), ".md.tmp should be cleaned up"
+    assert not prior_path.with_suffix(".md.bak").exists(), ".md.bak should be cleaned up"
+
+
+def test_generate_no_prior_db_failure_leaves_no_file(conn, tmp_path, monkeypatch):
+    """When no prior file exists and conn.commit() raises, out_path does not remain."""
+    from sable.advise.generate import generate_advise
+
+    failing_conn = _FailAfterNConn(conn, fail_after=1)
+    _setup_generate_mocks(monkeypatch, failing_conn, tmp_path)
+    monkeypatch.setattr("sable.advise.generate.get_db", lambda: failing_conn)
+
+    out_path = tmp_path / "vault" / "testorg" / "playbooks" / "twitter_alice.md"
+    assert not out_path.exists()
+
+    with pytest.raises(sqlite3.OperationalError):
+        generate_advise("alice")
+
+    assert not out_path.exists(), "No file should remain when no prior existed and DB failed"
+    assert not out_path.with_suffix(".md.tmp").exists()
+    assert not out_path.with_suffix(".md.bak").exists()
+
+
+def test_generate_data_caveats_block_when_stale(conn, tmp_path, monkeypatch):
+    """Data Caveats block appears in generated brief when pulse_ok=False."""
+    from sable.advise.generate import generate_advise
+
+    assembled = _make_assembled_base()
+    assembled["data_quality"] = {"pulse_ok": False, "meta_ok": True, "platform_ok": True}
+    _setup_generate_mocks(monkeypatch, conn, tmp_path, assembled_override=assembled)
+
+    result = generate_advise("alice")
+
+    content = Path(result).read_text(encoding="utf-8")
+    assert "## Data Caveats" in content, "Data Caveats section should appear when pulse_ok=False"
+    assert "Pulse performance data" in content
+
+
+def test_generate_no_caveats_when_healthy(conn, tmp_path, monkeypatch):
+    """No Data Caveats block when all data_quality flags are True."""
+    from sable.advise.generate import generate_advise
+
+    assembled = _make_assembled_base()
+    assembled["data_quality"] = {"pulse_ok": True, "meta_ok": True, "platform_ok": True}
+    _setup_generate_mocks(monkeypatch, conn, tmp_path, assembled_override=assembled)
+
+    result = generate_advise("alice")
+
+    content = Path(result).read_text(encoding="utf-8")
+    assert "## Data Caveats" not in content, "No Data Caveats section when all flags healthy"
