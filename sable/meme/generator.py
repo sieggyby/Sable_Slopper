@@ -59,7 +59,7 @@ Return JSON only:
     if dry_run:
         return {z["id"]: f"[DRY RUN: {z['label']}]" for z in template.get("zones", [])}
 
-    raw = call_claude_json(prompt, max_tokens=512)
+    raw = call_claude_json(prompt, max_tokens=512)  # budget-exempt: meme generation has no org context
 
     try:
         raw = raw.strip()
@@ -97,7 +97,7 @@ Return the template ID that best matches this account's voice and the topic.
 Return only the template ID string, nothing else.
 """
 
-    result = call_claude_json(prompt, max_tokens=64)
+    result = call_claude_json(prompt, max_tokens=64)  # budget-exempt: meme generation has no org context
     # Strip quotes if present
     return result.strip().strip('"\'')
 
@@ -144,7 +144,7 @@ Return JSON array:
 ]
 """
 
-    raw = call_claude_json(prompt, max_tokens=2048)
+    raw = call_claude_json(prompt, max_tokens=2048)  # budget-exempt: meme generation has no org context
     try:
         raw = raw.strip()
         if raw.startswith("```"):

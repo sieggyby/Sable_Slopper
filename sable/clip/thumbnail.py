@@ -134,6 +134,7 @@ def _make_gradient(width: int, height: int, top_rgb: tuple, bottom_rgb: tuple):
     from PIL import Image
     img = Image.new("RGB", (width, height))
     pixels = img.load()
+    assert pixels is not None
     for y in range(height):
         t = y / (height - 1)
         r = int(top_rgb[0] + (bottom_rgb[0] - top_rgb[0]) * t)
@@ -344,7 +345,7 @@ def _crop_face_portrait(
             y0 = (ih - new_h) // 2
             cropped = img.crop((0, y0, iw, y0 + new_h))
 
-    resized = cropped.resize((target_w, target_h), Image.LANCZOS)
+    resized = cropped.resize((target_w, target_h), Image.Resampling.LANCZOS)
     enhanced = ImageEnhance.Contrast(resized).enhance(1.15)
     return enhanced
 
@@ -375,6 +376,7 @@ def _compose_split(
         # Build seam mask: ramps from 0 at left edge to 255 (opaque) on right
         mask = Image.new("L", (FACE_W, canvas_h), 255)
         mask_pixels = mask.load()
+        assert mask_pixels is not None
         for x in range(blend_zone):
             alpha = int(255 * (x / blend_zone))
             for y in range(canvas_h):
@@ -387,6 +389,7 @@ def _compose_split(
         # Face on left: paste at x = 0
         mask = Image.new("L", (FACE_W, canvas_h), 255)
         mask_pixels = mask.load()
+        assert mask_pixels is not None
         blend_start = FACE_W - blend_zone
         for x in range(blend_start, FACE_W):
             alpha = int(255 * (1.0 - (x - blend_start) / blend_zone))

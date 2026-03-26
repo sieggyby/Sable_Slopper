@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import sable.vault.platform_sync as _psync
 from sable.vault.platform_sync import (
     _do_sync, _build_entity_note, _build_index,
     _build_diagnostic_summary, _build_diagnostic_history_entry,
@@ -375,6 +376,102 @@ def test_vault_deletes_meta_report_when_source_missing(conn, vault_root, monkeyp
 
     # meta_report.md should be removed since no pulse_meta_report artifact exists
     assert not meta_report.exists(), "meta_report.md should be deleted when no source artifact"
+
+
+def test_vault_sync_writes_partial_sentinel_on_meta_report_failure(conn, vault_root, monkeypatch, tmp_path):
+    """A meta_report copy failure after phase-B renames must leave _PARTIAL_SYNC behind."""
+    monkeypatch.setattr("sable.vault.platform_sync._safe_vault_root", lambda org_id: vault_root)
+
+    eid = _insert_entity(conn, display_name="Alice")
+    org = {"org_id": "testorg", "display_name": "Test Org"}
+    _do_sync(conn, org, vault_root, "job1")
+
+    entity_note_path = vault_root / "entities" / f"{eid}.md"
+    content_before = entity_note_path.read_text()
+
+    conn.execute("UPDATE entities SET display_name=? WHERE entity_id=?", ("Bob", eid))
+    conn.execute(
+        "INSERT INTO jobs (job_id, org_id, job_type, status, config_json) VALUES ('pulsejob', 'testorg', 'pulse_meta', 'completed', '{}')"
+    )
+    source_report = tmp_path / "pulse_meta_report.md"
+    source_report.write_text("latest pulse report", encoding="utf-8")
+    conn.execute(
+        """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale)
+           VALUES ('testorg', 'pulsejob', 'pulse_meta_report', ?, '{}', 0)""",
+        (str(source_report),)
+    )
+    conn.commit()
+
+    original_write_to_temp = _psync._write_to_temp
+    meta_report_dest = vault_root / "pulse" / "meta_report.md"
+
+    def fail_on_meta_report(path, content):
+        if path == meta_report_dest:
+            raise RuntimeError("injected meta_report failure")
+        return original_write_to_temp(path, content)
+
+    monkeypatch.setattr(_psync, "_write_to_temp", fail_on_meta_report)
+
+    with pytest.raises(RuntimeError, match="injected meta_report failure"):
+        _do_sync(conn, org, vault_root, "job2")
+
+    assert entity_note_path.read_text() != content_before
+    assert "Bob" in entity_note_path.read_text()
+    assert (vault_root / "_PARTIAL_SYNC").exists()
+
+
+# ─────────────────────────────────────────────
+# Test T1: two-phase safety — failure mid-generation preserves old artifacts
+# ─────────────────────────────────────────────
+
+def test_vault_sync_failure_preserves_old_artifacts(conn, vault_root, monkeypatch):
+    """If generation fails mid-way, old artifact files and DB rows remain intact with original content."""
+    monkeypatch.setattr("sable.vault.platform_sync._safe_vault_root", lambda org_id: vault_root)
+
+    # First sync: insert one entity with display_name="Alice", sync successfully
+    eid = _insert_entity(conn, display_name="Alice")
+
+    org = {"org_id": "testorg", "display_name": "Test Org"}
+    _do_sync(conn, org, vault_root, "job1")
+
+    # Read the entity note file content after first sync
+    entity_note_path = vault_root / "entities" / f"{eid}.md"
+    content_before = entity_note_path.read_text()
+
+    # Update entity display_name to "Bob" in DB
+    conn.execute("UPDATE entities SET display_name=? WHERE entity_id=?", ("Bob", eid))
+    conn.commit()
+
+    # Record artifact row count before second sync attempt
+    rows_before = conn.execute(
+        "SELECT COUNT(*) FROM artifacts WHERE org_id='testorg'"
+    ).fetchone()[0]
+
+    # Inject failure: _write_to_temp raises on the 2nd call
+    call_count = {"n": 0}
+    original_write_to_temp = _psync._write_to_temp
+
+    def failing_write_to_temp(path, content):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("injected failure on 2nd write")
+        return original_write_to_temp(path, content)
+
+    monkeypatch.setattr(_psync, "_write_to_temp", failing_write_to_temp)
+
+    with pytest.raises(RuntimeError, match="injected failure"):
+        _do_sync(conn, org, vault_root, "job2")
+
+    # File content must still be the "Alice" version (not "Bob")
+    assert entity_note_path.read_text() == content_before, \
+        "Entity note file was modified despite generation failure"
+
+    # Artifact row count must be unchanged
+    rows_after = conn.execute(
+        "SELECT COUNT(*) FROM artifacts WHERE org_id='testorg'"
+    ).fetchone()[0]
+    assert rows_after == rows_before, \
+        f"Artifact row count changed on failure: before={rows_before}, after={rows_after}"
 
 
 # ─────────────────────────────────────────────

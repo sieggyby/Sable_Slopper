@@ -1,6 +1,8 @@
 """Write learned_preferences back to roster.yaml from pulse data."""
 from __future__ import annotations
 
+from typing import Any
+
 from sable.pulse.db import get_posts_for_account, get_latest_snapshot
 from sable.pulse.scorer import score_post, rank_posts
 from sable.roster.manager import update_learned_preferences
@@ -31,13 +33,13 @@ def update_preferences_from_performance(handle: str, followers: int = 1000) -> d
         ct = s["content_type"]
         by_type.setdefault(ct, []).append(s)
 
-    prefs = {}
+    prefs: dict[str, Any] = {}
 
     # Best performing content type
     type_er = {ct: sum(s["engagement_rate"] for s in ss) / len(ss)
                for ct, ss in by_type.items()}
     if type_er:
-        best_type = max(type_er, key=type_er.get)
+        best_type = max(type_er, key=lambda k: type_er[k])
         prefs["best_content_type"] = best_type
         prefs["best_content_type_avg_er"] = round(type_er[best_type], 3)
 

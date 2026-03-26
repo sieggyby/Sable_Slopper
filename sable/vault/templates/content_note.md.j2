@@ -1,0 +1,40 @@
+---
+id: {{ id }}
+type: {{ type }}
+source_tool: {{ source_tool }}
+account: "{{ account }}"
+{% if topic is defined and topic %}topic: "{{ topic }}"
+{% endif %}{% if title is defined and title %}title: "{{ title }}"
+{% endif %}{% if template is defined and template %}template: "{{ template }}"
+{% endif %}{% if source is defined and source %}source: "{{ source }}"
+{% endif %}{% if target is defined and target %}target: "{{ target }}"
+{% endif %}output: "{{ output }}"
+{% if start is defined %}start: {{ start }}
+end: {{ end }}
+duration: {{ duration }}
+{% endif %}{% if strategy is defined and strategy %}strategy: "{{ strategy }}"
+{% endif %}{% if character_id is defined and character_id %}character_id: "{{ character_id }}"
+{% endif %}{% if script is defined and script %}script_preview: "{{ script[:200] | replace('"', "'") }}"
+{% endif %}assembled_at: "{{ assembled_at }}"
+meta_path: "{{ meta_path }}"
+topics: {{ topics | tojson }}
+questions_answered: {{ questions_answered | tojson }}
+depth: "{{ depth }}"
+tone: "{{ tone }}"
+keywords: {{ keywords | tojson }}
+enrichment_status: "{{ enrichment_status }}"
+suggested_for: {{ suggested_for | tojson }}
+posted_by: {{ posted_by | tojson }}
+---
+
+{% if type == "clip" %}
+**Clip** — {{ account }} | {{ "%.1f"|format(duration|float) }}s
+{% elif type == "meme" %}
+**Meme** — {{ account }} | {{ template }}
+{% elif type == "faceswap" %}
+**Faceswap** — {{ account }}
+{% elif type == "explainer" %}
+**Explainer** — {{ account }} | {{ topic }}
+{% else %}
+**Content** — {{ account }}
+{% endif %}

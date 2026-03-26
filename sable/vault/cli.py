@@ -117,8 +117,8 @@ def vault_sync(org_id, org, workspace_override, vault, dry_run):
         console.print(f"[green]✓ Synced:[/green] new={report.new}, updated={report.updated}", end="")
         if report.errors:
             console.print(f", [red]errors={len(report.errors)}[/red]")
-            for e in report.errors[:5]:
-                console.print(f"  [red]{e}[/red]")
+            for err in report.errors[:5]:
+                console.print(f"  [red]{err}[/red]")
         else:
             console.print()
 

@@ -24,9 +24,21 @@ def _cache_path(video_path: Path, model: str) -> Path:
     return transcript_cache_dir() / f"{key}-{model}-{_CACHE_VERSION}.json"
 
 
+# AR5-26: module-level cache so WhisperModel is only loaded once per process per model size
+_MODEL_CACHE: dict = {}  # str → WhisperModel instance
+
+
+def _get_model(model: str):
+    """Return a cached WhisperModel, loading it on first use."""
+    if model not in _MODEL_CACHE:
+        from faster_whisper import WhisperModel
+        _MODEL_CACHE[model] = WhisperModel(model, device="auto", compute_type="int8")
+    return _MODEL_CACHE[model]
+
+
 def _load_model(model: str):
-    from faster_whisper import WhisperModel
-    return WhisperModel(model, device="auto", compute_type="int8")
+    """Deprecated: use _get_model() for caching. Kept for backward compatibility."""
+    return _get_model(model)
 
 
 def transcribe(
@@ -49,7 +61,7 @@ def transcribe(
         with open(cache) as f:
             return json.load(f)
 
-    wm = _load_model(model)
+    wm = _get_model(model)
     segments_iter, _info = wm.transcribe(
         str(video_path),
         word_timestamps=True,

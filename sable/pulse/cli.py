@@ -17,6 +17,11 @@ def pulse_group():
     """Track performance, generate reports, and get AI recommendations."""
 
 
+# Register meta subgroup
+from sable.pulse.meta.cli import meta_group
+pulse_group.add_command(meta_group)
+
+
 @pulse_group.command("track")
 @click.option("--account", "-a", required=True)
 @click.option("--mock", is_flag=True, help="Use mock data (no API key required)")
@@ -163,6 +168,36 @@ def pulse_trends(account, query, count, mock):
             f"{t.get('retweet_count', 0):,}",
         )
     console.print(table)
+
+
+@pulse_group.command("account")
+@click.option("--account", "-a", required=True, help="Twitter handle")
+@click.option("--days", default=30, show_default=True, help="Lookback window in days")
+@click.option("--org", default=None, help="Org for niche comparison (defaults to roster org)")
+def pulse_account(account, days, org):
+    """Show per-format lift report for a managed account."""
+    from sable.roster.manager import require_account
+    from sable.shared.paths import pulse_db_path, meta_db_path
+    from sable.pulse.account_report import compute_account_format_lift, render_account_report
+
+    try:
+        acc = require_account(account)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        sys.exit(1)
+
+    effective_org = org or acc.org
+
+    with console.status(f"Computing format lift for {acc.handle}..."):
+        report = compute_account_format_lift(
+            handle=acc.handle,
+            org=effective_org,
+            days=days,
+            pulse_db_path=pulse_db_path(),
+            meta_db_path=meta_db_path() if effective_org else None,
+        )
+
+    click.echo(render_account_report(report))
 
 
 @pulse_group.command("link")

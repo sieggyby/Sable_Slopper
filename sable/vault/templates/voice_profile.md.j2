@@ -1,0 +1,31 @@
+---
+handle: "{{ handle }}"
+display_name: "{{ display_name }}"
+org: "{{ org }}"
+type: voice_profile
+archetype: "{{ archetype }}"
+voice_description: "{{ voice }}"
+topics: {{ topics | tojson }}
+avoid: {{ avoid | tojson }}
+clip_style: "{{ clip_style }}"
+meme_style: "{{ meme_style }}"
+brainrot_energy: "{{ brainrot_energy }}"
+content_count: 0
+posted_count: 0
+avg_engagement: 0
+last_updated: "{{ created_at }}"
+---
+
+# {{ display_name }} ({{ handle }})
+
+**Archetype:** {{ archetype }}
+**Voice:** {{ voice }}
+**Topics:** {{ topics | join(", ") }}
+
+## Content Inventory
+
+_Populated by `sable vault sync`._
+
+## Posting History
+
+_Populated by `sable vault log`._

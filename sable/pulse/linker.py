@@ -39,11 +39,9 @@ def similarity_ratio(a: str, b: str) -> float:
 
 def auto_link_posts(threshold: float = 70.0) -> list[dict]:
     """
-    Placeholder — always returns []. Manual linking via 'sable vault assign' is the supported path.
-    Do not build callers that expect this to return matches.
+    Intentional no-op — always returns []. Manual linking via 'sable vault assign' is the
+    supported path. Do not build callers that expect this to return matches.
     """
-    conn = get_conn()
-    conn.close()
     return []
 
 

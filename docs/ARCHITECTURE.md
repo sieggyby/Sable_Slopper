@@ -82,9 +82,9 @@ Three SQLite databases, all stored in `$SABLE_HOME/` (default `~/.sable/`).
 |------|---------|-----------|
 | `pulse.db` | Tweet performance data, posting log, roster accounts | `sable pulse track`, `sable pulse log`, `sable roster` |
 | `meta.db` | Watchlist tweet cache, per-author baselines, incremental scan cursors, format baseline history | `sable pulse meta scan` |
-| `sable.db` | Orgs, entities, handles, tags, merge candidates, jobs, cost events, artifacts | `sable/platform/` modules |
+| `sable.db` | Orgs, entities, handles, tags, merge candidates, jobs, cost events, artifacts, sync_runs, diagnostic_runs, content_items | `sable/platform/` modules; SableTracking `app/platform_sync.py` (external) |
 
-`pulse.db` and `meta.db` do not share tables; `pulse meta` reads roster data from `pulse.db` for org membership but writes only to `meta.db`. `sable.db` is entirely separate and written only through `sable/platform/`.
+`pulse.db` and `meta.db` do not share tables; `pulse meta` reads roster data from `pulse.db` for org membership but writes only to `meta.db`. `sable.db` is entirely separate and written only through `sable/platform/`. External tools (SableTracking's `app/platform_sync.py`) write via the same `sable/platform/` helpers — they never write raw SQL.
 
 ---
 

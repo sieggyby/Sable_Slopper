@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 
 @dataclass
@@ -45,7 +46,7 @@ def _check_has_alpha(image_path: Path) -> bool:
         img = Image.open(image_path)
         if img.mode != "RGBA":
             return False
-        min_alpha = img.split()[3].getextrema()[0]
+        min_alpha = cast(tuple[int, int], img.split()[3].getextrema())[0]
         return min_alpha < 255
     except Exception:
         return False

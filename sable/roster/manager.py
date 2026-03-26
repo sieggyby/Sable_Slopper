@@ -1,10 +1,13 @@
 """CRUD operations on roster.yaml."""
 from __future__ import annotations
 
+import fcntl
+import os
 from datetime import datetime, timezone
 from typing import Optional
 import yaml
 
+from sable.shared.files import atomic_write
 from sable.shared.paths import roster_path
 from sable.roster.models import Account, Roster
 
@@ -27,12 +30,18 @@ def load_roster() -> Roster:
 def save_roster(roster: Roster) -> None:
     path = roster_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = str(path) + ".lock"
     data = {
         "version": roster.version,
         "accounts": [a.to_yaml_dict() for a in roster.accounts],
     }
-    with open(path, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+    content = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+    with open(lock_path, "w") as lock_f:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
+        try:
+            atomic_write(path, content)
+        finally:
+            fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
 def get_account(handle: str) -> Optional[Account]:

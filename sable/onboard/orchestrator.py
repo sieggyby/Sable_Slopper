@@ -13,7 +13,7 @@ import yaml
 from sable.platform.db import get_db
 from sable.platform.errors import (
     SableError, ORG_NOT_FOUND, ORG_EXISTS, INVALID_CONFIG, SLUG_ORG_CONFLICT,
-    AMBIGUOUS_INPUT, AWAITING_OPERATOR_INPUT,
+    AMBIGUOUS_INPUT, AWAITING_OPERATOR_INPUT, redact_error,
 )
 from sable.platform.jobs import create_job, add_step, start_step, complete_step, fail_step
 
@@ -74,7 +74,7 @@ def _step_run_cult_doctor(conn, job_id: str, step_id: int, org_id: str, prospect
             capture_output=True, text=True, timeout=600
         )
     except subprocess.TimeoutExpired as e:
-        stdout_snippet = (e.stdout or "")[:500]
+        stdout_snippet = redact_error((e.stdout or b"").decode("utf-8", errors="replace")[:500])
         fail_step(conn, step_id, f"Cult Doctor pipeline timed out after 600s. stdout: {stdout_snippet}")
         raise SableError(INVALID_CONFIG, "Cult Doctor pipeline timed out after 10 minutes.")
     except FileNotFoundError:
@@ -82,7 +82,7 @@ def _step_run_cult_doctor(conn, job_id: str, step_id: int, org_id: str, prospect
         raise SableError(INVALID_CONFIG, "sable_cult_grader package not found. Install it to use onboarding.")
 
     if result.returncode != 0:
-        err_snippet = result.stderr[:1000]
+        err_snippet = redact_error(result.stderr[:1000])
         fail_step(conn, step_id, err_snippet)
         raise SableError(INVALID_CONFIG, f"Cult Doctor pipeline failed: {result.stderr[:200]}")
 

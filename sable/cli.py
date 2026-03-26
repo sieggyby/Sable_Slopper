@@ -60,6 +60,9 @@ from sable.commands.playbook import playbook_group
 from sable.commands.tracking import tracking_group
 from sable.commands.advise import advise_command
 from sable.commands.onboard import onboard_command
+from sable.commands.write import write_command
+from sable.commands.score import score_command
+from sable.commands.diagnose import diagnose_command
 
 main.add_command(roster_group)
 main.add_command(clip_group)
@@ -78,3 +81,6 @@ main.add_command(playbook_group)
 main.add_command(tracking_group)
 main.add_command(advise_command)
 main.add_command(onboard_command)
+main.add_command(write_command)
+main.add_command(score_command)
+main.add_command(diagnose_command)

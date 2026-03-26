@@ -13,6 +13,7 @@ _logger = logging.getLogger(__name__)
 _PAUSE_THRESHOLD = 0.8      # seconds of silence between words → window boundary
 _MIN_WINDOW_DURATION = 5.0  # discard windows shorter than this
 _MAX_EVAL_BATCH = 20        # maximum clips per single Claude eval call
+_MAX_WINDOW_CONTEXT: int = 80   # why: caps first-stage prompt; keeps input tokens bounded
 
 
 def _candidate_endpoints(
@@ -280,7 +281,7 @@ def _snap_to_pause_backed_sentence(
 def _evaluate_variants_batch(
     clips_with_variants: list[dict],
     segments: list[dict],
-    words: list[dict] = None,
+    words: list[dict] | None = None,
     max_dur: float = 90.0,
 ) -> list[dict]:
     """
@@ -427,6 +428,20 @@ Set lands=false when the chosen variant cuts off before the rhetorical point is 
     return resolved
 
 
+def _dedup_selections(selections: list[dict]) -> list[dict]:
+    """Remove overlapping selections (shared absolute window index). Input must be
+    pre-sorted by score descending. Higher-scored selection wins on overlap."""
+    claimed: set[int] = set()
+    result = []
+    for sel in selections:
+        idxs = set(sel.get("windows", []))
+        if not idxs or idxs & claimed:
+            continue
+        claimed |= idxs
+        result.append(sel)
+    return result
+
+
 def select_clips(
     transcript: dict,
     account: Account,
@@ -467,23 +482,32 @@ def select_clips(
     if not windows:
         raise RuntimeError("No speech windows found in transcript.")
 
-    # Build condensed window list for Claude
-    window_lines = []
-    for i, w in enumerate(windows):
-        dur = w["end"] - w["start"]
-        text = w["text"].replace("\n", " ")
-        if dur > 60.0 and len(text) > 300:
-            # Show start + mid + end for very long windows
-            snippet = text[:200] + " … [mid] … " + text[-100:]
-        elif len(text) > 300:
-            snippet = text[:300] + "…"
-        else:
-            snippet = text
-        window_lines.append(f"[{i}] {w['start']:.1f}s–{w['end']:.1f}s ({dur:.0f}s): \"{snippet}\"")
+    # Batched first-stage: process windows in batches of _MAX_WINDOW_CONTEXT
+    num_batches = (len(windows) + _MAX_WINDOW_CONTEXT - 1) // _MAX_WINDOW_CONTEXT
+    if num_batches > 1:
+        _logger.info(
+            "Transcript has %d windows; processing in %d batches of up to %d",
+            len(windows), num_batches, _MAX_WINDOW_CONTEXT,
+        )
 
-    windows_text = "\n".join(window_lines)
+    all_raw_selections: list[dict] = []
+    for batch_start in range(0, len(windows), _MAX_WINDOW_CONTEXT):
+        batch_windows = windows[batch_start : batch_start + _MAX_WINDOW_CONTEXT]
 
-    prompt = f"""You are a social media content strategist for crypto Twitter.
+        window_lines = []
+        for i, w in enumerate(batch_windows):
+            dur = w["end"] - w["start"]
+            text = w["text"].replace("\n", " ")
+            if dur > 60.0 and len(text) > 300:
+                snippet = text[:200] + " … [mid] … " + text[-100:]
+            elif len(text) > 300:
+                snippet = text[:300] + "…"
+            else:
+                snippet = text
+            window_lines.append(f"[{i}] {w['start']:.1f}s–{w['end']:.1f}s ({dur:.0f}s): \"{snippet}\"")
+        windows_text = "\n".join(window_lines)
+
+        prompt = f"""You are a social media content strategist for crypto Twitter.
 
 {account_context}
 
@@ -539,23 +563,31 @@ Return a JSON array only. Each element:
 
 Sort by score descending. Return [] if nothing qualifies."""
 
-    max_tokens = min(max(2048, len(windows) * 80), 8192)
-    raw = call_claude_json(prompt, max_tokens=max_tokens)  # budget-exempt: clip pipeline has no org context at eval time
+        max_tokens = min(max(2048, len(batch_windows) * 80), 8192)
+        raw = call_claude_json(prompt, max_tokens=max_tokens)  # budget-exempt: clip pipeline has no org context at eval time
 
-    try:
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-        selections = json.loads(raw)
-        if isinstance(selections, dict) and "clips" in selections:
-            selections = selections["clips"]
-        if not isinstance(selections, list):
-            selections = []
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Claude returned invalid JSON: {e}\nRaw: {raw[:500]}")
+        try:
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+            batch_sels = json.loads(raw)
+            if isinstance(batch_sels, dict) and "clips" in batch_sels:
+                batch_sels = batch_sels["clips"]
+            if not isinstance(batch_sels, list):
+                batch_sels = []
+        except json.JSONDecodeError as e:
+            _logger.warning("Claude batch %d parse failed: %s", batch_start // _MAX_WINDOW_CONTEXT, e)
+            batch_sels = []
 
-    # Sort by score descending
-    selections.sort(key=lambda s: s.get("score", 0), reverse=True)
+        # Offset local indices to absolute positions in windows[]
+        for sel in batch_sels:
+            sel["windows"] = [idx + batch_start for idx in sel.get("windows", [])]
+
+        all_raw_selections.extend(batch_sels)
+
+    # Sort by score descending, then deduplicate overlapping window spans
+    all_raw_selections.sort(key=lambda s: s.get("score", 0), reverse=True)
+    selections = _dedup_selections(all_raw_selections)
 
     # Resolve each selection to short/medium/long variant timestamps
     clips_with_variants = []

@@ -96,6 +96,7 @@ def generate_word_captions(
     words_per_line: int = 3,
     color: str = "yellow",
     highlight_active: bool = True,
+    position: str = "center",
 ) -> None:
     """
     Generate ASS subtitle file from word-level segments.
@@ -104,6 +105,10 @@ def generate_word_captions(
       - word: highlight one word at a time (karaoke effect when highlight_active=True)
       - phrase: group words_per_line words together
       - none: one segment per line
+
+    position:
+      - center: \\an5 (center of frame — default, used for stacked brainrot)
+      - bottom: \\an2 (bottom-center — used for clip-only full 9:16)
     """
     output_path = Path(output_path)
     lines = [_ass_header(color)]
@@ -112,25 +117,27 @@ def generate_word_captions(
         word_segs = _interpolate_words(segments)
         if highlight_active:
             _gen_word_highlight_style(word_segs, lines, words_per_group=4,
-                                      highlight_ass_color=_highlight_color(color))
+                                      highlight_ass_color=_highlight_color(color),
+                                      position=position)
         else:
-            _gen_word_style(word_segs, lines)
+            _gen_word_style(word_segs, lines, position=position)
     elif style == "phrase":
-        _gen_phrase_style(segments, lines, words_per_line)
+        _gen_phrase_style(segments, lines, words_per_line, position=position)
     else:
-        _gen_segment_style(segments, lines)
+        _gen_segment_style(segments, lines, position=position)
 
     output_path.write_text("".join(lines))
 
 
-def _gen_word_style(segments: list[dict], lines: list) -> None:
+def _gen_word_style(segments: list[dict], lines: list, position: str = "center") -> None:
+    an = "2" if position == "bottom" else "5"
     for seg in segments:
         text = seg.get("text", "").strip()
         if not text:
             continue
         start = seg.get("start", 0)
         end = seg.get("end", start + 0.5)
-        lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an5}}{text}\n")
+        lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an{an}}}{text}\n")
 
 
 def _gen_word_highlight_style(
@@ -138,8 +145,10 @@ def _gen_word_highlight_style(
     lines: list,
     words_per_group: int = 3,
     highlight_ass_color: str = "&H00FFFFFF",
+    position: str = "center",
 ) -> None:
     """Karaoke-style: display a chunk of words, active word shown in highlight color."""
+    an = "2" if position == "bottom" else "5"
     words = [s for s in segments if s.get("text", "").strip()]
     for i in range(0, len(words), words_per_group):
         chunk = words[i:i + words_per_group]
@@ -156,10 +165,11 @@ def _gen_word_highlight_style(
                 else:
                     parts.append(text)
             line_text = " ".join(parts)
-            lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an5}}{line_text}\n")
+            lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an{an}}}{line_text}\n")
 
 
-def _gen_phrase_style(segments: list[dict], lines: list, n: int) -> None:
+def _gen_phrase_style(segments: list[dict], lines: list, n: int, position: str = "center") -> None:
+    an = "2" if position == "bottom" else "5"
     words = [s for s in segments if s.get("text", "").strip()]
     for i in range(0, len(words), n):
         chunk = words[i:i + n]
@@ -168,10 +178,11 @@ def _gen_phrase_style(segments: list[dict], lines: list, n: int) -> None:
         start = chunk[0]["start"]
         end = chunk[-1]["end"]
         text = " ".join(w["text"].strip() for w in chunk)
-        lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an5}}{text}\n")
+        lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an{an}}}{text}\n")
 
 
-def _gen_segment_style(segments: list[dict], lines: list) -> None:
+def _gen_segment_style(segments: list[dict], lines: list, position: str = "center") -> None:
+    an = "2" if position == "bottom" else "5"
     # Group into natural sentences/pauses
     buffer: list[dict] = []
     for seg in segments:
@@ -183,11 +194,11 @@ def _gen_segment_style(segments: list[dict], lines: list) -> None:
                 end = buffer[-1]["end"]
                 text = " ".join(s.get("text", "").strip() for s in buffer).strip()
                 if text:
-                    lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an5}}{text}\n")
+                    lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an{an}}}{text}\n")
                 buffer = []
     if buffer:
         start = buffer[0]["start"]
         end = buffer[-1]["end"]
         text = " ".join(s.get("text", "").strip() for s in buffer).strip()
         if text:
-            lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an5}}{text}\n")
+            lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Default,,0,0,0,,{{\\an{an}}}{text}\n")

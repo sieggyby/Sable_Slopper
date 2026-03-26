@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from sable.shared.ffmpeg import extract_clip, stack_videos, require_ffmpeg
+from sable.shared.ffmpeg import extract_clip, stack_videos, encode_clip_only, require_ffmpeg
 from sable.clip.brainrot import pick as pick_brainrot, loop_to_duration
 from sable.clip.captions import generate_word_captions
 from sable.clip.thumbnail import generate_thumbnail
@@ -63,11 +63,13 @@ def assemble_clip(
     dry_run: bool = False,
     platform: str = "twitter",
     highlight_active: bool = True,
+    audio_only: bool = False,
 ) -> dict:
     """
     Full assembly pipeline:
     1. Extract clip segment from source
     2. Pick + loop brainrot video
+    3a. (clip-only) Scale source to full 9:16 — skips steps 2 & 4 brainrot path
     3. Generate ASS captions
     4. Stack + burn captions via FFmpeg
 
@@ -79,8 +81,13 @@ def assemble_clip(
 
     # Resolve caption color (auto-detect if not specified)
     if caption_color is None:
-        sample_time = start + clip_duration / 2
-        resolved_color = _auto_caption_color(source_video, sample_time)
+        if audio_only:
+            # Source is a screen-share — brainrot fills the frame, not the source.
+            # Auto-detecting from the source would return "black" (bright background).
+            resolved_color = "yellow"
+        else:
+            sample_time = start + clip_duration / 2
+            resolved_color = _auto_caption_color(source_video, sample_time)
     else:
         resolved_color = caption_color
 
@@ -92,6 +99,7 @@ def assemble_clip(
         "start": start,
         "end": end,
         "duration": clip_duration,
+        "account": account_handle,
         "brainrot_energy": brainrot_energy,
         "caption_style": caption_style,
         "caption_color": resolved_color,
@@ -99,6 +107,7 @@ def assemble_clip(
         "platform": platform,
         "dry_run": dry_run,
         "highlight_active": highlight_active,
+        "audio_only": audio_only,
         "caption": caption_hint or "",
     }
 
@@ -112,17 +121,19 @@ def assemble_clip(
         source_clip = tmp_path / "source_clip.mp4"
         extract_clip(source_video, source_clip, start, end)
 
-        # 2. Get brainrot
-        brainrot_src = pick_brainrot(energy=brainrot_energy, min_duration=5.0)
-        if brainrot_src is None:
-            raise RuntimeError(
-                "No brainrot videos found in library. "
-                "Add some with: sable clip brainrot add <video> --energy medium"
-            )
-
-        meta["brainrot_source"] = brainrot_src
-        brainrot_looped = tmp_path / "brainrot_looped.mp4"
-        loop_to_duration(brainrot_src, clip_duration, brainrot_looped)
+        # 2. Get brainrot (skipped when brainrot_energy == "none")
+        clip_only = brainrot_energy == "none"
+        brainrot_src = None
+        if not clip_only:
+            brainrot_src = pick_brainrot(energy=brainrot_energy, min_duration=5.0, clip_duration=clip_duration)
+            if brainrot_src is None:
+                raise RuntimeError(
+                    "No brainrot videos found in library. "
+                    "Add some with: sable clip brainrot add <video> --energy medium"
+                )
+            meta["brainrot_source"] = brainrot_src
+            brainrot_looped = tmp_path / "brainrot_looped.mp4"
+            loop_to_duration(brainrot_src, clip_duration, brainrot_looped)
 
         # 3. Captions
         subtitle_path = None
@@ -136,21 +147,40 @@ def assemble_clip(
             if adjusted:
                 subtitle_path = tmp_path / "captions.ass"
                 generate_word_captions(adjusted, subtitle_path, style=caption_style, color=resolved_color,
-                                       highlight_active=highlight_active)
+                                       highlight_active=highlight_active,
+                                       position="bottom" if (clip_only or audio_only) else "center")
 
-        # 4. Stack and encode
+        # 4. Stack/encode
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        stack_videos(
-            source_clip, brainrot_looped, output_path,
-            subtitle_path=subtitle_path,
-            image_overlay_path=image_overlay_path,
-            profile=profile,
-        )
+        if audio_only and not clip_only:
+            from sable.shared.ffmpeg import encode_audio_over_brainrot
+            encode_audio_over_brainrot(
+                source_clip=str(source_clip),
+                brainrot_clip=str(brainrot_looped),
+                output_path=str(output_path),
+                subtitle_path=subtitle_path,
+                image_overlay_path=image_overlay_path,
+                platform=platform,
+            )
+        elif clip_only:
+            encode_clip_only(
+                source_clip, output_path,
+                subtitle_path=subtitle_path,
+                image_overlay_path=image_overlay_path,
+                profile=profile,
+            )
+        else:
+            stack_videos(
+                source_clip, brainrot_looped, output_path,
+                subtitle_path=subtitle_path,
+                image_overlay_path=image_overlay_path,
+                profile=profile,
+            )
 
     # Generate thumbnail
     thumb_path = output_path.with_suffix(".thumbnail.png")
     generate_thumbnail(
-        headline_hint=meta.get("caption", "")[:200],
+        headline_hint=str(meta.get("caption") or "")[:200],
         output_path=thumb_path,
         source_video=source_video,
         clip_start=start,

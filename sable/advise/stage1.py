@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
     """
     from sable.shared.paths import pulse_db_path, meta_db_path, profile_dir
 
-    result = {
+    result: dict[str, Any] = {
         "handle": normalized_handle,
         "org_id": org_id,
         "profile": {},
@@ -90,6 +90,8 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
     pulse_conn = _open_db_readonly(pulse_db_path())
     if pulse_conn:
         result["pulse_available"] = True
+        # Normalize once for all pulse.db queries
+        _norm_handle = normalized_handle if normalized_handle.startswith("@") else f"@{normalized_handle}"
         try:
             rows = pulse_conn.execute(
                 """SELECT p.id, p.text, p.posted_at, p.sable_content_type,
@@ -101,7 +103,7 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                      AND p.posted_at >= datetime('now', '-14 days')
                      AND s.id = (SELECT MAX(s2.id) FROM snapshots s2 WHERE s2.post_id = p.id)
                    ORDER BY p.posted_at DESC""",
-                (normalized_handle,)
+                (_norm_handle,)
             ).fetchall()
 
             posts = []
@@ -123,7 +125,7 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                 """SELECT MAX(s.taken_at) FROM snapshots s
                    JOIN posts p ON s.post_id = p.id
                    WHERE p.account_handle = ?""",
-                (normalized_handle,)
+                (_norm_handle,)
             ).fetchone()[0]
             result["data_freshness"]["pulse_last_track"] = latest_snap
             result["post_freshness"] = latest_snap
@@ -213,7 +215,7 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
     platform_ok = True
     try:
         priority_tags = ["cultist_candidate", "bridge_node", "top_contributor"]
-        entity_rows = []
+        entity_rows: list[Any] = []
         for tag in priority_tags:
             rows = platform_conn.execute(
                 """SELECT DISTINCT e.entity_id, e.display_name, e.status
@@ -255,11 +257,14 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
 
     # --- sable.db: content_items ---
     try:
+        # TODO(sable-tracking): SableTracking must populate posted_at with source publish time.
+        # Until then, COALESCE falls back to created_at (ingestion time).
         cutoff = (_now_utc() - timedelta(days=14)).isoformat()
         content_rows = platform_conn.execute(
-            """SELECT * FROM content_items
-               WHERE org_id = ? AND created_at >= ?
-               ORDER BY created_at DESC""",
+            """SELECT *, COALESCE(posted_at, created_at) AS source_time
+               FROM content_items
+               WHERE org_id = ? AND COALESCE(posted_at, created_at) >= ?
+               ORDER BY COALESCE(posted_at, created_at) DESC""",
             (org_id, cutoff)
         ).fetchall()
 
@@ -275,6 +280,7 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                     "content_type": row["content_type"] or "unknown",
                     "body": row["body"] or "",
                     "created_at": row["created_at"] or "",
+                    "source_time": row["source_time"] or "",
                     "entity_id": row["entity_id"],
                 })
         result["content_items"] = items
@@ -338,13 +344,13 @@ def render_summary(data: dict) -> str:
         lines.append(f"Median engagement: {data.get('median_engagement', 0):.1f}")
         if len(posts) >= 10:
             # Worst format
-            format_eng = {}
+            format_eng: dict[str, Any] = {}
             for p in posts:
                 ft = p["content_type"]
                 if ft not in format_eng:
                     format_eng[ft] = []
                 format_eng[ft].append(p.get("lift", 0))
-            worst = min(format_eng.items(), key=lambda x: sum(x[1]) / len(x[1]), default=(None, []))
+            worst: Any = min(format_eng.items(), key=lambda x: sum(x[1]) / len(x[1]), default=(None, []))
             if worst[0]:
                 avg = sum(worst[1]) / len(worst[1])
                 lines.append(f"Worst format: {worst[0]} — avg lift: {avg:.2f}")

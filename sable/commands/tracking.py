@@ -56,19 +56,23 @@ def tracking_sync(org_id):
             f"{counts.get('handles_added', 0)} handles added"
         )
     except SableError as e:
-        fail_step(conn, step_id, str(e))
+        from sable.platform.errors import redact_error
+        _err = redact_error(str(e))
+        fail_step(conn, step_id, _err)
         conn.execute(
             "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (str(e), job_id)
+            (_err, job_id)
         )
         conn.commit()
         click.echo(f"Error [{e.code}]: {e.message}", err=True)
         sys.exit(1)
     except Exception as e:
-        fail_step(conn, step_id, str(e))
+        from sable.platform.errors import redact_error
+        _err = redact_error(str(e))
+        fail_step(conn, step_id, _err)
         conn.execute(
             "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (str(e), job_id)
+            (_err, job_id)
         )
         conn.commit()
         click.echo(f"Error: {e}", err=True)

@@ -1,6 +1,6 @@
 # Sable Slopper — Schema Inventory
 
-> Research artifact. No implementation planned. Describes every defined schema in the codebase as of 2026-03-22.
+> Research artifact. No implementation planned. Describes every defined schema in the codebase as of 2026-03-23.
 
 ---
 
@@ -8,7 +8,7 @@
 
 The codebase has **three SQLite databases**, **22 Python data models** (dataclasses + Pydantic), **one YAML config schema**, **one YAML watchlist schema**, **one markdown frontmatter schema** (vault notes), and **one YAML character profile schema**.
 
-No formal ORM, no Pydantic-backed database layer. `pulse.db` and `meta.db` use hand-written SQL + dataclasses with no migration runner. `sable.db` uses `sable db migrate` (`sable/db/migrations/001_initial.sql`) via `ensure_schema()`.
+No formal ORM, no Pydantic-backed database layer. `pulse.db` and `meta.db` use hand-written SQL + dataclasses with no migration runner. `sable.db` uses `sable db migrate` (`sable/db/migrations/001_initial.sql`, extended by 002+003) via `ensure_schema()`. SableTracking's `_apply_pending_migrations()` also applies these migrations on sync startup.
 
 ---
 
@@ -424,7 +424,8 @@ orgs:
 ---
 
 ### sable.db — `~/.sable/sable.db`
-**Defined in:** `sable/db/migrations/001_initial.sql` + `sable/platform/db.py`
+**Defined in:** `sable/db/migrations/001_initial.sql` (extended by 002+003) + `sable/platform/db.py`
+**Written by:** `sable/platform/` modules; SableTracking `app/platform_sync.py` (via `sable/platform/` helpers)
 
 | Table              | Purpose                                              |
 |--------------------|------------------------------------------------------|

@@ -33,29 +33,41 @@ Implemented in Sable_Cult_Grader (not in this repo directly):
 - Schema version: 3
 - Tests: 50 passing (`pytest tests/` in Sable_Cult_Grader)
 
-### Round 3 — SableTracking
-Bridges Discord community data into sable.db entity/handle records. Writes sync_runs.
-Marks dependent artifacts stale on new data arrival.
+### Round 3 — SableTracking ✅ COMPLETE (2026-03-23)
+Implemented in SableTracking (not in this repo directly):
+- `app/platform_sync.py`: async `sync_to_platform(org_id)` → entities, handles, tags, content_items (contributors with `identity_status='matched'` → entities; `top_contributor` tag at 5+ reviewed posts; processed content_log rows → content_items UPSERT)
+- `app/platform_sync_runner.py`: local CLI runner (`python -m app.platform_sync_runner tig`)
+- `tests/platform_sync/`: 36 unit tests (conftest, contributors, tags, content_items, infrastructure)
+- `SABLE_CLIENT_ORG_MAP` env var: JSON string mapping client names → org_ids
+- Schema version remains 3
 
 ---
 
-## Phase 2 — Local Web UI
+## Phase 2 — FastAPI Backend (consumed by SableWeb)
 
-**Target: Team + client access without CLI**
+**Target: Expose vault and pulse data to SableWeb's `/ops` surface via a read API**
 
-- `sable serve` — FastAPI server (`sable/serve/`) wrapping the same vault functions
-- Cloudflare Tunnel for external access
-- Role-based access control (see `docs/ROLES.md`)
-- Roles: admin, creator, operator
-- Web views: dashboard, content browser, search, reply suggest, posting log
-- Auth: simple token-based (no OAuth in Phase 2)
-- Local SQLite session store
+SableWeb (Next.js, separate repo) is the single web UI for both operators and clients. Slopper Phase 2 does not produce its own frontend — it produces a FastAPI backend that SableWeb calls. This avoids two auth systems, two deployment models, and duplicated reads from the same databases.
 
-**New files:**
+**What `sable serve` provides:**
 - `sable/serve/app.py` — FastAPI app factory
-- `sable/serve/routes/` — route modules per feature
-- `sable/serve/auth.py` — token auth middleware
-- `sable/vault/permissions.py` — role check implementation (currently stub)
+- `sable/serve/routes/vault.py` — vault inventory, content browser, search, assign
+- `sable/serve/routes/pulse.py` — posting log, pulse snapshots, format performance
+- `sable/serve/routes/meta.py` — topic signals, watchlist, format baselines
+- `sable/serve/auth.py` — token auth middleware (SableWeb authenticates users; this layer validates service-to-service tokens)
+- `sable/vault/permissions.py` — role check implementation (currently stub; roles defined in `docs/ROLES.md`)
+
+**What moves to SableWeb `/ops` (not built here):**
+- Content browser — vault inventory per client: produced, posted, unused
+- Search — frontmatter filter + Claude ranking results displayed in portal
+- Posting log — Sable vs. organic attribution, format performance vs. niche baselines
+- Stale/unused asset flags
+
+**What stays CLI-only for now:**
+- `sable vault suggest` — reply suggestion is generative/interactive; does not fit a read-only portal. Revisit when SableWeb becomes action-capable.
+- `sable vault assign`, `sable vault gaps`, `sable vault export` — operator workflows that are fast enough in CLI
+
+**Deployment:** Cloudflare Tunnel belongs to SableWeb's deployment story, not this repo. `sable serve` runs as a local or Railway service; SableWeb proxies to it.
 
 ---
 

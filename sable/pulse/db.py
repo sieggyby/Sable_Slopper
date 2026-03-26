@@ -87,16 +87,26 @@ def insert_post(
     platform: str = "twitter",
     content_type: str = "unknown",
     content_path: str = "",
-) -> None:
+) -> bool:
+    """Insert a post. Returns True if newly inserted, False if already existed (AR5-24)."""
+    # Normalize handle to always include @ prefix (matches get_posts_for_account convention)
+    account_handle = account_handle if account_handle.startswith("@") else f"@{account_handle}"
     conn = get_conn()
+    existing = conn.execute(
+        "SELECT id FROM posts WHERE id = ?", (post_id,)
+    ).fetchone()
+    if existing:
+        conn.close()
+        return False
     with conn:
         conn.execute(
-            """INSERT OR IGNORE INTO posts
+            """INSERT INTO posts
                (id, account_handle, platform, url, text, posted_at, sable_content_type, sable_content_path)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (post_id, account_handle, platform, url, text, posted_at, content_type, content_path),
         )
     conn.close()
+    return True
 
 
 def insert_snapshot(
@@ -155,6 +165,7 @@ def save_recommendation(handle: str, content: str) -> int:
         "INSERT INTO recommendations (account_handle, content) VALUES (?, ?)",
         (handle, content),
     )
+    assert cursor.lastrowid is not None
     rec_id = cursor.lastrowid
     conn.commit()
     conn.close()

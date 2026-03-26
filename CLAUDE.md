@@ -27,7 +27,10 @@ Five new CLI commands: `sable org`, `sable entity`, `sable job`, `sable db`, `sa
 
 **Cult Doctor (Round 2) is complete.** Cult Grader now writes to sable.db after every run (via `platform_sync.py` in Sable_Cult_Grader). New: DB migrations 002+003 extend `sync_runs` and `diagnostic_runs` schemas. Discord playbook generator (`playbook/`) and operator bot (`bot/`) are live in Sable_Cult_Grader. Schema version is now 3.
 
-**SableTracking (Round 3) is planned but not started.**
+**SableTracking (Round 3) is complete.** `app/platform_sync.py` in SableTracking bridges
+Google Sheets (contributors + content_log) → `sable.db` (entities, handles, tags, content_items).
+Async sync runner, `_apply_pending_migrations()`, `SABLE_CLIENT_ORG_MAP` env var config.
+36 tests passing. Schema version remains 3.
 
 **Phase 2 (local web UI) is planned but not started.**
 - Entry point: `sable serve` → FastAPI app in `sable/serve/`

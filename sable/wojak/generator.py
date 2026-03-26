@@ -81,7 +81,7 @@ Return JSON only:
             }
         return {"layers": [], "caption": "[DRY RUN]"}
 
-    raw = call_claude_json(prompt, max_tokens=512)
+    raw = call_claude_json(prompt, max_tokens=512)  # budget-exempt: wojak generation has no org context
 
     try:
         raw = raw.strip()

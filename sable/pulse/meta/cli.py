@@ -446,6 +446,7 @@ def _run_analysis(org: str, deep: bool, cheap: bool, trends_only: bool, dry_run:
             vault_path=vault_path if vault_available else None,
             analysis=analysis,
             cfg=meta_cfg,
+            org=org,
         )
 
     # Store topic signals
@@ -493,3 +494,45 @@ def _run_analysis(org: str, deep: bool, cheap: bool, trends_only: bool, dry_run:
             degraded=_claude_degraded,
         )
         console.print(f"\n[dim]Report written: {report_path}[/dim]")
+
+    # Anatomy enrichment — silently skip on any error
+    try:
+        from sable.pulse.meta.anatomy import run_anatomy_enrichment
+        n_saved = run_anatomy_enrichment(org)
+        if n_saved:
+            console.print(f"[dim]Anatomy: {n_saved} new viral post(s) analyzed[/dim]")
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Digest command
+# ---------------------------------------------------------------------------
+
+@meta_group.command("digest")
+@click.option("--org", required=True, help="Org slug (e.g. tig)")
+@click.option("--period", "period_days", default=7, show_default=True,
+              help="Look-back window in days.")
+@click.option("--top", "top_n", default=10, show_default=True,
+              help="Maximum posts to include.")
+@click.option("--save", "save_to_vault", is_flag=True, default=False,
+              help="Write digest to vault as a report note.")
+def meta_digest(org: str, period_days: int, top_n: int, save_to_vault: bool) -> None:
+    """Generate a watchlist intelligence digest of top-lift posts."""
+    from sable.pulse.meta.digest import generate_digest, render_digest, save_digest_to_vault
+    from sable.pulse.meta import db as meta_db
+    from sable.shared.paths import meta_db_path, vault_dir
+
+    meta_db.migrate()
+    report = generate_digest(
+        org=org,
+        period_days=period_days,
+        top_n=top_n,
+        meta_db_path=meta_db_path(),
+        vault_root=vault_dir(org) if save_to_vault else None,
+    )
+    console.print(render_digest(report))
+    if save_to_vault:
+        from sable.shared.paths import vault_dir as _vd
+        saved_path = save_digest_to_vault(report, _vd(org))
+        console.print(f"\n[dim]Saved: {saved_path}[/dim]")

@@ -70,7 +70,7 @@ def load_font(style: str = "classic", size: int = 60) -> ImageFont.FreeTypeFont:
         pass
 
     # Last resort: default bitmap font (very small, no size control)
-    return ImageFont.load_default()
+    return ImageFont.load_default()  # type: ignore[return-value]
 
 
 def find_font_size(

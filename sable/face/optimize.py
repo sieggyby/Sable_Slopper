@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 def has_face(image_path: str | Path) -> bool:
@@ -48,7 +48,7 @@ def dedup_frames(frame_paths: list[Path], threshold: int = 10) -> list[Path]:
     except ImportError:
         return frame_paths
 
-    seen_hashes = []
+    seen_hashes: list[Any] = []
     result = []
 
     for path in frame_paths:

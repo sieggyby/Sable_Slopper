@@ -86,6 +86,7 @@ def generate_script(
         system += _QUIRKS_BLOCK.format(quirk_lines=quirk_lines)
 
     # Distill long background docs to a tight factual brief before sending to the writer
+    background_brief: str | None
     if background and len(background.split()) > 200:
         background_brief = _distill_background(client, background, config.claude_model)
     else:

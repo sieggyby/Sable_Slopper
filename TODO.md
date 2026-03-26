@@ -1,5 +1,23 @@
 # TODO
 
+---
+
+## Strategic Direction (as of 2026-03-25)
+
+Slopper is the content production engine. In the current 6–12 month services phase, the focus is on delivering high-quality content for existing and incoming clients — not building a general-purpose social media product.
+
+**Current and incoming clients needing Slopper profiles:**
+- **TIG Foundation** — active (profile should exist or be created)
+- **Multisynq** — pseudo-client; profile prep useful
+- **PSY Protocol** — best current lead; prepare `~/.sable/profiles/@psy_handle/` in advance so onboarding is fast when signed
+- **Flow L1** — next lead after PSY; profile prep when outreach begins
+
+**Phase 2 (local web UI) remains deferred.** It is not needed for the services phase — CLI is sufficient for Sable operators. Revisit when client volume makes CLI management impractical (roughly 5+ active accounts).
+
+**What not to build:** Any multi-tenant, self-serve, or externally accessible content product. Slopper stays internal tooling for this phase.
+
+---
+
 ## Audit Remediation — AR-5
 
 Sourced from `codit.md` full-codebase audit, then refreshed against the live code on
@@ -13,15 +31,16 @@ This file now mixes:
 
 Do not assume every item below is still open. Use the **Current Open Queue** first.
 
-Validation snapshot from the 2026-03-24 reconciliation pass:
-- `./.venv/bin/python -m pytest -q` → `205 passed`
-- `./.venv/bin/ruff check .` → `28` violations
-- `./.venv/bin/mypy sable` → `96` errors in `27` files
-
-Validation snapshot after AR-5 batch 2 (2026-03-24):
-- `./.venv/bin/python -m pytest -q` → `216 passed`
+Validation snapshot (current):
+- `./.venv/bin/python -m pytest -q` → `359 passed`
 - `./.venv/bin/ruff check .` → `0` violations
-- `./.venv/bin/mypy sable` → `102` errors in `27` files (all pre-existing; no new errors introduced)
+- `./.venv/bin/mypy sable` → `0` errors
+
+Historical note kept for trend only:
+- after FEATURE-3 Slice A (2026-03-24): `274 passed / 0 ruff / 98 mypy in 25 files`
+- 2026-03-24 maintainer audit refresh: `216 passed / 0 ruff / 102 mypy in 27 files`
+- earlier 2026-03-24 reconciliation pass was `205 passed / 28 ruff violations / 96 mypy errors`
+- after FEATURE-8 (2026-03-25): `359 passed / 0 ruff / 0 mypy`
 
 ---
 
@@ -29,7 +48,7 @@ Validation snapshot after AR-5 batch 2 (2026-03-24):
 
 ### What is actually healthy
 
-- Core test suite is green: `205` tests passing.
+- Core test suite is green: `359` tests passing.
 - Several former criticals are now genuinely fixed:
   - `pulse/meta` zero-history `None`-lift aggregation hardening
   - vault `_PARTIAL_SYNC` coverage through the pulse report step
@@ -44,19 +63,34 @@ Validation snapshot after AR-5 batch 2 (2026-03-24):
   - Whisper model caching
   - brainrot loop cap
   - timezone sweep away from `utcnow()`
+  - `advise/stage1.py` pulse handle contract — both queries now use `@handle` form
+  - `recommender.py` / `cli.py` `posted_by` fatigue — `org` now threaded from CLI through `build_recommendations()` to `compute_priority()`; fatigue fires correctly on real vault notes
+  - `vault/platform_sync.py` `_build_entity_note()` — `source_time` used for filter and display (not `created_at`)
+  - `vault/search.py` large-result path — `(note, score)` tuples unwrapped before `claude_rank()` (line 60)
+  - `clip/selector.py` first-stage batching — hard truncation replaced with deterministic batched loop + `_dedup_selections()`
 
 ### What is still structurally weak
 
-- cross-repo tracking freshness / async contract remains unresolved.
-  - strategy + vault readers still use ingestion-time `created_at`
-  - this repo still cannot prove the Tracking sync boundary contract from local code alone
+- SableTracking cross-repo contract not yet confirmed:
+  - `sable/commands/tracking.py` assumes `sync_to_platform()` is sync; needs confirmation
+  - `content_items.posted_at` as canonical source-time field needs cross-repo sign-off
+  - once confirmed, `advise/stage1.py` content_items query and ordering can switch to `posted_at`
 - AI spend / prompt-size controls are still uneven outside the org-gated advise/meta flows.
-  - selector prompt size is still unbounded before the Claude call
-  - `sable/character_explainer/script.py` budget-exempt annotation still missing
-- validation is not at a full maintainer-clean baseline.
-  - tests green (216 passing)
-  - lint clean (ruff 0 violations)
-  - mypy red (102 pre-existing errors; no batch-2 regressions)
+  - non-org Claude call sites remain intentionally budget-exempt, so spend is still not observable
+    in a single place for content-generation flows
+- tests and types are not yet aligned with the real contracts.
+  - some tests still encode stale producer/consumer schemas
+  - lint is green, and mypy is clean: `0` errors
+
+**Resolved in AR-5 maintainer-review fixes + follow-up (2026-03-24):**
+- `advise/stage1.py` freshness query: extracted `_norm_handle`; both pulse.db queries now use normalized `@handle` form
+- `pulse/meta/recommender.py` `compute_priority()`: added `org` parameter; removed silent `content.get("org", "")` fallback that always returned `""` from real vault notes — caller must supply org explicitly
+- `pulse/meta/recommender.py` `build_recommendations()`: added `org` parameter, threaded through to `compute_priority()`
+- `pulse/meta/cli.py` `_run_analysis()`: added `org=org` to `build_recommendations()` call — fatigue now fires on live CLI path
+- `vault/platform_sync.py` `_build_entity_note()`: filter and display now use `source_time` (with `created_at` fallback) instead of `created_at` alone
+- `sable/clip/selector.py`: replaced hard truncation at `_MAX_WINDOW_CONTEXT` with deterministic batched loop; added `_dedup_selections()` to merge overlapping window spans across batches
+- 7 new tests added (stage1 handle normalization, recommender org parameter × 2, recommender `build_recommendations` integration, platform_sync source_time × 2, selector batch count and index offset × 2, `_run_analysis()` CLI boundary regression)
+- Validation: `233 passed · 0 ruff · 101 mypy errors in 26 files` (was 226 passed / 0 ruff / 101 mypy)
 
 **Resolved in AR-5 batch 2 (2026-03-24):**
 - `advise/generate.py` partial-write safety: temp→swap→restore pattern implemented
@@ -72,11 +106,12 @@ Validation snapshot after AR-5 batch 2 (2026-03-24):
 
 ### How to sequence work
 
-1. Fix output-trustworthiness defects before feature work.
-2. Eliminate brief artifact partial writes.
-3. Settle the SableTracking freshness / sync contract.
-4. Tighten AI spend / prompt-size policy and explicit exemption comments.
-5. Only then spend time on lower-signal cleanup or new capability work.
+1. Fix cross-tool contract bugs and output-trustworthiness defects before any feature work.
+2. Align tests with the live producer/consumer schemas while fixing those bugs.
+3. Settle the SableTracking freshness / sync contract and large-search retrieval bug.
+4. Tighten prompt-size / spend controls and run the focused secret-scrubbing audit.
+5. Keep touched-file mypy debt from spreading; reduce it in the glue code you touch.
+6. Only then start staged feature work in the order defined later in this file.
 
 ---
 
@@ -119,160 +154,94 @@ feature/backlog work unless a new live code inspection proves otherwise.
 
 ---
 
-## Current Open Queue (2026-03-24 Reconciled Super List)
+## Current Open Queue (2026-03-24 Maintainer Audit Refresh)
 
-Reconciled against:
-- the original AR-5 refresh in this file
-- the later Claude audit pasted into chat
-- the live code after the latest fixes
+This section supersedes the older queue ordering. Treat it as the source of truth for Claude.
 
-Only items below remain open after direct source re-read.
-The following findings were valid but are now resolved in current code and moved to history:
+**Execution contract for Claude:**
+- **Stage 0 is fully closed** (items 1–4 all resolved with tests; see "Recently resolved" below)
+- **Stage 1 item 5 is closed** (selector first-stage batching resolved)
+- **FEATURE-3 (`sable pulse account`) is fully shipped** — all 3 slices landed 2026-03-24 ahead of the item 6/7 gate; items 6 and 7 remain open
+- **FEATURE-1 (`sable write`) fully shipped** — Slices A, B, C complete (2026-03-25)
+- **Items 6, 7, 8 closed (2026-03-25). FEATURE-2 unblocked.**
+- do one queue item per patch set where practical
+- add failing tests first for the specific contract or edge case being fixed
+- rerun repo-wide validation after each patch set:
+  - `./.venv/bin/python -m pytest -q`
+  - `./.venv/bin/ruff check .`
+  - `./.venv/bin/mypy sable`
+- update this TODO entry after each completed patch with exact validation results
+
+**Recently resolved; keep closed unless they regress:**
 - `pulse/meta` downstream `None`-lift crash in `weighted_mean_lift()` / `assess_format_quality()`
 - vault pulse-report partial-sync gap in `platform_sync.py`
 - `advise/stage2.py` wrapper bypass and `pulse/meta/analyzer.py` missing `org_id`
-- `advise/generate.py` partial-write safety (items 1 — RESOLVED AR-5 batch 2)
-- `advise/stage1.py` silent parse fallbacks (item 2 — RESOLVED AR-5 batch 2)
-- `advise/generate.py` deterministic data caveats block (item 3 — RESOLVED AR-5 batch 2)
-- `tracker.py` insert_post bool not captured (FOLLOW-UP-2 — RESOLVED AR-5 batch 2)
-- ruff lint violations: 28 → 0 (FOLLOW-UP-3 — RESOLVED AR-5 batch 2)
-- missing T1/T2/T3/T4 tests (FOLLOW-UP-5 — RESOLVED AR-5 batch 2)
+- `advise/generate.py` partial-write safety
+- `advise/stage1.py` silent parse fallbacks + pulse handle contract (`@handle` normalization in both queries)
+- `advise/generate.py` deterministic data caveats block
+- `tracker.py` insert_post bool not captured
+- repo-wide ruff baseline: `28` violations → `0`
+- missing batch-2 regression tests (all landed)
+- **Stage 0 item 1** — `advise/stage1.py` pulse handle drift: both queries now use `_norm_handle` (`@handle` form); tests updated to use `@alice`; `test_pulse_last_track_populates_for_at_handle` added
+- **Stage 0 item 2** — `posted_by` fatigue contract: `compute_priority()` now takes `org` parameter; `build_recommendations()` threads it through; `pulse/meta/cli.py` `_run_analysis()` passes `org=org`; recommender no longer reads stale `content.get(“org”, “”)`; `has_similar_recent_post` and `get_days_since_last_post` already used `posted_at` correctly; integration test `test_build_recommendations_threads_org_for_fatigue` added
+- **Stage 0 item 3** — SableTracking source-time local fixes: `vault/platform_sync.py` `_build_entity_note()` now uses `source_time` for filter+display (with `created_at` fallback); `test_build_entity_note_*` tests added; cross-repo contract confirmation for `sync_to_platform()` sync/async and `posted_at` canonicity still pending (tracked in “structurally weak” section above)
+- **Stage 0 item 4** — `vault/search.py` large-result path: `top50_notes` already unwraps tuples at line 60 — confirmed fixed
+- **Stage 1 item 5** — `clip/selector.py` first-stage batching: hard truncation replaced with batched loop + `_dedup_selections()`; tests added for batch count and index offset
 
-### 1. CRIT · `advise/generate.py` partial-write safety — RESOLVED (AR-5 batch 2)
+### Stage 1 — hardening and debt reduction before feature work
 
-Temp→swap→restore pattern with backup file implemented. Tests added covering DB failure
-with and without prior file on disk. Marked resolved; keep notes in history section.
+### 6. MED · Explicit log/error secret scrubbing audit ✓ **Done**
 
-### 2. HIGH · `advise/stage1.py` silent parse fallbacks — RESOLVED (AR-5 batch 2)
+No confirmed live key leak found in the current audit, but this remains a valid hardening task.
+Do it **after** the correctness blockers above and **before** shipping new features.
 
-All 3 bare-except blocks now emit `logger.warning(...)` with `org_id` context, set
-appropriate degraded flags, and append to `failed_sources`. Tests in
-`tests/advise/test_stage1.py` cover all 3 paths. Marked resolved.
-
-### 3. HIGH · Advise brief deterministic data caveats block — RESOLVED (AR-5 batch 2)
-
-`generate.py` now derives a `## Data Caveats` block from `data_quality`, `meta_stale`,
-and `failed_sources` and prepends it to `brief_body` before file write. Tests in
-`tests/advise/test_advise.py` verify presence/absence of the block. Marked resolved.
-
-### 4. HIGH · SableTracking contract alignment: async wrapper + source-time freshness
-
-**Files:** `sable/commands/tracking.py`, `sable/advise/stage1.py`,
-`sable/vault/platform_sync.py`
-
-There are two related cross-repo contract issues with SableTracking:
-
-1. **Wrapper contract verification:** Slopper currently calls `sync_to_platform(org_id)` as if
-   it were synchronous in `sable/commands/tracking.py`. The implementation lives in the
-   external Tracking repo (`app.platform_sync`), so this repo cannot prove alone whether the
-   function is sync or async. If Tracking currently exports `async def sync_to_platform(...)`,
-   the Slopper wrapper is wrong and needs a local sync shim (`asyncio.run(...)` or equivalent).
-
-2. **Freshness semantics:** Slopper currently treats `content_items.created_at` as the source
-   content timestamp in strategy/vault consumers. That is wrong for synced or backfilled
-   tracker content, because local ingestion time can be much newer than the source post time.
-   Confirmed current readers:
-   - `sable/advise/stage1.py` filters and orders tracker content by `created_at`
-   - `sable/vault/platform_sync.py` orders and displays tracker content by `created_at`
-
-**Required coordination with Tracking:**
-- agree on the source-time field for tracker content, e.g.:
-  - a first-class `published_at` / `source_created_at` column, or
-  - a stable key in `metadata_json`
-- clarify whether `created_at` means ingestion time only
-- clarify whether `sync_to_platform()` is sync or async at the contract boundary
-
-**Slopper-side follow-up once the contract is settled:**
-- update the tracking CLI wrapper if Tracking exports an async sync entrypoint
-- update strategy/vault readers to use the agreed source-time field for cutoff/order/display
-- keep `created_at` for local ingestion/audit semantics only
-- extend consumers to ingest richer tracker metadata where useful:
-  - `url`
-  - `platform`
-  - other source metadata beyond `body`/summary
-
-**Tests:**
-- wrapper test: if `sync_to_platform()` is async, CLI still completes and records counts
-- tracker freshness test: backfilled content with old `published_at` but new local `created_at`
-  does not appear artificially fresh in `assemble_input()`
-- vault sync test: tracker items are ordered/displayed by source publish time, not ingestion time
-- metadata propagation test: once contract lands, `url` / `platform` survive into strategy or
-  vault consumers without relying on ad hoc JSON parsing at every call site
-
-### 5. HIGH · Explicit log/error secret scrubbing audit
-
-This repo does not currently have a confirmed runtime secret leak matching the external audit,
-but the risk class is valid here and still under-specified. We already require `.env`
-gitignore and no secret interpolation in outputs; we do **not** yet have a focused pass on:
-- exception logging in platform / vault / advise / pulse-meta flows
-- whether upstream client/library exceptions can embed auth material
-- whether any persisted local logs or reports could capture keys from config/env-derived state
-
-**Scope for the next audit/fix pass:**
-- search all explicit logging/traceback persistence paths
-- confirm that no config dict, header dict, or client repr with keys/tokens is persisted
-- add redaction where runtime error persistence exists
+**Scope:**
+- search explicit exception logging / persisted error paths in platform, vault, advise,
+  pulse-meta, and any future web/UI entrypoints
+- confirm upstream exceptions cannot persist config dicts, auth headers, or client reprs
+- add a single redaction helper if any persistence path is found to be risky
 
 **Tests / checks:**
 - synthetic exception containing `ANTHROPIC_API_KEY=test-secret` is redacted before persistence
-- no generated artifact or error log path stores raw key-looking values
+- no generated artifact or persisted log path stores key-looking strings
 
-### 6. MED · AI spend / prompt-size controls remain uneven outside the org-gated paths
+### 7. MED · Touched-file mypy cleanup ✓ **Done**
 
-**Files:** `sable/clip/selector.py`, `sable/clip/thumbnail.py`,
-`sable/character_explainer/script.py`, `sable/shared/api.py`
+Repo-wide state at time this item closed (historical — see validation snapshot at top of file):
+- `pytest` → `304 passed`
+- `ruff` → `0` violations
+- `mypy` → `97` errors in `24` files (jobs.py fix reduced touched-file errors to 0; baseline unchanged)
 
-Confirmed current gaps:
-- `select_clips()` builds `windows_text` from **all** detected windows before any cap
-- `_evaluate_variants_batch()` evaluates **all** candidate clips before `max_clips` trims
-  the final result
-- some intentionally org-exempt Claude call sites still lack an explicit
-  `# budget-exempt:` comment:
-  - `sable/clip/thumbnail.py`
-  - `sable/character_explainer/script.py`
+**Required discipline for Claude:**
+- no patch should claim “clean” unless the repo-wide commands above support that claim
+- reduce mypy errors only in files touched during items 6–7 (do not touch-and-type random modules)
+- priority files if touched:
+  - `sable/pulse/meta/cli.py` (touched by CLI regression test)
+  - `sable/clip/selector.py` (touched by selector batching)
+  - any new helper introduced during item 6 secret scrubbing
 
-**Fix strategy:**
-- add a pre-LLM cap or batching rule for the initial window-selection prompt
-  (`max_windows_per_llm_batch` or equivalent)
-- add a pre-variant-eval cap or batching rule so `max_clips` is not the first limit applied
-  after all variants have already been sent to Claude
-- merge / de-dupe batch results before final scoring
-- annotate every intentionally org-exempt Claude call site with a consistent reason, or pass
-  `org_id` where the call is actually org-scoped
-
-**Tests:**
-- a transcript with 40+ windows is split into bounded-size LLM batches rather than one
-  monolithic prompt
-- variant-eval prompt size is bounded before the final `max_clips` trim
-- targeted grep/test proves each non-org Claude call site is either explicitly budget-exempt
-  or passes `org_id`
-
-### 7. MED · Validation debt is now a tracked backlog, not a green baseline
-
-The repo is test-green but not lint-clean or type-clean. Current repo-wide snapshot:
-- `pytest` → `205 passed`
-- `ruff` → `28` violations
-- `mypy` → `96` errors in `27` files
-
-Keep using repo-wide commands as the source of truth. No batch should be described as “clean”
-unless those repo-wide commands also exit `0`.
-
-### 8. LOW · `pulse/linker.py::auto_link_posts()` is still a feature-shaped stub
+### 8. LOW · `pulse/linker.py::auto_link_posts()` is still a feature-shaped stub ✓ **Done**
 
 **File:** `sable/pulse/linker.py`
 
-`auto_link_posts()` still fetches unlinked DB rows and then always returns `[]` with a comment
-that manual linking is the primary path. This is not a production break, but it is misleading
-maintainer-facing surface area: it looks like a real auto-linker while behaving as a permanent
-stub.
+`auto_link_posts()` still looks like a live auto-linker while behaving as a permanent no-op.
+This is not urgent, but it is misleading surface area.
 
 **Fix options:**
-- either implement a minimal caption-similarity linker
-- or rename/re-scope the function / CLI surface so the placeholder nature is explicit
+- keep it explicit no-op and document/test that state
+- or implement a truly minimal linker only after the bugfix stages above are done
 
 **Tests:**
-- if kept as placeholder, test and doc should state that it is intentionally no-op
-- if implemented, add duplicate / threshold / false-positive tests before exposing it as live
+- if kept as placeholder, test and docs should say it is intentionally no-op
+- if implemented later, add false-positive / threshold / duplicate tests before exposing it
+
+### Feature Gate
+
+No `FEATURE-*` work begins until:
+1. Stage 0 items are closed with tests. ✓ **Done** — all four items resolved.
+2. Stage 1 item 5 is closed. ✓ **Done** — selector first-stage batching resolved.
+3. Stage 1 items 6 and 7 are closed. ✓ **Done.** (secret scrubbing audit + mypy debt pass, 2026-03-25). FEATURE-2 unblocked.
+4. Repo-wide validation still reads `pytest green / ruff 0 / mypy no worse than current baseline`.
 
 ### Resolved / Obsolete From The Original AR-5 Draft
 
@@ -430,7 +399,7 @@ Replace both `write_text()` calls with `atomic_write()`.
 ### P5 · Silent fallback in reporting paths (CC-1 / MED-4 / MED-5)
 
 **Files:** `sable/advise/stage1.py`, `sable/vault/search.py`, `sable/vault/sync.py`,
-`sable/platform/cli.py`, `sable/pulse/meta/cli.py`
+`sable/platform/cli.py`, `sable/pulse/meta/cli.py`, `sable/pulse/account_report.py`
 
 **Issue:** Many paths do `except Exception: result[...] = []` with no log. Real DB failures
 look identical to "no data yet."
@@ -448,14 +417,13 @@ except Exception as e:
     result.setdefault("failed_sources", []).append("pulse")
 ```
 
-Priority order within this item:
+**`pulse/meta/cli.py`** — ✓ done (fallback analysis frontmatter/banner landed)
+
+Remaining open paths (priority order):
 1. `advise/stage1.py` — four DB read blocks (86–129, 156–199, 243–269, 270–279)
 2. `vault/search.py` — Claude→keyword fallback
 3. `vault/sync.py` — lines 251–265
 4. `platform/cli.py` — lines 101–129
-
-`pulse/meta/cli.py` fallback analysis frontmatter/banner has already landed. Remaining work
-under this item is the other silent fallback paths listed above.
 
 ---
 
@@ -521,17 +489,10 @@ Fix — choose one of these explicitly before implementation:
 Do not implement persistence without also implementing a schema-level way to distinguish
 watchlist tweets from outsider tweets.
 
-**AR5-11 · Corrupted artifact cache rows loop forever — `generate.py:31–61` (HIGH-6)**
-Fix: On JSON parse failure for a cache row, mark it stale so the stale=0 filter excludes
-it on the next cache lookup:
-```python
-except (json.JSONDecodeError, KeyError):
-    conn.execute("UPDATE artifacts SET stale=1 WHERE artifact_id=?", (row["artifact_id"],))
-    continue
-```
-Adding a separate `corrupt` column is an option if distinguishing "stale" (outdated) from
-"unreadable" (malformed JSON) matters for reporting, but requires a migration and is heavier
-than necessary if the product doesn't need that distinction.
+**AR5-11 · Corrupted artifact cache rows loop forever — `generate.py:31–61` (HIGH-6) — RESOLVED**
+Fix landed: `except (json.JSONDecodeError, KeyError)` block now executes
+`conn.execute("UPDATE artifacts SET stale=1 WHERE artifact_id=?", (row["artifact_id"],))`
+and `continue`. Corrupt rows are marked stale and skipped on subsequent lookups.
 
 **AR5-12 · No LIMIT on entity sync query — `platform_sync.py:~312` (HIGH-7) — RESOLVED**
 Fix: Paginate with `LIMIT 500 OFFSET n` loop. Write files per page before loading the next.
@@ -815,16 +776,15 @@ AR-1 through AR-4 were implemented. Two items were deferred at that time:
 
 ## Platform Layer — Upcoming Rounds
 
-### Round 2 — Cult Doctor (community health grader) (2026-03-23)
-- Read `sable.db` entities/tags per org to produce health scores
-- Write `diagnostic_runs` rows + `artifacts` (playbook, strategy brief)
-- CLI: `sable cult-doctor run <org_id>`
+### Round 2 — Cult Doctor (community health grader) ✓ **Complete** (2026-03-23)
+- Cult Grader writes to sable.db after every run via `platform_sync.py` in Sable_Cult_Grader
+- Discord playbook generator (`playbook/`) and operator bot (`bot/`) live in Sable_Cult_Grader
+- Schema version 3; DB migrations 002+003 extend `sync_runs` and `diagnostic_runs`
 
-### Round 3 — SableTracking integration (2026-03-23)
-- Bridge SableTracking Discord data → `sable.db` entities + handles
-- Write `sync_runs` rows per ingest
-- Trigger `mark_artifacts_stale()` on new data arrival
-- CLI: `sable tracking sync <org_id>`
+### Round 3 — SableTracking integration ✓ **Complete** (2026-03-23)
+- `app/platform_sync.py` bridges Google Sheets (contributors + content_log) → `sable.db`
+- Async sync runner, `_apply_pending_migrations()`, `SABLE_CLIENT_ORG_MAP` env var config
+- 36 tests passing; schema version remains 3
 
 ---
 
@@ -849,3 +809,1552 @@ Extracted from vault spec. Not implemented in Phase 1 CLI.
   - Multi-tenant auth, vault-as-API, real-time enrichment queue (Celery/Redis)
   - Automated gap-fill suggestions triggered by pulse performance data
   - Client portal with read-only dashboard + export access
+
+---
+
+## New Feature Suite — Content Intelligence Loop
+
+These features close the gap between format intelligence (what the niche rewards) and content
+production (what the account outputs). All build on existing infrastructure in pulse.db,
+meta.db, sable.db, the vault, roster profiles, and the `call_claude()` wrapper.
+
+## Feature Readiness Review (2026-03-24)
+
+No feature below should start until the **Feature Gate** above is satisfied.
+
+### Global spec corrections Claude must apply before implementing any feature below
+
+- command registration happens in `sable/cli.py`, not `sable/commands/__init__.py`
+- top-level commands belong in `sable/cli.py`; nested subcommands belong in the owning group
+  file such as `sable/pulse/cli.py` or `sable/pulse/meta/cli.py`
+- handle-scoped commands should call `require_account()` first and default `--org` from the
+  roster account when `--org` is omitted
+- `build_account_context()` takes an `Account` object, not a bare handle string
+- `pulse.db` uses `posts.id` and `snapshots.id`; sample SQL below that mentions `post_id`
+  or `snapshot_id` is conceptual and must be translated to the live schema
+- `pulse.db.posts.sable_content_type` is only a coarse production hint (`clip`, `meme`,
+  `faceswap`, `text`, `unknown`, plus occasional tool-specific spillover). It is not a
+  full format taxonomy and must be mapped to pulse-meta format buckets explicitly
+- `meta.db.format_baselines` stores baseline aggregates only; it does **not** store
+  `current_lift`, `status`, `momentum`, or `confidence_grade`
+  - any feature needing “current niche trend” must reuse existing pulse-meta trend helpers or
+    add a small adapter around the current scan + baselines logic
+- `load_all_notes()` returns a list of frontmatter dicts with synthetic `_note_path`
+  fields; it does **not** return `(note, path)` tuples
+- `load_all_notes()` only scans `vault/content/**/*.md`
+  - anything written under `digests/`, `playbooks/`, or other top-level vault folders will
+    **not** be visible to `vault search` unless the loader and CLI filters are deliberately
+    widened with tests
+- vault note lifecycle is currently represented by `posted_by` and `suggested_for`
+  - there is no canonical `status='posted'` field on content notes today
+- content note freshness comes from `assembled_at`; there is no canonical `created_at`
+  frontmatter field on synced content notes today
+- any feature that reasons about tracker freshness must use the fixed source-time contract
+  from Current Open Queue item 3, not `content_items.created_at`
+- `search_vault()` is called as
+  `search_vault(query, vault_path, org, filters=SearchFilters(...), config=...)`
+  - it does **not** accept bare keyword args like `depth="shallow"`
+- config access should use `sable.config.get(...)` / `require_key(...)`, not a nonexistent
+  `get_config()` helper
+
+### Staged feature order after bug fixes
+
+1. **Stage 2:** `FEATURE-3` (`sable pulse account`) ✓ **Complete** (2026-03-24)
+2. **Stage 3:** `FEATURE-1` (`sable write`) ✓ **Complete** (2026-03-25)
+   - `FEATURE-2` (`sable score`) ✓ **Complete** (2026-03-25)
+3. **Stage 4:** `FEATURE-4` (viral anatomy archive), then `FEATURE-6` (watchlist digest) — **not yet started**
+   - best implemented as a pair; digest should consume cached anatomy
+   - spec maturity: medium-high
+4. **Stage 5 (actual delivery order):** `FEATURE-8` (`sable diagnose`) ✓ **Complete** (2026-03-25) — shipped before Stage 4
+5. **Stage 6:** `FEATURE-9` (`sable pulse attribution`) — gate cleared, ready to implement
+6. **Stage 7:** `FEATURE-7` (`sable calendar`) — spec rewrite required before implementation
+
+### Feature delivery rules
+
+- land **one feature at a time** after the Feature Gate is satisfied
+- each feature should be split into **2–4 patch sets**, not one-shot:
+  1. schema/helpers/contracts + failing tests
+  2. core computation/rendering
+  3. CLI wiring + persistence/integration
+  4. only then default-on automation or extra polish
+- if a feature adds a new `meta.db` table, the **first** patch set should land only:
+  - `_SCHEMA` update
+  - DB helper functions
+  - migration/idempotence tests
+- do **not** mix new feature work with unresolved Stage 0 / Stage 1 bugfix items
+- after each patch set:
+  - rerun `pytest`, `ruff`, and `mypy`
+  - update this TODO with what landed, what is still blocked, and the exact validation output
+
+### Per-feature completeness / readiness summary
+
+- `FEATURE-3` is **Complete (2026-03-24)**. All slices A+B+C landed.
+- `FEATURE-1` is **Complete (2026-03-25)**. Slices A, B, C landed.
+- `FEATURE-2` is **Complete (2026-03-25)**.
+- `FEATURE-4` **Not started.** Cleanest spec of remaining features.
+  - isolated data model
+  - clear cost ceiling
+  - low dependency surface beyond pulse-meta and vault write helpers
+- `FEATURE-6` is **good only after Feature 4 lands**.
+  - otherwise it degenerates into extra uncached Claude calls
+- `FEATURE-7` is **not ready to implement as written**.
+  - it assumes nonexistent vault `status` fields
+  - it needs real inventory semantics based on `posted_by` / `suggested_for`
+  - the spec needs a ground-up rewrite against the live vault note shape before implementation
+- `FEATURE-8` (`sable diagnose`) is **Complete (2026-03-25)**. 359 passed · 0 ruff · 0 mypy.
+  - `assembled_at`, `posted_by`, and `topic_signals` all confirmed present in live data.
+
+**Prerequisite reading before implementing any feature:**
+- `sable/pulse/meta/fingerprint.py` — `classify_format()` and `_normalise_tweet()`
+- `sable/pulse/meta/normalize.py` — `compute_author_lift()`, `_compute_fallback()`, `weighted_mean_lift()`
+- `sable/pulse/meta/db.py` — `scanned_tweets` schema, `format_baselines` schema, `upsert_format_baseline()`
+- `sable/pulse/db.py` — `posts` + `snapshots` schema, `insert_post()`
+- `sable/shared/api.py` — `call_claude()`, `call_claude_json()`, `build_account_context()`
+- `sable/vault/notes.py` — `write_note()`, `read_note()`, `load_all_notes()`
+- `sable/vault/search.py` — `search_vault()`, `claude_rank()`
+- `sable/roster/manager.py` — `load_roster()`, `require_account()`, `roster_path()`
+- `sable/shared/paths.py` — `sable_home()`, `vault_dir()`, `meta_db_path()`, `pulse_db_path()`
+
+**Validation gates after each feature:**
+```
+./.venv/bin/python -m pytest -q
+./.venv/bin/ruff check .
+./.venv/bin/mypy sable
+```
+
+All three must exit 0. mypy is currently clean; no regressions allowed.
+
+---
+
+### FEATURE-3 · `sable pulse account` — Account-Level Format Lift
+
+**Priority:** Implement first. Required by Feature 7 (calendar).
+**Status:** All slices complete (2026-03-24). Slice A + B + C landed.
+**Completeness:** Medium-low. Valuable feature, but the original draft had real schema drift.
+**Hard blockers:** Current Open Queue items 1 and 3 — both resolved.
+
+**Implementation slices (do in order):**
+1. **Slice A — live data contract + tests** ✓ **Done**
+   - `sable/pulse/account_report.py`: `FormatLiftEntry`, `AccountFormatReport`, `_classify_post`,
+     `_compute_account_baseline`, `_engagement_score`, `_divergence_signal`, `_load_posts_with_snapshots`,
+     `_load_follower_count`, `compute_account_format_lift`, `render_account_report`
+   - `tests/pulse/test_account_report.py`: 35 tests — empty history, missing snapshots, org fallback,
+     classify_post mapping, baseline computation, lift formula, window filtering, handle normalization,
+     render output
+   - `_load_niche_lifts` stubbed to return `{}` — full meta.db trend pipeline is Slice B
+   - Validation: `274 passed · 0 ruff · 98 mypy` (no regression)
+2. **Slice B — niche baseline integration** ✓ **Done**
+   - implement `_load_niche_lifts()`: connect meta.db, run `analyze_all_formats()` with correct signature
+   - wire divergence computation into entries when niche data is available
+   - render terminal output with niche column when present
+   - Validation: `279 passed · 0 ruff · 98 mypy` (no regression)
+3. **Slice C — CLI integration** ✓ **Done**
+   - add `sable pulse account`
+   - make `--org` optional and default from roster when available
+   - no persistence or caching in v1
+
+**Post-implementation audit findings (2026-03-24):**
+
+*Real issues — LOW severity:*
+
+- **`_load_niche_lifts` ignores `days` param** (`account_report.py:177`): always queries
+  the last 30 days from meta.db regardless of the `days` argument passed to
+  `compute_account_format_lift`. If called with `days=7`, account data is 7 days but
+  niche data is 30 days — semantic mismatch. Acceptable for v1 where default is 30d,
+  but should be threaded through in Slice C or a future pass.
+
+- **`_load_follower_count` is dead code** (`account_report.py:149`): defined but never
+  called. The spec mentioned follower-relative normalization as optional; the
+  implementation uses raw engagement throughout. Either wire it in or delete it.
+
+- **Silent `except Exception` in `_load_niche_lifts`** (`account_report.py:224`): swallows
+  all errors (DB corruption, schema mismatch, import failure) with no log. Consistent
+  pattern with P5 findings elsewhere. Should add `logger.warning(...)` before `return {}` — tracked under P5 open queue item for `account_report.py`
+
+*Stale / misleading:*
+
+- **Section header comment** (`account_report.py:158`): still reads "Slice B — stubbed for
+  Slice A" — should be updated to reflect the real implementation.
+
+- **Test file docstring** (`test_account_report.py:1`): says "Slice A: data model, readers,
+  helpers" — Slice B integration tests now live in the same file.
+
+- **`test_divergence_execution_gap_with_niche_data` docstring** (`test_account_report.py:594`):
+  says "Account thread" but the setup inserts `clip` posts (→ `short_clip`). Thread/clip
+  mismatch in the docstring.
+
+*Coverage gaps:*
+
+- **No test: meta.db tweets older than 30 days excluded** — the `posted_at >= ?` SQL
+  filter in `_load_niche_lifts` is not covered by any test.
+
+- **No test: `niche_confidence` value after Slice B wiring** — should be `"C"` (confidence
+  grade C because quality gates always fail with `baseline_days_available=0`). Not
+  asserted in any Slice B test.
+
+- **No test: empty scanned_tweets after org filter** — `_load_niche_lifts` returns `{}`
+  when no rows match the org+window query. Only the nonexistent-path case is tested.
+
+- **`_classify_post` thread-detection gap** (known V1 limitation): for `sable_content_type='text'`,
+  always passes `is_thread=False` to `classify_format()` because pulse.db has no thread
+  marker. Text threads will be miscategorized as `standalone_text`. Not a bug in v1 but
+  should be documented in Slice C help text.
+
+**Purpose:** Applies the same normalized lift computation used for watchlist accounts to
+the managed account's own posting history. Reveals what formats actually work for the
+specific account (vs what works in the niche generally), and flags divergence between them.
+
+**Command syntax:**
+```
+sable pulse account @handle [--days 30] [--org ORG]
+```
+
+If `--org` is omitted, default to the roster account org. If no org is available, still
+run the account-only report and skip divergence-to-niche analysis cleanly.
+
+**Files already created (Slices A+B):**
+- `sable/pulse/account_report.py` — all computation logic (279 tests passing)
+- `tests/pulse/test_account_report.py` — 40 tests
+
+**Remaining file to modify (Slice C):**
+- `sable/pulse/cli.py` — add `account` subcommand (following pattern of existing subcommands)
+
+**No new database tables.** Reads pulse.db (posts + snapshots) and meta.db
+(`scanned_tweets` plus baselines/trend-helper inputs).
+
+**Computation steps in `account_report.py`:**
+
+1. **Load posts with their most-recent snapshot engagement:**
+   ```sql
+   SELECT p.id, p.text, p.posted_at, p.sable_content_type,
+          s.likes, s.retweets, s.replies, s.views, s.bookmarks, s.quotes
+   FROM posts p
+   LEFT JOIN snapshots s ON (
+       p.id = s.post_id
+       AND s.id = (
+           SELECT MAX(s2.id) FROM snapshots s2 WHERE s2.post_id = p.id
+       )
+   )
+   WHERE p.account_handle = ? AND p.posted_at >= ?
+   ORDER BY p.posted_at DESC
+   ```
+   - use the canonical `@handle` contract from Stage 0 item 1
+   - if a post has no snapshot yet, keep it in the post count but treat engagement as `0`
+   - if follower-relative normalization is attempted, read the latest `account_stats` row
+     separately; do not try to join it into the post query in a way that duplicates rows
+
+2. **Classify each post by format bucket:**
+   Call `sable/pulse/meta/fingerprint.py::classify_format()`. Posts don't have the same
+   tweet-dict structure as meta.db tweets, so map before calling:
+   - `sable_content_type = 'clip'` → default to `short_clip`; only upgrade to `long_clip`
+     when a real duration signal exists from sidecar/vault metadata
+   - `sable_content_type = 'meme'` → `single_image`
+   - `sable_content_type = 'explainer'` → `long_clip`
+   - `sable_content_type = 'faceswap'` → `short_clip`
+   - `sable_content_type = 'text'` or `unknown` → build a minimal tweet-dict with `text`,
+     `has_image=False`, `has_video=False`, `urls=[]`, `is_retweet=False`,
+     `is_quote_tweet=False`, then pass to `classify_format()`
+   - do **not** assume `sable_content_type` is already a pulse-meta format bucket
+
+3. **Compute account engagement rate baseline:**
+   For this account, compute median engagement per post across all posts in the window.
+   Use the same engagement formula as `normalize.py`: `likes + 3*replies + 4*retweets +
+   5*quotes + 2*bookmarks + 0.5*views`. Divide by follower count if available from
+   `account_stats` table, otherwise use raw engagement. The key is author-relative normalization.
+
+4. **Compute per-format lift:**
+   For each format bucket, compute mean of (post_engagement / account_baseline) across all
+   posts in that bucket. Require minimum 2 posts in a bucket before reporting a lift score.
+   Buckets with < 2 posts should show `None` lift with label "insufficient data (N post)".
+
+5. **Load niche format baselines for divergence:**
+   Do **not** query nonexistent `current_lift / status / momentum` columns from
+   `format_baselines`.
+   Preferred approach:
+   - load the latest scan's `scanned_tweets` for the org
+   - fetch 30d / 7d baselines via `sable/pulse/meta/baselines.py`
+   - reuse `sable/pulse/meta/trends.py::analyze_all_formats()` to obtain:
+     - `current_lift`
+     - `trend_status`
+     - `momentum`
+     - `confidence`
+   If no org is provided or no recent scan/baselines exist, skip divergence analysis cleanly.
+
+6. **Compute divergence signal per format:**
+   - If account_lift >= 1.5 AND niche_lift >= 1.5 → `DOUBLE DOWN`
+   - If account_lift <= 0.8 AND niche_lift >= 1.5 → `EXECUTION GAP`
+   - If account_lift >= 1.5 AND niche_lift <= 0.8 → `ACCOUNT DIFFERENTIATION`
+   - If both <= 0.8 → `AVOID`
+   - Otherwise → `NEUTRAL`
+
+**Output format (printed to console and optionally saved):**
+```
+@handle — Format Lift (last 30d, 47 posts, org: tig)
+
+  standalone_text  ████████████  2.4x  niche: 2.3x  → DOUBLE DOWN
+  short_clip       █████████     1.8x  niche: 1.7x  → DOUBLE DOWN
+  thread           ████          0.9x  niche: 1.7x  → EXECUTION GAP
+  single_image     ██            0.5x  niche: 1.1x  → AVOID
+  quote_tweet      [insufficient data: 1 post]
+
+  Top formats by account lift: standalone_text (2.4x), short_clip (1.8x)
+  Niche surging but unused by this account: long_clip
+```
+
+**Dataclass models:**
+```python
+@dataclass
+class FormatLiftEntry:
+    format_bucket: str
+    account_lift: float | None
+    niche_lift: float | None
+    niche_trend_status: str | None
+    niche_confidence: str | None
+    post_count: int
+    divergence_signal: str  # DOUBLE DOWN / EXECUTION GAP / AVOID / NEUTRAL / ACCOUNT DIFFERENTIATION
+
+@dataclass
+class AccountFormatReport:
+    handle: str
+    org: str
+    days: int
+    total_posts: int
+    entries: list[FormatLiftEntry]
+    missing_niche_formats: list[str]  # formats surging in niche but never used by account
+    generated_at: str
+```
+
+**Functions to implement:**
+```python
+def compute_account_format_lift(
+    handle: str,
+    org: str,
+    days: int,
+    pulse_db_path: Path,
+    meta_db_path: Path | None = None,
+) -> AccountFormatReport: ...
+
+def _classify_post(post: dict) -> str:
+    """Map pulse.db post row to format_bucket string."""
+
+def _compute_account_baseline(posts: list[dict]) -> float:
+    """Median engagement across posts. Returns 1.0 as floor to avoid division by zero."""
+
+def render_account_report(report: AccountFormatReport) -> str:
+    """Return formatted console string."""
+```
+
+**Tests (`tests/pulse/test_account_report.py`):**
+- Build in-memory pulse.db with 10 posts (3 standalone_text, 3 short_clip, 2 thread, 2 single_image)
+  and their snapshots. Assert `compute_account_format_lift()` returns correct lift per bucket.
+- Seed pulse rows using the real producer contract (`@handle`), not bare handles.
+- Test divergence: inject meta.db with thread at niche_lift=1.7x; account thread at 0.9x.
+  Assert `FormatLiftEntry.divergence_signal == "EXECUTION GAP"` for thread bucket.
+- Test minimum data guard: bucket with 1 post → `account_lift=None`, correct "insufficient data" label.
+- Test missing niche formats: if meta.db has `long_clip` surging but no pulse.db posts use it,
+  assert `long_clip` in `report.missing_niche_formats`.
+- Test empty pulse.db: `compute_account_format_lift()` returns report with `total_posts=0`,
+  no exception raised.
+- Test org fallback: when `--org` is omitted, the command uses `Account.org`; when both are
+  missing, it still renders account-only output without divergence fields.
+- Test `_classify_post` maps `sable_content_type='clip'` → `'short_clip'`, `'meme'` → `'single_image'`.
+- Test `render_account_report()` produces non-empty string with handle in output.
+
+---
+
+### FEATURE-1 · `sable write` — Tweet Writer
+
+**Status:** Slices A, B, C complete (2026-03-25). FEATURE-1 fully shipped.
+**Completeness:** Medium. The product shape is good; the draft needed live-code corrections.
+**Hard blockers:** Feature Gate, `FEATURE-3`, and Stage 0 item 4 if vault topic search is used.
+
+**Implementation slices (do in order):**
+1. **Slice A — context/trend assembly + tests** ✓ **Done**
+   - `sable/write/generator.py`: `TweetVariant`, `_load_format_trends`, `_select_best_format`, `_get_format_context`, `_get_vault_context`
+   - `tests/write/test_generator.py`: 6 tests
+   - Validation: `292 passed · 0 ruff · 97 mypy` (no regression)
+2. **Slice B — Claude generation core** ✓ **Done**
+   - `generate_tweet_variants()`: prompt assembly, Claude call, JSON parsing, variant validation
+   - `sable/write/generator.py`: adds `generate_tweet_variants()` + 3 imports
+   - `tests/write/test_generator.py`: 8 new tests (14 total)
+   - Validation: `300 passed · 0 ruff · 97 mypy` (no regression)
+3. **Slice C — CLI wiring** ✓ **Done**
+   - register top-level `sable write` command in `sable/cli.py`
+   - keep v1 console-only; do not add artifact persistence in the same patch
+
+**Purpose:** Generates ready-to-post tweet copy for an account, using current format trends,
+account profile, and vault context as input. Eliminates the blank page. Does NOT auto-post.
+
+**Command syntax:**
+```
+sable write @handle [--format standalone_text] [--topic "defi yields"] [--source-url URL]
+            [--variants 3] [--org ORG]
+```
+
+**New files to create:**
+- `sable/write/__init__.py`
+- `sable/write/generator.py` — all generation logic
+- `sable/commands/write.py` — CLI entrypoint (thin Click wrapper)
+- `tests/write/test_generator.py`
+
+**Existing files to modify:**
+- `sable/cli.py` — register `write` top-level command
+
+**No new database tables.** Reads meta.db (format_baselines, scanned_tweets). Does not
+persist output in v1 — operator pastes chosen variant into their posting workflow.
+
+**Data assembled before the Claude call:**
+
+1. **Account context:** resolve the roster account, then call
+   `sable/shared/api.py::build_account_context(account)`.
+   Correct live flow:
+   - `acc = require_account(handle)`
+   - `resolved_org = org or acc.org`
+   - `context = build_account_context(acc)`
+   Returns concatenated YAML persona + tone/interests/context/notes profile content.
+
+2. **Current format trends:** Query meta.db:
+   Do **not** query nonexistent `current_lift / status / momentum / confidence_grade` columns.
+   Preferred live shape:
+   - reuse the same niche-trend adapter defined for `FEATURE-3`
+   - take the top 3–5 `TrendResult` entries by `current_lift`
+   - include `current_lift`, `trend_status`, `momentum`, and `confidence`
+   If no org or no recent meta data exists, skip trend context and generate from profile only.
+
+3. **Structural examples** (for the chosen format, or top-format if none chosen):
+   ```sql
+   SELECT text, total_lift, author_handle
+   FROM scanned_tweets
+   WHERE org = ? AND format_bucket = ? AND total_lift >= 2.5
+         AND posted_at >= datetime('now', '-30 days')
+   ORDER BY total_lift DESC
+   LIMIT 5
+   ```
+   These are real high-performing tweets shown to Claude as structural models, NOT as content
+   to copy. Include them in the prompt as "examples of what's landing right now."
+
+4. **Vault reference (optional):** If `--topic` is provided, run a quick vault search
+   (`search_vault(topic, vault_path, org, filters=SearchFilters(...))`) and include the top-1
+   result summary as background context. Skip gracefully if vault is empty or unavailable.
+   - use `SearchFilters(depth="intro")` or another real filter value; there is no
+     `depth="shallow"` parameter in the live API
+   - do not wire this until Stage 0 item 4 (`vault/search.py` large-result path) is fixed
+
+**Claude prompt structure:**
+
+System prompt:
+```
+You are a ghost-writer for a crypto Twitter account. The account profile is:
+
+{account_context}
+
+Write tweet variants that sound exactly like this account — not generic crypto content.
+```
+
+User prompt:
+```
+Format target: {format_bucket} (currently {status}, {current_lift}x average lift in this niche)
+
+Examples of what's performing at {format_bucket} right now (study structure, not content):
+{examples_block}
+
+Topic to write about: {topic or "choose from account interests"}
+{source_tweet_block if quote_tweet}
+
+Generate {num_variants} tweet variants. For each:
+- Write the tweet text (respect Twitter's 280-char limit for standalone; 280 per tweet for threads)
+- Identify the structural move you're making (e.g. "contrarian claim + specific number")
+- Rate format fit 1-10 based on how well it matches the example structure patterns
+
+Return JSON:
+{
+  "variants": [
+    {
+      "text": "...",
+      "structural_move": "...",
+      "format_fit_score": 8.5,
+      "notes": "optional one-liner about the approach"
+    }
+  ]
+}
+```
+
+**Functions to implement:**
+```python
+@dataclass
+class TweetVariant:
+    text: str
+    structural_move: str
+    format_fit_score: float
+    notes: str
+
+def generate_tweet_variants(
+    handle: str,
+    org: str,
+    format_bucket: str | None,
+    topic: str | None,
+    source_url: str | None,
+    num_variants: int,
+    meta_db_path: Path | None,
+    vault_root: Path | None,
+) -> list[TweetVariant]: ...
+
+def _get_format_context(
+    org: str,
+    format_bucket: str,
+    conn: sqlite3.Connection,
+) -> tuple[str, list[dict]]:
+    """Returns (trend_summary_string, structural_examples_list)."""
+
+def _select_best_format(org: str, conn: sqlite3.Connection) -> str:
+    """Return the highest-ranked active format from the live trend helper. Falls back to 'standalone_text'."""
+```
+
+**CLI output format:**
+```
+Generating 3 variants for @handle (standalone_text, topic: defi yields)
+Using format trend: standalone_text surging at 2.3x (confidence A, last 7d)
+
+── Variant 1 · Format fit: 9.0 ──────────────────────────────────────
+Everyone's watching ETH gas. Nobody's watching funding rates.
+
+When perp funding flips negative across 3 majors simultaneously, that's not noise.
+That's the market telling you something.
+
+Structure: contrarian misdirection → specific signal → implication
+──────────────────────────────────────────────────────────────────────
+
+── Variant 2 · Format fit: 8.0 ──────────────────────────────────────
+...
+```
+
+**Tests (`tests/write/test_generator.py`):**
+- Mock `call_claude_json`; assert it receives account context, structural examples, and topic.
+- Assert 3 variants returned when `num_variants=3`, each has non-empty `text` and `structural_move`.
+- Test format auto-selection: when no `--format` given, `_select_best_format()` returns the
+  highest-ranked active bucket from the live trend helper.
+- Test graceful fallback: when meta.db is empty, `generate_tweet_variants()` still returns
+  variants (profile-only context, no crash).
+- Test format_fit_score parsed correctly from Claude JSON response.
+- Test 280-char limit note is in the system prompt for standalone_text format.
+- Test that structural examples are NOT present in prompt when meta.db has no high-lift tweets
+  (graceful omission, not crash).
+- Test missing account: `require_account()` failure surfaces as a clean CLI error before any
+  Claude call is attempted.
+
+---
+
+### FEATURE-2 · `sable score` — Hook Scorer
+
+**Status:** Complete (2026-03-25).
+**Completeness:** Medium-high for a standalone scorer. Integration into `sable write` should
+be a second patch, not the first.
+**Hard blockers:** Feature Gate; best done after `FEATURE-1` CLI shape is stable.
+
+**Implementation slices (do in order):**
+1. **Slice A — cache table + DB helpers + tests** ✓ **Done**
+2. **Slice B — standalone scoring command** ✓ **Done**
+3. **Slice C — `sable write --score` integration** ✓ **Done** (6 tests in `tests/write/test_write_score.py`)
+
+**Post-implementation note:**
+- `score_draft(draft, handle, format_bucket, patterns)` is the actual function name (not `score_hook` as originally specced)
+- `get_hook_patterns(org, format_bucket)` owns its own DB connection internally (does not accept `conn` parameter)
+- Slice C landed alongside Slice B: `sable write --score` flag wires `score_draft()` per variant with SableError fallback
+- 18 tests total: 12 in `test_scorer.py`, 6 in `test_write_score.py`
+
+**Purpose:** Scores a draft tweet's hook against structural patterns extracted from recent
+high-performing watchlist posts. Usable standalone before posting, and as a pre-flight gate
+inside `sable write`.
+
+**Command syntax:**
+```
+sable score @handle --text "your draft tweet text" [--format standalone_text] [--org ORG]
+```
+
+**New files to create:**
+- `sable/write/scorer.py` — pattern extraction + scoring logic
+- `sable/commands/score.py` — top-level CLI entrypoint
+- `tests/write/test_scorer.py`
+
+**Existing files to modify:**
+- `sable/cli.py` — register `score` top-level command
+- `sable/pulse/meta/db.py` — add `hook_pattern_cache` table to `_SCHEMA` and migration
+- `sable/commands/write.py` — optional only if/when adding a later `--score` integration
+
+**New DB table in `meta.db`:**
+```sql
+CREATE TABLE IF NOT EXISTS hook_pattern_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org TEXT NOT NULL,
+    format_bucket TEXT NOT NULL,
+    patterns_json TEXT NOT NULL,
+    generated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hook_patterns_key
+    ON hook_pattern_cache (org, format_bucket);
+```
+
+Add this table to `pulse/meta/db.py::_SCHEMA`. Add `upsert_hook_patterns()` and
+`get_hook_patterns()` DB functions to `pulse/meta/db.py`.
+
+**Cache policy:** Re-generate patterns if cached entry is > 24 hours old OR if a newer
+**successful** scan has completed since the last pattern generation.
+- compare against `scan_runs.completed_at`, not `started_at`
+- ignore failed scans (`claude_raw LIKE 'FAILED:%'`) when deciding invalidation
+- this avoids thrashing the cache on failed or still-running scans
+
+**Two-step process:**
+
+**Step 1 — Pattern extraction** (Claude call, cached):
+Pull top-20 tweets with `total_lift >= 2.5` for the format in last 30d. Claude call:
+```
+Here are 20 tweets that significantly outperformed their author's average engagement.
+All are {format_bucket} format.
+
+{tweet_list}
+
+Identify 6-8 structural hook patterns that appear across these high performers.
+For each pattern: name it, describe it in one sentence, give one example fragment.
+
+Return JSON: { "patterns": [{"name": "...", "description": "...", "example": "..."}] }
+```
+
+**Step 2 — Scoring call** (Claude call, not cached):
+```
+Account voice profile:
+{tone.md excerpt — first 200 chars only to keep prompt small}
+
+High-performing hook patterns in {format_bucket} right now:
+{patterns_list}
+
+Draft tweet:
+{draft_text}
+
+Score this draft 1-10 on:
+1. Hook strength (does it compel the read?)
+2. Pattern match (does it use one of the known high-performing patterns?)
+3. Voice fit (does it sound like the account?)
+
+Return JSON:
+{
+  "grade": "B+",
+  "score": 7.5,
+  "matched_pattern": "contrarian opener",
+  "voice_fit": 8,
+  "flags": ["hook could be shorter", "second sentence is the real hook — move it first"],
+  "suggested_rewrite": "..." // optional, include only if score < 7
+}
+```
+
+**Functions to implement:**
+```python
+@dataclass
+class HookPattern:
+    name: str
+    description: str
+    example: str
+
+@dataclass
+class HookScore:
+    grade: str        # A+ / A / B+ / B / C+ / C / D
+    score: float      # 1-10
+    matched_pattern: str | None
+    voice_fit: int
+    flags: list[str]
+    suggested_rewrite: str | None
+
+def get_hook_patterns(
+    org: str,
+    format_bucket: str,
+    meta_db_conn: sqlite3.Connection,
+) -> list[HookPattern]:
+    """Return cached patterns or generate fresh if stale."""
+
+def score_hook(
+    draft: str,
+    handle: str,
+    format_bucket: str,
+    patterns: list[HookPattern],
+) -> HookScore: ...
+```
+
+**Tests (`tests/write/test_scorer.py`):**
+- Pattern generation: given 5 high-lift tweets in meta.db, `get_hook_patterns()` calls Claude,
+  stores patterns in `hook_pattern_cache`, returns non-empty list.
+- Cache hit: call `get_hook_patterns()` twice. Assert Claude called exactly once (mock counter).
+- Cache staleness: insert cache row with `generated_at` 25 hours ago. Assert patterns regenerated.
+- Cache invalidation by new successful scan: insert a newer successful `scan_runs.completed_at`
+  and assert regeneration occurs.
+- Failed scan does **not** invalidate cache: insert a newer failed scan row and assert the
+  cached patterns are still reused.
+- Score: mock Claude returning grade="B+", score=7.5. Assert `HookScore` populated correctly.
+- Score below 7: assert `suggested_rewrite` is present in returned `HookScore`.
+- Integration with `sable write`: after implementing Feature 1, assert `sable write` output
+  includes a hook score for each variant if `--score` flag passed.
+- Edge case: format with < 5 high-lift tweets in meta.db → patterns generated from available
+  data (no crash if fewer than 20 examples available).
+
+---
+
+### FEATURE-9 · `sable pulse attribution` — Content Attribution Report
+
+**Status:** Not started.
+**Gate:** Feature Gate satisfied. Ready to implement — no remaining blockers.
+**Completeness:** High. Full spec in `~/Downloads/Slopper_ContentAttribution_Prompt.md`.
+
+**Purpose:** Answers "what fraction of this account's engagement came from Sable-produced
+content, and did Pulse Meta-informed content outperform the baseline?" Deterministic
+aggregation over existing pulse.db + meta.db data. No new tables, no Claude calls.
+
+**Implementation slices (do in order):**
+1. **Slice A — format_baselines time-series migration**
+   - `sable/pulse/meta/db.py`: drop unique index on `(org, format_bucket, period_days)`;
+     add non-unique time-series index; change `upsert_format_baseline` from INSERT OR
+     REPLACE to plain INSERT; add `get_format_baselines_as_of(org, as_of_str, period_days=7)`
+     helper; add `prune_format_baselines(org, keep_n=90)` to bound table growth
+   - `tests/pulse/meta/test_db.py` (new or extend): time-series accumulation, as_of lookup,
+     pruning, backward-compat for existing `get_format_baselines()` callers
+2. **Slice B — ContentAttribution dataclass + compute function**
+   - New file: `sable/pulse/attribution.py`
+   - `ContentAttribution` dataclass + `compute_attribution(handle, days, pulse_db_path,
+     meta_db_path)` function
+   - 8 tests in `tests/pulse/test_attribution.py` (in-memory SQLite, all edge cases)
+3. **Slice C — CLI + strategy brief integration**
+   - `sable/pulse/cli.py`: add `sable pulse attribution @handle [--days N] [--format md|json]`
+   - `sable/advise/stage1.py`: add `## Content Attribution` section (≥5 Sable posts gate)
+   - Optional: `sable/vault/dashboard.py` + `sable/vault/templates/index.md.j2`
+
+**Key design decisions (corrections from original spec):**
+- CLI lives in `sable/pulse/cli.py`, not a nonexistent `sable/commands/pulse.py`
+- SQL uses `s.id = (SELECT MAX(s2.id) ...)` latest-snapshot pattern (matches account_report.py)
+- Engagement formula is weighted: `likes*1 + replies*3 + retweets*4 + quotes*5 + bookmarks*2 + views*0.5` (matches `_compute_lift` in stage1.py)
+- Meta-informed classification requires Slice A; uses `get_format_baselines_as_of(org, post.posted_at)` not current-state baselines
+- `clip` → format_bucket: check `sable_content_path + ".meta.json"` for `duration`; ≤60s → `short_clip`, >60s → `long_clip`; missing file → `short_clip`
+- `## Content Attribution` section in stage1 sits after `## Post Performance`, before `## Pulse Meta Trends`
+- Vault dashboard integration touches Jinja2 template `sable/vault/templates/index.md.j2`
+
+---
+
+### FEATURE-4 · Viral Anatomy Archive
+
+**Status:** Not started.
+**Completeness:** Medium-high after spec corrections. Strong candidate for the first
+post-feature content-intelligence add-on.
+**Hard blockers:** Feature Gate only.
+
+**Implementation slices (do in order):**
+1. **Slice A — `viral_anatomies` table + analysis helper + tests**
+2. **Slice B — vault note writing + searchability wiring**
+3. **Slice C — post-scan integration**
+   - first land as guarded/manual wiring
+   - only make default-on after the helper is stable and validated
+
+**Purpose:** When any watchlist account posts something with >= 10x author-relative lift,
+auto-archive a structural breakdown as a vault note. Over time, builds a searchable pattern
+library of what actually goes viral in the niche.
+
+**Spec correction:** do **not** make this default-on in the first patch. First land the
+helper, DB table, vault note writer, and tests. Then wire it into `pulse meta scan` once
+failure behavior is proven safe.
+
+**New files to create:**
+- `sable/pulse/meta/anatomy.py` — analysis logic + vault note writing
+- `tests/pulse/meta/test_anatomy.py`
+
+**Existing files to modify:**
+- `sable/pulse/meta/cli.py` — call anatomy enrichment after scan completes
+- `sable/pulse/meta/db.py` — add `viral_anatomies` table to `_SCHEMA`
+- `sable/vault/cli.py` — only if exposing `--type viral_anatomy` via the existing search CLI
+
+**New DB table in `meta.db`:**
+```sql
+CREATE TABLE IF NOT EXISTS viral_anatomies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org TEXT NOT NULL,
+    tweet_id TEXT NOT NULL,
+    author_handle TEXT NOT NULL,
+    total_lift REAL NOT NULL,
+    format_bucket TEXT NOT NULL,
+    anatomy_json TEXT NOT NULL,
+    analyzed_at TEXT NOT NULL,
+    UNIQUE(org, tweet_id)
+);
+```
+
+Add to `pulse/meta/db.py::_SCHEMA`. Add `save_anatomy()` and `get_unanalyzed_viral_tweets()`
+functions to `db.py`.
+
+**Anatomy JSON schema (stored in `anatomy_json` column):**
+```json
+{
+  "hook_structure": "contrarian claim + specific number",
+  "hook_length_words": 8,
+  "first_sentence": "Nobody talks about this but...",
+  "emotional_register": "confident",
+  "topic_cluster": "DeFi yield farming",
+  "has_cta": false,
+  "cta_type": null,
+  "retweet_bait": true,
+  "retweet_bait_element": "invites disagreement",
+  "is_thread": false,
+  "thread_length": null
+}
+```
+
+**Claude prompt for anatomy (one call per tweet, keep small):**
+```
+Analyze this crypto Twitter post. It achieved {lift}x its author's average engagement.
+
+Post:
+"{tweet_text}"
+
+Return JSON with these exact fields:
+- hook_structure: string (describe the structural pattern of the first sentence)
+- hook_length_words: int
+- first_sentence: string (the actual first sentence)
+- emotional_register: one of [confident, anxious, excited, contemptuous, neutral, urgent]
+- topic_cluster: string (1-3 words describing the topic)
+- has_cta: bool
+- cta_type: one of [implicit, explicit, null]
+- retweet_bait: bool
+- retweet_bait_element: string or null (e.g. "invites reply", "controversial claim")
+- is_thread: bool
+- thread_length: int or null
+```
+
+**Post-scan enrichment logic in `cli.py` (after helper is proven stable):**
+```python
+# After scan result is logged, before returning:
+from sable.pulse.meta.anatomy import run_anatomy_enrichment
+run_anatomy_enrichment(
+    org=org,
+    meta_db_path=meta_db_path(org),
+    vault_root=vault_dir(org),
+    max_per_run=config.get("max_anatomy_per_scan", 10),
+    min_lift=config.get("anatomy_min_lift", 10.0),
+)
+```
+
+**Vault note path:** `~/.sable-vault/{org}/content/viral_anatomy/{tweet_id}.md`
+- this is important because `load_all_notes()` only scans `vault/content/**`
+- if you instead write these notes outside `content/`, `vault search` will not see them
+  unless the loader is explicitly widened and tested
+
+**Vault note frontmatter:**
+```yaml
+---
+id: viral_{tweet_id}
+type: viral_anatomy
+author: "@defichad"
+format: standalone_text
+lift: 9.3
+hook_structure: "contrarian opener + specific timeline"
+topic_cluster: "L2 fees"
+analyzed_at: "2026-03-24T14:30:00+00:00"
+---
+```
+
+Body: the full tweet text, followed by the anatomy fields as a structured markdown section.
+
+**Vault search integration:** if you want `sable vault search --type viral_anatomy`, update:
+- `sable/vault/cli.py` `--type` choices to include `viral_anatomy`
+- any tests or docs that currently describe the content-type choices as only
+  `clip | meme | faceswap | explainer`
+
+**Functions to implement in `anatomy.py`:**
+```python
+@dataclass
+class ViralAnatomy:
+    tweet_id: str
+    author_handle: str
+    total_lift: float
+    format_bucket: str
+    hook_structure: str
+    hook_length_words: int
+    first_sentence: str
+    emotional_register: str
+    topic_cluster: str
+    has_cta: bool
+    cta_type: str | None
+    retweet_bait: bool
+    retweet_bait_element: str | None
+    is_thread: bool
+    thread_length: int | None
+    analyzed_at: str
+
+def run_anatomy_enrichment(
+    org: str,
+    meta_db_path: Path,
+    vault_root: Path,
+    max_per_run: int = 10,
+    min_lift: float = 10.0,
+) -> int:
+    """Returns count of anatomies generated this run."""
+
+def analyze_tweet(tweet: dict, org: str) -> ViralAnatomy:
+    """Single Claude call to produce anatomy for one tweet."""
+
+def write_anatomy_vault_note(anatomy: ViralAnatomy, vault_root: Path) -> Path:
+    """Write vault note. Returns path written."""
+```
+
+**Cost guard:** Each anatomy call is ~150 input tokens + ~100 output tokens using
+Haiku (~$0.000063/call). 10 calls = ~$0.00063/scan.
+- still pass `org_id=org` and a real `call_type` (for example `pulse_meta_anatomy`) through
+  `call_claude_json()`
+- do **not** treat org-scoped anatomy analysis as budget-exempt
+- `max_per_run` remains the hard cap regardless
+
+**Tests (`tests/pulse/meta/test_anatomy.py`):**
+- `test_analyze_tweet`: mock `call_claude_json` returning valid anatomy JSON. Assert
+  `ViralAnatomy` dataclass populated with correct fields.
+- `test_run_anatomy_enrichment_deduplication`: pre-populate `viral_anatomies` table with
+  tweet_id=123. Call `run_anatomy_enrichment()` with that tweet in scanned_tweets. Assert
+  Claude NOT called again for tweet_id=123.
+- `test_max_per_run_cap`: populate meta.db with 15 tweets at >=10x lift. Assert only
+  `max_per_run=10` anatomy calls made.
+- `test_zero_viral_tweets_graceful`: meta.db has no tweets at >=10x. `run_anatomy_enrichment()`
+  returns 0, no exception.
+- `test_vault_note_written`: after `write_anatomy_vault_note()`, assert file exists at
+  expected path and frontmatter contains `type: viral_anatomy`, `lift`, `format` fields.
+- `test_vault_note_atomic`: mock `os.replace` to raise after tmp write. Assert original
+  note (if it existed) is not corrupted. (Reuse `atomic_write` from `sable/shared/files.py`.)
+- `test_post_scan_anatomy_failure_does_not_corrupt_scan_result`: once CLI wiring is added,
+  inject an anatomy failure after a successful scan and assert the scan itself still
+  completes with a logged warning.
+
+---
+
+### FEATURE-6 · `sable pulse meta digest` — Watchlist Intelligence Digest
+
+**Status:** Not started.
+**Completeness:** Medium-high once `FEATURE-4` exists. Without anatomy cache it becomes too
+Claude-heavy for the value it returns.
+**Hard blockers:** Feature Gate and `FEATURE-4`.
+
+**Implementation slices (do in order):**
+1. **Slice A — digest selection + cached anatomy consumption**
+2. **Slice B — report rendering + optional save**
+3. **Slice C — CLI wiring**
+
+**Purpose:** Weekly curated report of the most structurally interesting posts from the
+78-account watchlist. Each entry includes anatomy (structural breakdown + what to steal).
+Saved as a vault report and printed to console.
+
+**Command syntax:**
+```
+sable pulse meta digest --org tig [--period 7d] [--top 10] [--save]
+```
+
+**New files to create:**
+- `sable/pulse/meta/digest.py` — digest generation logic
+- `tests/pulse/meta/test_digest.py`
+
+**Existing files to modify:**
+- `sable/pulse/meta/cli.py` — add `digest` subcommand
+
+**Vault note path:** `~/.sable-vault/{org}/digests/watchlist_digest_{YYYY-MM-DD}.md`
+
+**Selection logic:**
+```sql
+SELECT st.text, st.author_handle, st.total_lift, st.format_bucket, st.tweet_id,
+       va.anatomy_json
+FROM scanned_tweets st
+LEFT JOIN viral_anatomies va ON (va.tweet_id = st.tweet_id AND va.org = st.org)
+WHERE st.org = ?
+  AND st.total_lift >= 3.0
+  AND st.posted_at >= ?
+ORDER BY st.total_lift DESC
+LIMIT ?
+```
+- compute the cutoff string in Python (for example `f"-{period_days} days"`) or precompute an
+  ISO cutoff timestamp, then bind it directly
+- do not rely on `? || ' days'` string concatenation in SQL
+
+**Anatomy integration:** If `va.anatomy_json IS NOT NULL`, use the cached anatomy (no Claude
+call). If NULL, call `anatomy.analyze_tweet()` inline. This means Feature 4 feeds Feature 6 —
+running a scan before digest generation will pre-cache the analyses.
+
+**Claude call for non-anatomy posts (one call per post, small):**
+```
+This crypto Twitter post achieved {lift}x average engagement.
+
+Post by @{author}:
+"{tweet_text}"
+
+In 3 sentences: (1) What structural move is it making? (2) What should we steal from it?
+(3) What's the hook pattern in one phrase?
+
+Return JSON: {"analysis": "...", "steal": "...", "hook_pattern": "..."}
+```
+
+**Digest output format:**
+```markdown
+## Watchlist Digest — Week of Mar 24, 2026
+
+*10 posts with 3x+ lift from 78 watched accounts · Generated 2026-03-24*
+
+---
+
+### 1. @defichad — 9.3x lift — standalone_text
+
+> Nobody talks about this but ETH L2 sequencer fees are going to zero in 18 months.
+> [continue...]
+
+**Hook pattern:** Contrarian + specific timeline
+**What to steal:** The "nobody talks about X but Y will Z in N months" frame works for
+any DeFi macro narrative where you have a specific directional claim.
+
+---
+
+### 2. @fejau_inc — 7.1x lift — thread
+
+> Three things that will define crypto in Q2 2025: [thread excerpt]
+
+**Hook pattern:** Numbered list + quarter-specific framing
+**What to steal:** "N things that will define X in [specific time window]" is reliably
+high-curiosity when the N is credible and time-bounded.
+
+---
+```
+
+**Dataclass models:**
+```python
+@dataclass
+class DigestEntry:
+    rank: int
+    author_handle: str
+    total_lift: float
+    format_bucket: str
+    tweet_text: str
+    hook_pattern: str
+    analysis: str
+    steal: str
+
+@dataclass
+class DigestReport:
+    org: str
+    period_days: int
+    generated_at: str
+    entries: list[DigestEntry]
+    total_posts_considered: int  # how many tweets in period before top-N filter
+```
+
+**Functions to implement in `digest.py`:**
+```python
+def generate_digest(
+    org: str,
+    period_days: int,
+    top_n: int,
+    meta_db_path: Path,
+    vault_root: Path | None,
+) -> DigestReport: ...
+
+def _get_digest_posts(
+    org: str,
+    period_days: int,
+    top_n: int,
+    conn: sqlite3.Connection,
+) -> list[dict]: ...
+
+def _analyze_post_for_digest(post: dict) -> tuple[str, str, str]:
+    """Returns (hook_pattern, analysis, steal). Uses cached anatomy if available."""
+
+def render_digest(report: DigestReport) -> str: ...
+
+def save_digest_to_vault(report: DigestReport, vault_root: Path) -> Path: ...
+```
+
+**Persistence note:** saving the digest under `digests/` is fine for a report artifact, but
+that location is **not** part of `load_all_notes()` and therefore not searchable through the
+existing content search path. Treat the digest as a report, not as content inventory.
+
+**Tests (`tests/pulse/meta/test_digest.py`):**
+- `test_top_n_filtering`: populate meta.db with 20 posts with varying lifts >= 3.0.
+  `_get_digest_posts(top_n=10)` returns exactly 10, highest lift first.
+- `test_anatomy_cache_used`: insert a tweet in both `scanned_tweets` and `viral_anatomies`.
+  `_analyze_post_for_digest()` reads from anatomy_json, does NOT call Claude.
+- `test_anatomy_cache_miss_calls_claude`: tweet in `scanned_tweets` but not `viral_anatomies`.
+  Assert Claude called exactly once.
+- `test_empty_period`: no posts with lift >= 3.0 in period. `generate_digest()` returns
+  `DigestReport` with empty `entries`, no exception.
+- `test_vault_note_saved`: `save_digest_to_vault()` creates file at expected path with
+  correct frontmatter (`type: digest`, `org`, `period_days`, `generated_at`).
+- `test_render_output`: `render_digest()` produces non-empty string with correct header and
+  each entry's author handle visible.
+- Any inline analysis miss should pass `org_id=org` and a distinct `call_type`
+  (for example `pulse_meta_digest`) through the shared Claude wrapper.
+
+---
+
+### FEATURE-7 · `sable calendar` — Content Calendar
+
+**Status:** Not started.
+**Completeness:** Medium-low. Strong product idea, weakest live spec fidelity.
+**Hard blockers:** Feature Gate, `FEATURE-3`, and the Stage 0 contract fixes.
+
+**Implementation slices (do in order):**
+1. **Slice A — deterministic inputs + tests**
+   - posting history helper
+   - vault inventory helper with real note semantics
+   - trend summary helper
+2. **Slice B — planning core + rendering**
+3. **Slice C — CLI wiring + optional save path**
+
+**Purpose:** Given an account and time horizon, generates a concrete posting schedule that
+balances format diversity, niche trend alignment, and what's already ready in the vault.
+
+**Command syntax:**
+```
+sable calendar @handle --days 7 [--formats-target 4] [--org ORG] [--save]
+```
+
+**New files to create:**
+- `sable/calendar/__init__.py`
+- `sable/calendar/planner.py` — calendar logic
+- `sable/commands/calendar.py` — CLI entrypoint
+- `tests/calendar/test_planner.py`
+
+**Existing files to modify:**
+- `sable/cli.py` — register `calendar` top-level command
+
+**No new database tables.** Reads pulse.db, meta.db, vault filesystem.
+
+**Three inputs assembled before the Claude call:**
+
+1. **Posting history** (last 14d from pulse.db):
+   ```sql
+   SELECT p.posted_at, p.sable_content_type, s.likes, s.retweets, s.views
+   FROM posts p
+   LEFT JOIN snapshots s ON (p.id = s.post_id AND s.id = (
+       SELECT MAX(s2.id) FROM snapshots s2 WHERE s2.post_id = p.id
+   ))
+   WHERE p.account_handle = ? AND p.posted_at >= datetime('now', '-14 days')
+   ORDER BY p.posted_at DESC
+   ```
+   Compute: posts per day average, format distribution over 14d, days since last post per
+   **format bucket** after mapping `sable_content_type` through the same helper used by
+   `FEATURE-3`.
+
+2. **Vault inventory** (unposted content assigned to this account):
+   ```python
+   notes = load_all_notes(vault_root / org)
+   ready = [
+       {
+           "note_id": n.get("id"),
+           "path": n.get("_note_path"),
+           "type": n.get("type"),
+           "format": n.get("format"),
+           "topic": n.get("topic"),
+           "assembled_at": n.get("assembled_at"),
+       }
+       for n in notes
+       if n.get("type") in ("clip", "meme", "explainer", "faceswap")
+       and not n.get("posted_by")
+       and (
+           n.get("account") == handle
+           or handle in (n.get("suggested_for") or [])
+       )
+   ]
+   ```
+   - there is no canonical `status` field; use `posted_by` emptiness plus
+     `account` / `suggested_for` membership instead
+   - if recency matters, use `assembled_at`, not a nonexistent `created_at` frontmatter field
+
+3. **Format trends** from meta.db (same query as Feature 1):
+   reuse the live trend helper / `FEATURE-3` adapter; do not query nonexistent
+   `current_lift` columns from `format_baselines`.
+
+**Claude call:**
+
+System: minimal (no account profile needed for scheduling logic)
+
+User:
+```
+Account: @{handle}, org: {org}
+Planning horizon: {days} days starting {start_date}
+Format diversity target: at least {formats_target} distinct formats
+
+Posting history (last 14d):
+{history_summary}
+
+Content ready in vault:
+{vault_inventory_list}
+
+Current niche format trends:
+{trends_summary}
+
+Generate a {days}-day posting calendar. For each day, suggest 1-2 slots.
+For each slot, use vault content when available (mark action as "post_ready").
+For slots needing new content, mark action as "create" with a topic suggestion.
+Do not schedule declining formats (lift < 0.8x) more than once per week.
+
+Return JSON:
+{
+  "days": [
+    {
+      "date": "YYYY-MM-DD",
+      "day_name": "Monday",
+      "slots": [
+        {
+          "format_bucket": "...",
+          "topic_suggestion": "...",
+          "action": "post_ready" | "create",
+          "vault_note_id": "..." | null,
+          "rationale": "..."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "formats_covered": [...],
+    "vault_items_scheduled": N,
+    "creation_tasks": N
+  }
+}
+```
+
+**Dataclass models:**
+```python
+@dataclass
+class CalendarSlot:
+    format_bucket: str
+    topic_suggestion: str
+    action: str              # "post_ready" | "create"
+    vault_note_id: str | None
+    rationale: str
+
+@dataclass
+class CalendarDay:
+    date: str
+    day_name: str
+    slots: list[CalendarSlot]
+
+@dataclass
+class CalendarPlan:
+    handle: str
+    org: str
+    days: list[CalendarDay]
+    formats_covered: list[str]
+    vault_items_scheduled: int
+    creation_tasks: int
+    generated_at: str
+```
+
+**Functions to implement:**
+```python
+def build_calendar(
+    handle: str,
+    org: str,
+    days: int,
+    formats_target: int,
+    pulse_db_path: Path,
+    meta_db_path: Path | None,
+    vault_root: Path | None,
+) -> CalendarPlan: ...
+
+def _get_posting_history(handle: str, days: int, conn: sqlite3.Connection) -> dict: ...
+
+def _get_vault_inventory(handle: str, org: str, vault_root: Path) -> list[dict]: ...
+
+def render_calendar(plan: CalendarPlan) -> str: ...
+```
+
+**Output format:**
+```
+@handle — 7-Day Content Calendar (Mon Mar 25 → Sun Mar 31)
+
+Mon Mar 25
+  ① standalone_text · "perp funding rate inversion" · CREATE
+    Why: standalone_text surging at 2.3x; account hasn't posted text-only in 4 days
+  ② [optional 2nd slot if vault has content ready]
+
+Tue Mar 26
+  ① short_clip · "L2 scaling explained" · POST READY → clips/l2_scaling_032024.mp4
+    Why: clip in vault assigned to this account, topic aligned with niche signals
+
+...
+
+Summary: 7 formats across 7 days · 3 vault pieces scheduled · 4 new creation tasks
+```
+
+**Tests (`tests/calendar/test_planner.py`):**
+- `test_vault_content_scheduled`: add 3 unposted vault notes for @handle; assert at least
+  2 slots have `action="post_ready"` in returned plan.
+- `test_format_diversity`: with `formats_target=4`, assert `len(plan.formats_covered) >= 4`.
+- `test_declining_format_capped`: inject meta.db with `single_image` at lift=0.6x.
+  Assert `single_image` appears at most once in 7-day plan.
+- `test_empty_vault`: `_get_vault_inventory()` with no vault directory → returns `[]`,
+  no exception.
+- `test_empty_pulse_db`: `_get_posting_history()` with no posts → returns empty dict,
+  calendar still generated using Claude with "no history" context.
+- `test_render_calendar`: `render_calendar()` produces non-empty string with handle and
+  day names.
+- `test_get_vault_inventory_uses_posted_by_and_suggested_for`: prove the helper excludes
+  already-posted notes and includes notes suggested for the handle even when `account`
+  differs.
+- if `--save` is implemented, save under a report/planning path such as
+  `playbooks/calendar_<handle>_<date>.md` using `atomic_write()`; do not put calendars into
+  `content/` unless they are intentionally part of searchable inventory.
+
+---
+
+### FEATURE-8 · `sable diagnose` — Full Account Audit
+
+**Status:** Complete (2026-03-25). 12 tests · 0 ruff · 0 mypy.
+**Completeness:** All five audit sections implemented and tested.
+
+**Implementation slices (do in order):**
+1. **Slice A — deterministic section helpers + tests** ✓ **Done**
+2. **Slice B — report assembly + rendering** ✓ **Done**
+3. **Slice C — CLI wiring + artifact save path** ✓ **Done**
+
+**Post-implementation notes:**
+- `save_diagnosis_artifact(report, org)` — no `conn` parameter; function opens its own sable.db connection
+- All 5 audit sections match spec: format portfolio, topic freshness, vault utilization, cadence, engagement trend
+- 12 tests in `tests/diagnose/test_runner.py` — all spec tests landed
+- Helper `_norm_handle()` and `_age_days()` added as private utilities (not in spec, necessary for correctness)
+
+**Purpose:** Backward-looking audit of one managed account. Identifies structural problems
+(format over-indexing, topic gaps, vault waste, cadence issues) that the weekly brief
+doesn't surface. Not a forward plan — a diagnosis.
+
+**Command syntax:**
+```
+sable diagnose @handle [--org ORG] [--days 30]
+```
+
+**New files to create:**
+- `sable/diagnose/__init__.py`
+- `sable/diagnose/runner.py` — all audit logic
+- `sable/commands/diagnose.py` — CLI entrypoint
+- `tests/diagnose/test_runner.py`
+
+**Existing files to modify:**
+- `sable/cli.py` — register `diagnose` top-level command
+
+**No new database tables.** Reads pulse.db, meta.db, sable.db, vault filesystem.
+Saves diagnosis as an artifact in sable.db (`artifact_type='account_diagnosis'`).
+- if persistence is implemented, prefer creating a lightweight `diagnose` job and inserting
+  the artifact through the existing jobs/artifacts flow rather than inventing a second save path
+
+**Five audit sections:**
+
+**Section 1 — Format portfolio health:**
+Use Feature 3 logic (`compute_account_format_lift()`). Flag:
+- Over-indexed: any single format accounts for > 50% of posts → WARNING
+- Primary format declining: if account's top-format has niche_lift < 0.8x → WARNING
+- Format gap: niche has ≥ 1 surging format (lift >= 1.5x) never used by account → INFO
+
+**Section 2 — Topic freshness:**
+- Extract account's recent topics: tokenize last 20 post texts (basic bigram extraction;
+  prefer nouns and ticker symbols). Compute top-5 account topics by frequency.
+- Load niche topic signals from meta.db `topic_signals` table (top-10 by `avg_lift * unique_authors`).
+- Flag: niche has topic in top-5 signals not present in account's last-20 posts → INFO
+- Flag: account's top-1 topic not in niche top-10 signals → INFO (possible differentiation,
+  not necessarily bad)
+- Note: do NOT use Claude for topic extraction. Use simple regex tokenizer.
+
+**Section 3 — Vault utilization:**
+```python
+all_notes = load_all_notes(vault_root / org)
+account_notes = [
+    n for n in all_notes
+    if n.get("account") == handle or handle in (n.get("suggested_for") or [])
+]
+unposted = [n for n in account_notes if not n.get("posted_by")]
+stale_unposted = [n for n in unposted if age_days(n.get("assembled_at")) > 7]
+```
+Flag: `len(stale_unposted) > 0` → "N pieces of content older than 7 days not yet posted" → WARNING
+Flag: any unposted note has `topic` matching a niche top-5 signal → "Unposted content on hot
+topic '{topic}' is sitting unused" → WARNING
+- there is no canonical vault `status` field in live notes
+- use `assembled_at`, not a nonexistent `created_at`, for stale inventory checks
+
+**Section 4 — Posting cadence:**
+From pulse.db:
+```sql
+SELECT DATE(posted_at) as post_date, COUNT(*) as post_count
+FROM posts
+WHERE account_handle = ? AND posted_at >= datetime('now', '-30 days')
+GROUP BY DATE(posted_at)
+ORDER BY post_date
+```
+- Average posts per day over window
+- Max posts in a single day
+- Number of days with zero posts in window
+- Longest dry spell (consecutive days with no posts)
+
+Flag: `avg_posts_per_day > 3` → "High posting rate may dilute per-post engagement" → INFO
+Flag: `avg_posts_per_day < 0.5` → "Low activity: averaging less than 1 post every 2 days" → WARNING
+Flag: `longest_dry_spell >= 5` → "Longest dry spell: {N} days" → WARNING
+
+**Section 5 — Engagement trend:**
+From pulse.db snapshots, compute rolling 7d average engagement for last 4 weeks.
+Flag: week-over-week engagement drop > 20% for two consecutive weeks → "Engagement declining
+for 2+ weeks" → WARNING.
+If fewer than 10 posts in window, skip this section with "insufficient data" note.
+
+**Output format (console + saved to sable.db artifact):**
+```
+Diagnosis: @handle (last 30d) — Generated 2026-03-24
+
+═══ Format Portfolio ════════════════════════════════════════════
+  ✅ standalone_text dominant (48%) — currently surging in niche (aligned)
+  ⚠  thread: niche rising (1.7x) but you're flat (0.9x) — execution gap
+  ⚠  short_clip: niche surging (2.1x) — you've never posted this format
+
+═══ Topic Freshness ═════════════════════════════════════════════
+  ℹ  Niche trending: "solana infra" — not in your last 20 posts
+  ℹ  Your top topic "ETH gas" ranks #12 in niche signals (moderate alignment)
+
+═══ Vault Utilization ══════════════════════════════════════════
+  ⚠  7 unposted pieces older than 7 days
+  ⚠  2 unposted clips on "L2 scaling" — currently in niche top-5 signals
+
+═══ Posting Cadence ════════════════════════════════════════════
+  ✅ 1.2 posts/day average (healthy)
+  ⚠  Longest dry spell: 6 consecutive days (Mar 10–15)
+
+═══ Engagement Trend ═══════════════════════════════════════════
+  ⚠  Engagement dropped 28% week-over-week (weeks ending Mar 17, Mar 24)
+
+─── Summary ────────────────────────────────────────────────────
+  3 warnings, 2 info items
+  Saved as diagnosis artifact {artifact_id}
+```
+
+**Dataclass models:**
+```python
+from enum import Enum
+
+class FindingSeverity(Enum):
+    WARNING = "warning"
+    INFO = "info"
+    OK = "ok"
+
+@dataclass
+class Finding:
+    section: str
+    severity: FindingSeverity
+    message: str
+    detail: str | None = None
+
+@dataclass
+class DiagnosisReport:
+    handle: str
+    org: str
+    days: int
+    generated_at: str
+    findings: list[Finding]
+    artifact_id: str | None = None  # set after saving to sable.db
+```
+
+**Functions to implement:**
+```python
+def run_diagnosis(
+    handle: str,
+    org: str,
+    days: int,
+    pulse_db_path: Path,
+    meta_db_path: Path | None,
+    vault_root: Path | None,
+    sable_db_path: Path,
+) -> DiagnosisReport: ...
+
+def _audit_format_portfolio(handle, org, days, pulse_db_path, meta_db_path) -> list[Finding]: ...
+def _audit_topic_freshness(handle, org, pulse_db_path, meta_db_path) -> list[Finding]: ...
+def _audit_vault_utilization(handle, org, vault_root, meta_db_path) -> list[Finding]: ...
+def _audit_posting_cadence(handle, pulse_db_path, days) -> list[Finding]: ...
+def _audit_engagement_trend(handle, pulse_db_path) -> list[Finding]: ...
+
+def render_diagnosis(report: DiagnosisReport) -> str: ...
+
+def save_diagnosis_artifact(report: DiagnosisReport, conn: sqlite3.Connection, org: str) -> str:
+    """Saves to sable.db artifacts table. Returns artifact_id."""
+```
+
+**Tests (`tests/diagnose/test_runner.py`):**
+- `test_format_over_indexing`: 80% of posts are standalone_text → WARNING finding in section 1.
+- `test_format_execution_gap`: niche thread lift=1.7x (from meta.db), account thread lift=0.9x
+  → "execution gap" WARNING finding.
+- `test_format_gap`: niche has short_clip surging, no short_clip posts in pulse.db for @handle
+  → "never used" INFO finding.
+- `test_topic_gap`: meta.db has "solana infra" as top signal, not in last 20 post texts
+  → INFO finding.
+- `test_vault_stale_unposted`: 5 vault notes for @handle with `assembled_at` 10 days ago and
+  empty `posted_by` → WARNING with count=5.
+- `test_vault_hot_topic_unposted`: vault note with `topic="L2 scaling"` matches meta.db
+  topic signal → WARNING.
+- `test_cadence_dry_spell`: pulse.db has no posts for 7 consecutive days → WARNING.
+- `test_cadence_low_activity`: 5 posts in 30 days (avg < 0.2/day) → WARNING.
+- `test_engagement_trend_declining`: week-over-week snapshots show 30% drop for 2 weeks
+  → WARNING.
+- `test_all_clear`: healthy account data → 0 warnings, only OK/INFO findings, no exception.
+- `test_artifact_saved`: `save_diagnosis_artifact()` writes to sable.db; confirm row in
+  artifacts with correct `artifact_type='account_diagnosis'` and org.
+- `test_insufficient_data_graceful`: pulse.db has 3 posts (< 10 threshold for engagement
+  trend) → section 5 returns INFO "insufficient data", no crash.
+
+---
+
+### Shared Infrastructure Notes
+
+**All features must follow these patterns (already established in codebase):**
+
+- API keys loaded from env vars or `~/.sable/config.yaml` — never hardcoded
+- Claude calls use `sable/shared/api.py::call_claude_json()` or `call_claude()`
+- org-scoped Claude calls pass `org_id` and a meaningful `call_type`
+- non-org call sites annotated with `# budget-exempt: <reason>` comment
+- File writes use `sable/shared/files.py::atomic_write()` for any markdown/JSON output
+- Config values accessed via `sable.config.get(...)`, `load_config()`, or `require_key()`
+- keep DB access consistent with the surrounding module
+  - local helper modules can own short-lived connections
+  - CLI orchestration can pass an existing connection when the repo already follows that pattern
+  - do **not** invent a second DB-access style inside the same feature
+- All `except Exception` blocks must `logger.warning(...)` — no silent swallows
+- `load_all_notes()` only covers `vault/content/**`
+  - if a feature expects search/discovery through existing vault tooling, write notes there or
+    widen the loader and CLI deliberately with tests
+
+**New modules (`write/`, `calendar/`, `diagnose/`) should follow existing module pattern:**
+- `__init__.py` (empty or exports)
+- Main logic file (generator.py, planner.py, runner.py)
+- CLI command module in `sable/commands/`
+- registration in `sable/cli.py`
+- Tests in `tests/{module_name}/`
+
+**Pulse/meta DB migrations:** Features 2 and 4 add tables to `meta.db`. These must be
+added to `pulse/meta/db.py::_SCHEMA` string so `migrate()` creates them automatically.
+Do NOT add them as separate migration files — meta.db uses `_SCHEMA` executescript, not
+the migration runner used by sable.db.
+
+---
+
+### Validation Checklist (run after each patch set, and again after each feature)
+
+Do **not** wait until the whole feature suite is “done.” Run this after every feature slice.
+
+```bash
+# Full test suite — must stay green, no regressions
+./.venv/bin/python -m pytest -q
+
+# Lint — must stay at 0 violations
+./.venv/bin/ruff check .
+
+# Type check — must stay at 0 errors
+./.venv/bin/mypy sable
+
+# Smoke test: new commands registered and help strings visible
+sable write --help
+sable score --help
+sable pulse account --help
+sable pulse meta digest --help
+sable calendar --help
+sable diagnose --help
+
+# Smoke test: commands handle missing data gracefully
+sable write @nonexistent_handle 2>&1 | grep -i "not found\|no account"
+sable pulse account @handle --days 30  # with empty pulse.db — should print "no data"
+sable diagnose @handle  # with empty dbs — should print report with "insufficient data" notes
+```

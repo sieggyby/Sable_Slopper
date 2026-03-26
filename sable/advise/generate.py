@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sable.platform.db import get_db
-from sable.platform.errors import SableError, HANDLE_NOT_IN_ROSTER, NO_ORG_FOR_HANDLE, ORG_NOT_FOUND, BUDGET_EXCEEDED, BRIEF_CAP_EXCEEDED
+from sable.platform.errors import SableError, HANDLE_NOT_IN_ROSTER, NO_ORG_FOR_HANDLE, ORG_NOT_FOUND, BUDGET_EXCEEDED, BRIEF_CAP_EXCEEDED, redact_error
 from sable.platform.jobs import create_job, add_step, start_step, complete_step, fail_step
 from sable.platform.cost import log_cost, check_budget
 from sable.advise.stage1 import assemble_input, render_summary
@@ -97,6 +97,7 @@ def generate_advise(
     # Check cache
     cache_hit, cached_path = _check_cache(conn, org_id, normalized_handle, force)
     if cache_hit:
+        assert cached_path is not None  # _check_cache returns non-None path on hit
         return cached_path
 
     # Dry run: estimate cost and exit
@@ -143,10 +144,11 @@ def generate_advise(
         assembled = assemble_input(normalized_handle, org_id, conn)
         complete_step(conn, s1_step)
     except Exception as e:
-        fail_step(conn, s1_step, str(e))
+        _err = redact_error(str(e))
+        fail_step(conn, s1_step, _err)
         conn.execute(
             "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (str(e), job_id)
+            (_err, job_id)
         )
         conn.commit()
         raise
@@ -190,10 +192,11 @@ def generate_advise(
 
         complete_step(conn, s2_step)
     except Exception as e:
-        fail_step(conn, s2_step, str(e))
+        _err = redact_error(str(e))
+        fail_step(conn, s2_step, _err)
         conn.execute(
             "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (str(e), job_id)
+            (_err, job_id)
         )
         conn.commit()
         raise

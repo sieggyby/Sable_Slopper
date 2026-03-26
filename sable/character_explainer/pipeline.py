@@ -135,6 +135,7 @@ def generate_explainer(
         except Exception as e:
             print(f"[thumbnail] character thumbnail failed: {e}")
     elif use_photo:
+        assert character.thumbnail_photo_path is not None
         photo = Path(character.thumbnail_photo_path).expanduser()
         thumb2 = output_path.with_suffix(".thumbnail.png")
         try:

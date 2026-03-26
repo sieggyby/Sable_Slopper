@@ -1,6 +1,9 @@
 """Workspace path resolution for sable."""
+import re
 from pathlib import Path
 import os
+
+_ORG_SLUG = re.compile(r'^[a-zA-Z0-9_-]+$')
 
 
 def sable_home() -> Path:
@@ -87,3 +90,45 @@ def downloads_dir() -> Path:
     d = workspace() / "downloads"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def explainer_resources_dir() -> Path:
+    """~/.sable/explainer_resources — one subdirectory per topic slug."""
+    d = sable_home() / "explainer_resources"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def sable_db_path() -> Path:
+    return sable_home() / "sable.db"
+
+
+def meta_db_path() -> Path:
+    d = sable_home() / "pulse"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "meta.db"
+
+
+def watchlist_path() -> Path:
+    d = sable_home() / "pulse"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "watchlist.yaml"
+
+
+def vault_dir(org: str = "") -> Path:
+    """Root of the sable vault (or org sub-vault if org specified)."""
+    from sable import config as cfg
+    base = cfg.get("vault_base_path", "")
+    if base:
+        root = Path(base).expanduser()
+    else:
+        root = Path.home() / "sable-vault"
+    if org:
+        if not _ORG_SLUG.match(org):
+            from sable.platform.errors import SableError, INVALID_ORG_ID
+            raise SableError(INVALID_ORG_ID, f"Invalid org slug: {org!r}")
+        d = root / org
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    root.mkdir(parents=True, exist_ok=True)
+    return root

@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 _FFMPEG_SPECIAL = re.compile(r'[;:\[\]=]')
 
@@ -272,7 +272,7 @@ def encode_audio_over_brainrot(
     Use for podcasts and screen-share recordings with no usable video content.
     """
     from sable.clip.assembler import PLATFORM_PROFILES
-    p = PLATFORM_PROFILES.get(platform, PLATFORM_PROFILES["twitter"])
+    p: dict[str, Any] = PLATFORM_PROFILES.get(platform, PLATFORM_PROFILES["twitter"])
     w = p["width"]
     full_h = p["half_height"] * 2
 
@@ -341,6 +341,8 @@ def overlay_image_on_video(
     """Overlay a PNG image onto a video. Default position: bottom-left."""
     ffmpeg = require_ffmpeg()
 
+    x: Any
+    y: Any
     if position == "bottom-left":
         x, y = padding, f"H-h-{padding}"
     elif position == "bottom-right":

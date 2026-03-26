@@ -55,7 +55,7 @@ def generate_character_thumbnail(
             scale = H / ch
             scaled_w = int(cw * scale)
             scaled_h = H
-            char_img = char_img.resize((scaled_w, scaled_h), Image.LANCZOS)
+            char_img = char_img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
             # Anchor bottom-right with a slight bleed
             paste_x = W - scaled_w + 20
             paste_y = 0
@@ -138,13 +138,14 @@ def generate_photo_thumbnail(
     elif ph > pw:
         y0 = (ph - pw) // 2
         photo = photo.crop((0, y0, pw, y0 + pw))
-    photo = photo.resize((W, H), Image.LANCZOS)
+    photo = photo.resize((W, H), Image.Resampling.LANCZOS)
 
     canvas = photo.copy().convert("RGBA")
 
     # Radial vignette — darken corners by ~50%
     vignette = Image.new("L", (W, H), 0)
     v_pixels = vignette.load()
+    assert v_pixels is not None
     cx, cy = W // 2, H // 2
     max_dist = (cx**2 + cy**2) ** 0.5
     for y in range(H):
@@ -160,6 +161,7 @@ def generate_photo_thumbnail(
     # Bottom gradient fade y=700→1200, black 0%→60%
     grad_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     g_pixels = grad_layer.load()
+    assert g_pixels is not None
     grad_start = 700
     for y in range(grad_start, H):
         t = (y - grad_start) / (H - grad_start)
@@ -197,7 +199,7 @@ def generate_photo_thumbnail(
         if current:
             lines.append(current)
 
-        line_h = draw.textbbox((0, 0), "Ag", font=font)[3] + 10
+        line_h: int = int(draw.textbbox((0, 0), "Ag", font=font)[3]) + 10
         total_h = line_h * len(lines)
         # Must fit between y=700 and y=text_y_max
         if total_h < (text_y_max - 700):

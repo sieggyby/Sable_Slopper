@@ -83,12 +83,16 @@ def pick(
     energy: str = "medium",
     min_duration: float = 0.0,
     tags: Optional[list[str]] = None,
+    clip_duration: float = 0.0,
 ) -> Optional[str]:
     """
     Select a random brainrot video matching energy level.
     Falls back to adjacent energy levels if no exact match.
+    When clip_duration > 0, prefers sources >= clip_duration / 2 (max 2x loop).
     Returns file path or None.
     """
+    if energy == "none":
+        return None
     index = load_index()
     # Filter to existing files
     index = [e for e in index if Path(e.get("path", "")).exists()]
@@ -107,8 +111,14 @@ def pick(
     fallback_order = _energy_fallback(energy)
     for eng in fallback_order:
         candidates = [e for e in index if matches(e, eng)]
-        if candidates:
-            return random.choice(candidates)["path"]
+        if not candidates:
+            continue
+        if clip_duration > 0:
+            # Prefer sources that won't loop more than 2x
+            preferred = [c for c in candidates if c.get("duration", 0) >= clip_duration / 2.0]
+            if preferred:
+                return random.choice(preferred)["path"]
+        return random.choice(candidates)["path"]
     return None
 
 
@@ -136,6 +146,16 @@ def loop_to_duration(video_path: str | Path, target_duration: float, output_path
         raise ValueError(f"Cannot determine duration of {video_path}")
 
     loops = int(target_duration / src_duration) + 2
+    # AR5-28: cap loops to prevent runaway ffmpeg for very short brainrot clips
+    _MAX_LOOPS = 30  # why: 30 loops × even a 1s clip = 30s, well beyond any real target
+    if loops > _MAX_LOOPS:
+        import warnings
+        warnings.warn(
+            f"loop_to_duration: capping loops {loops} → {_MAX_LOOPS} for {video_path}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        loops = _MAX_LOOPS
     run([
         require_ffmpeg(), "-y",
         "-stream_loop", str(loops),

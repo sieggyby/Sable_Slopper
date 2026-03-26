@@ -13,7 +13,59 @@ _DEFAULTS: dict = {
     "socialdata_api_key": "",
     "default_model": "claude-sonnet-4-6",
     "workspace": str(Path.home() / "sable-workspace"),
+    "pulse_meta": {
+        "lookback_hours": 48,
+        "baseline_long_days": 30,
+        "baseline_short_days": 7,
+        "min_baseline_days": 5,
+        "min_samples_for_trend": 4,
+        "min_authors_for_trend": 2,
+        "concentration_threshold": 0.50,
+        "surging_threshold": 2.5,
+        "rising_threshold": 1.5,
+        "declining_threshold": 0.8,
+        "dead_threshold": 0.5,
+        "lift_threshold": 1.5,
+        "aggregation_method": "weighted_mean",
+        "max_cost_per_run": 1.00,
+        "claude_model": "claude-sonnet-4-6",
+        "top_n_for_analysis": 20,
+        "engagement_weights": {
+            "likes": 1.0,
+            "replies": 12.0,
+            "reposts": 20.0,
+            "quotes": 25.0,
+            "bookmarks": 10.0,
+            "video_views": 6.0,
+        },
+    },
+    "platform": {
+        "cost_caps": {
+            "max_ai_usd_per_org_per_week": 5.00,
+            "max_ai_usd_per_playbook": 0.15,
+            "max_ai_usd_per_strategy_brief": 0.20,
+            "max_ai_usd_per_vault_sync": 0.00,
+            "max_external_api_calls_per_feedback_loop": 500,
+            "max_retries_per_step": 2,
+        },
+        "model_ladder": {
+            "primary": "claude-sonnet-4-20250514",
+            "fallback": "claude-haiku-4-5-20251001",
+            "template_only": None,
+        },
+        "degrade_mode": "fallback",
+    },
 }
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def load_config() -> dict:
@@ -23,7 +75,7 @@ def load_config() -> dict:
             data = yaml.safe_load(f) or {}
     else:
         data = {}
-    return {**_DEFAULTS, **data}
+    return _deep_merge(_DEFAULTS, data)
 
 
 def save_config(cfg: dict) -> None:

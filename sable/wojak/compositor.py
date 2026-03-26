@@ -56,7 +56,7 @@ def _fit_wojak(img: Image.Image, slot_w: int, slot_h: int) -> Image.Image:
     scale = min(slot_w / orig_w, slot_h / orig_h, 1.0)
     new_w = max(1, int(orig_w * scale))
     new_h = max(1, int(orig_h * scale))
-    return img.resize((new_w, new_h), Image.LANCZOS)
+    return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
 
 def render_scene(
@@ -79,7 +79,7 @@ def render_scene(
     try:
         label_font = load_font("modern", LABEL_FONT_SIZE)
     except Exception:
-        label_font = ImageFont.load_default()
+        label_font = ImageFont.load_default()  # type: ignore[assignment]
 
     try:
         caption_font = load_font("modern", CAPTION_FONT_SIZE)

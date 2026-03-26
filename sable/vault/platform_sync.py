@@ -119,15 +119,18 @@ def _build_entity_note(entity: dict, handles: list[dict], tags: list[dict],
     # Content section (last 90 days)
     from datetime import timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-    recent_content = [c for c in content_items if (c["created_at"] or "") >= cutoff]
+    recent_content = [
+        c for c in content_items
+        if (c.get("source_time") or c.get("created_at") or "") >= cutoff
+    ]
     if recent_content:
         lines.append("\n## Content\n")
         for c in recent_content:
             fmt = c["content_type"] or "unknown"
             body_preview = (c["body"] or "")[:80]
             url = c["url"] if isinstance(c, dict) else None
-            created = c["created_at"] or ""
-            line = f"- [{fmt}] {body_preview} ({created})"
+            display_time = c.get("source_time") or c.get("created_at") or ""
+            line = f"- [{fmt}] {body_preview} ({display_time})"
             if url:
                 line += f" [link]({url})"
             lines.append(line + "\n")
@@ -299,10 +302,12 @@ def platform_vault_sync(org_id: str) -> dict:
         conn.commit()
         return stats
     except Exception as e:
-        fail_step(conn, step_id, str(e))
+        from sable.platform.errors import redact_error
+        _err = redact_error(str(e))
+        fail_step(conn, step_id, _err)
         conn.execute(
             "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (str(e), job_id)
+            (_err, job_id)
         )
         conn.commit()
         raise
@@ -366,7 +371,9 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
 
         # content_items: get url from metadata_json
         content_rows = conn.execute(
-            "SELECT * FROM content_items WHERE entity_id=? ORDER BY created_at DESC LIMIT 50",
+            "SELECT *, COALESCE(posted_at, created_at) AS source_time "
+            "FROM content_items WHERE entity_id=? "
+            "ORDER BY COALESCE(posted_at, created_at) DESC LIMIT 50",
             (eid,)
         ).fetchall()
         items = []

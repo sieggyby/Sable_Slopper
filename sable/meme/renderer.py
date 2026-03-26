@@ -15,7 +15,7 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, draw: ImageDraw.ImageDra
     """Wrap text to fit within max_width pixels."""
     words = text.split()
     lines = []
-    current = []
+    current: list[str] = []
     for word in words:
         test = " ".join(current + [word])
         bbox = draw.textbbox((0, 0), test, font=font)
@@ -117,13 +117,14 @@ def render_meme(
         tx = zx + (zw - tw) // 2
         ty = zy + (zh - th) // 2
 
+        pos = (int(tx), int(ty))
         if render_style == "classic":
-            _draw_outlined_text(draw, (tx, ty), wrapped, font, outline_width=3)
+            _draw_outlined_text(draw, pos, wrapped, font, outline_width=3)
         elif render_style == "modern":
-            _draw_outlined_text(draw, (tx, ty), wrapped, font,
+            _draw_outlined_text(draw, pos, wrapped, font,
                                 fill=(30, 30, 30), outline=(220, 220, 220), outline_width=1)
         else:  # minimal
-            _draw_shadow_text(draw, (tx, ty), wrapped, font)
+            _draw_shadow_text(draw, pos, wrapped, font)
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,6 +144,6 @@ def _placeholder_image(template: dict) -> Image.Image:
     try:
         font = load_font("classic", 40)
     except Exception:
-        font = ImageFont.load_default()
+        font = ImageFont.load_default()  # type: ignore[assignment]
     draw.text((400, 300), f"[{template['name']}]", font=font, fill=(200, 200, 200), anchor="mm")
     return img

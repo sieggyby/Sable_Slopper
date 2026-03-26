@@ -1,9 +1,12 @@
 """Platform CLI command groups: org, entity, job, db, resume."""
 from __future__ import annotations
 
+import logging
 import sys
 
 import click
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +112,8 @@ def org_status(org_id):
                 ).fetchone()
                 pulse_last_track = row[0] if row else None
                 pconn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not read pulse freshness: %s", e)
 
         # Meta freshness (read-only, best-effort)
         meta_last_scan = None
@@ -125,8 +128,8 @@ def org_status(org_id):
                 ).fetchone()
                 meta_last_scan = row[0] if row else None
                 mconn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not read meta freshness: %s", e)
 
         click.echo(f"Org: {org['org_id']} — {org['display_name']}")
         click.echo(f"  Status:               {org['status']}")

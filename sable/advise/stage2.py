@@ -1,7 +1,9 @@
 """Stage 2: AI synthesis for Twitter strategy brief."""
 from __future__ import annotations
 
-import anthropic
+from typing import Optional
+
+from sable.shared.api import call_claude_with_usage
 
 
 OUTPUT_FORMAT_CONTRACT = """
@@ -28,32 +30,21 @@ def synthesize(
     assembled_summary: str,
     model: str = "claude-sonnet-4-20250514",
     max_tokens: int = 1500,
+    org_id: Optional[str] = None,
 ) -> tuple[str, float, int, int]:
     """
     Call Claude with the assembled summary.
     Returns (response_text, cost_usd, input_tokens, output_tokens).
     """
-    client = anthropic.Anthropic()
-
-    response = client.messages.create(
+    result = call_claude_with_usage(
+        assembled_summary,
+        system=system_prompt,
         model=model,
         max_tokens=max_tokens,
-        system=system_prompt,
-        messages=[{"role": "user", "content": assembled_summary}],
+        org_id=org_id,
+        call_type="advise",
     )
-
-    text = response.content[0].text if response.content else ""
-    input_tokens = response.usage.input_tokens
-    output_tokens = response.usage.output_tokens
-
-    # Rough cost estimate
-    # Sonnet: ~$3/$15 per million input/output tokens
-    # Haiku: ~$0.25/$1.25 per million
-    cost_usd = (input_tokens * 3.0 + output_tokens * 15.0) / 1_000_000
-    if "haiku" in model.lower():
-        cost_usd = (input_tokens * 0.25 + output_tokens * 1.25) / 1_000_000
-
-    return text, cost_usd, input_tokens, output_tokens
+    return result.text, result.cost_usd, result.input_tokens, result.output_tokens
 
 
 def build_system_prompt(profile: dict) -> str:

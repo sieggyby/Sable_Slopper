@@ -1,0 +1,47 @@
+---
+org: "{{ org }}"
+type: vault_index
+generated_at: "{{ generated_at }}"
+total_clips: {{ total_clips }}
+total_memes: {{ total_memes }}
+total_faceswaps: {{ total_faceswaps }}
+total_explainers: {{ total_explainers }}
+total_content: {{ total_content }}
+---
+
+# Sable Vault — {{ org }}
+
+_Generated: {{ generated_at }}_
+
+## Content Inventory
+
+| Type | Count |
+|------|-------|
+| Clips | {{ total_clips }} |
+| Memes | {{ total_memes }} |
+| Faceswaps | {{ total_faceswaps }} |
+| Explainers | {{ total_explainers }} |
+| **Total** | **{{ total_content }}** |
+
+## Accounts
+
+{% for acc in accounts %}
+- **{{ acc.handle }}** — {{ acc.content_count }} pieces, {{ acc.posted_count }} posted
+{% endfor %}
+
+## Top Unused Content
+
+{% if top_unused %}
+{% for item in top_unused %}
+- [[content/{{ item.type }}s/{{ item.id }}|{{ item.id }}]] — {{ item.account }} | {{ item.topic or item.type }}
+{% endfor %}
+{% else %}
+_No unused content found._
+{% endif %}
+
+## Quick Links
+
+- [[strategy/]] — Strategy docs
+- [[voices/]] — Voice profiles
+- [[topics/]] — Topic hubs
+- [[posting-log/]] — Posting history

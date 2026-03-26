@@ -17,14 +17,15 @@ def advise_command(handle, cheap, force, dry_run):
     from rich.console import Console
 
     console = Console()
+    err_console = Console(stderr=True)
 
     try:
         path = generate_advise(handle, force=force, cheap=cheap, dry_run=dry_run)
         if not dry_run and path:
             console.print(f"[green]✓ Strategy brief:[/green] {path}")
     except SableError as e:
-        console.print(f"[red]Error [{e.code}]: {e.message}[/red]", err=True)
+        err_console.print(f"[red]Error [{e.code}]: {e.message}[/red]")
         sys.exit(1)
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]", err=True)
+        err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)

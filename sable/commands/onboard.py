@@ -6,6 +6,7 @@ import click
 from rich.console import Console
 
 console = Console()
+err_console = Console(stderr=True)
 
 
 @click.command("onboard")
@@ -23,8 +24,8 @@ def onboard_command(prospect_yaml, org_id, yes, non_interactive):
         console.print(f"[green]✓ Onboarding complete.[/green] Job: {job_id}")
         console.print(f"  Run [cyan]sable job show {job_id}[/cyan] to see all steps.")
     except SableError as e:
-        console.print(f"[red]Error [{e.code}]: {e.message}[/red]", err=True)
+        err_console.print(f"[red]Error [{e.code}]: {e.message}[/red]")
         sys.exit(1)
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]", err=True)
+        err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
