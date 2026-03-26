@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Sable Slopper is a CLI toolkit with 11 subsystems sharing a common config layer, three SQLite databases, and three external API integrations.
+Sable Slopper is a CLI toolkit with 13 subsystems sharing a common config layer, three SQLite databases, and three external API integrations.
 
 ---
 
@@ -32,12 +32,17 @@ sable/
 ├── character_explainer/ ← character explainer videos (TTS + brainrot)
 ├── wojak/               ← wojak meme generation
 │
-├── pulse/               ← performance tracking
-│   ├── cli.py           ← sable pulse group
+├── pulse/               ← performance tracking + attribution
+│   ├── cli.py           ← sable pulse group (track, report, recommend, export, trends, account, attribution, link, meta)
 │   ├── tracker.py       ← tweet fetch + DB write
 │   ├── reporter.py      ← performance reporting
 │   ├── recommender.py   ← AI recommendations from pulse data
+│   ├── attribution.py   ← ContentAttribution: Sable vs organic engagement breakdown
+│   ├── account_report.py ← per-format lift report
 │   └── meta/            ← content shape intelligence (see below)
+│
+├── calendar/            ← posting schedule planner
+│   └── planner.py       ← CalendarPlan dataclasses + build_calendar + render_calendar
 │
 └── vault/               ← content vault operations
     ├── init.py          ← vault directory structure creation
@@ -92,7 +97,7 @@ Three SQLite databases, all stored in `$SABLE_HOME/` (default `~/.sable/`).
 
 | API | Used by | Key | Notes |
 |-----|--------|-----|-------|
-| Anthropic (Claude) | `clip`, `meme`, `pulse recommend`, `pulse meta`, `vault suggest`, `vault search`, `character-explainer` | `ANTHROPIC_API_KEY` | Core intelligence layer |
+| Anthropic (Claude) | `clip`, `meme`, `pulse recommend`, `pulse meta`, `vault suggest`, `vault search`, `character-explainer`, `calendar` | `ANTHROPIC_API_KEY` | Core intelligence layer |
 | SocialData | `pulse track`, `pulse trends`, `pulse meta scan` | `SOCIALDATA_API_KEY` | Twitter/X data provider; $0.002/request |
 | Replicate | `face` | `REPLICATE_API_TOKEN` | Hosted face-swap model inference |
 | ElevenLabs | `character-explainer` (elevenlabs backend) | `ELEVENLABS_API_KEY` | Hosted TTS; voice ID set per-character in profile.yaml |
@@ -157,6 +162,42 @@ Source video / URL
       │
       ▼
   Console report + ~/.sable-vault/{org}/pulse_meta_report.md
+```
+
+### Calendar planning pipeline
+
+```
+pulse.db (posting history)
+meta.db  (format baselines)
+vault    (unposted notes)
+      │
+      ▼
+  planner.py         ← _get_posting_history + _get_format_trends + _get_vault_inventory
+      │
+      ▼
+  Claude call        ← formats_target + trends + inventory → daily slot plan (JSON)
+      │
+      ▼
+  CalendarPlan       ← CalendarDay[] + CalendarSlot[] dataclasses
+      │
+      ▼
+  render_calendar()  ← markdown output / optional save to ~/.sable/playbooks/
+```
+
+### Content attribution pipeline
+
+```
+pulse.db (posts + snapshots for last N days)
+meta.db  (format baselines for meta-informed classification)
+      │
+      ▼
+  attribution.py     ← compute_attribution(handle, days, org)
+      │
+      ▼
+  ContentAttribution ← Sable vs organic engagement, per-format breakdown, meta lift
+      │
+      ▼
+  render_attribution_report() ← markdown table output
 ```
 
 ---

@@ -19,7 +19,9 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 ## Current Phase
 
 **Phase 1 (CLI) is complete.** All vault, pulse, clip, meme, face, character-explainer,
-and wojak commands are implemented.
+wojak, calendar, write, score, diagnose, and advise commands are implemented.
+`sable pulse` now has 9 subcommands: `track`, `report`, `recommend`, `export`, `trends`,
+`account`, `attribution`, `link`, and the `meta` subgroup.
 
 **Platform layer (Round 1) is complete.** `sable.db` is live at `~/.sable/sable.db`.
 `sable/platform/` provides shared entity, tag, merge, job, cost, and error helpers.

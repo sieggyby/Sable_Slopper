@@ -238,6 +238,7 @@ def generate_tweet_variants(
             system=system_prompt,
             max_tokens=2048,
             call_type="write_variants",
+            org_id=resolved_org,
         )
 
         # Parse response

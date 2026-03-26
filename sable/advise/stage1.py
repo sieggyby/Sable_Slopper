@@ -23,7 +23,8 @@ def _open_db_readonly(path: Path) -> Optional[sqlite3.Connection]:
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         return conn
-    except Exception:
+    except Exception as e:
+        logger.warning("stage1: _open_db_readonly failed (path=%s): %s", path, e)
         return None
 
 
@@ -32,8 +33,8 @@ def _read_profile_file(handle_dir: Path, filename: str) -> str:
     if p.exists():
         try:
             return p.read_text(encoding="utf-8").strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("stage1: _read_profile_file failed (path=%s): %s", p, e)
     return "(not configured)"
 
 
@@ -70,6 +71,7 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
         "entities": [],
         "content_items": [],
         "tracking_last_sync": None,
+        "attribution": None,
         "data_freshness": {
             "pulse_last_track": None,
             "meta_last_scan": None,
@@ -285,7 +287,7 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                 })
         result["content_items"] = items
     except Exception as e:
-        logger.warning("sable.db entity read failed: %s", e, exc_info=True)
+        logger.warning("sable.db content_items read failed: %s", e, exc_info=True)
         result.setdefault("failed_sources", []).append("sable.db content")
         result["content_items"] = []
         platform_ok = False
@@ -302,6 +304,15 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
         logger.warning("tracking read failed: %s", e, exc_info=True)
         result.setdefault("failed_sources", []).append("tracking")
         platform_ok = False
+
+    # --- Content attribution ---
+    try:
+        from sable.pulse.attribution import compute_attribution
+        attr = compute_attribution(normalized_handle, days=30, org=org_id if org_id else None)
+        result["attribution"] = attr
+    except Exception as e:
+        logger.warning("attribution computation failed: %s", e, exc_info=True)
+        result["attribution"] = None
 
     result["data_quality"] = {
         "pulse_ok": result["pulse_available"],
@@ -354,6 +365,26 @@ def render_summary(data: dict) -> str:
             if worst[0]:
                 avg = sum(worst[1]) / len(worst[1])
                 lines.append(f"Worst format: {worst[0]} — avg lift: {avg:.2f}")
+        lines.append("")
+
+    # Content Attribution
+    attr = data.get("attribution")
+    if attr and attr.sable_posts >= 5:
+        lines.append("## Content Attribution (last 30 days)")
+        lines.append(
+            f"Sable-produced: {attr.sable_posts} of {attr.total_posts} posts "
+            f"({attr.sable_share_of_posts:.0%}), generating {attr.sable_share_of_engagement:.0%} of total engagement."
+        )
+        if attr.sable_lift_vs_organic is not None:
+            lines.append(
+                f"Sable avg engagement: {attr.sable_avg_engagement:.0f} "
+                f"vs organic: {attr.organic_avg_engagement:.0f} ({attr.sable_lift_vs_organic:+.0%})."
+            )
+        if attr.meta_available and attr.meta_lift is not None:
+            lines.append(
+                f"Meta-informed content ({attr.meta_informed_posts} of {attr.sable_posts} Sable posts): "
+                f"avg {attr.meta_informed_avg:.0f} vs non-meta {attr.non_meta_informed_avg:.0f} ({attr.meta_lift:+.0%})."
+            )
         lines.append("")
 
     # Pulse Meta Trends

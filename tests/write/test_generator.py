@@ -336,3 +336,32 @@ def test_generate_passes_source_url_in_prompt(monkeypatch):
     )
 
     assert "https://t.co/abc" in captured["prompt"]
+
+
+def test_write_generator_passes_org_id_to_call_claude_json(monkeypatch):
+    """call_claude_json must receive org_id so cost is logged."""
+    import json as _json
+    from sable.write.generator import generate_tweet_variants
+
+    captured: dict = {}
+
+    monkeypatch.setattr("sable.write.generator.require_account", lambda h: _make_account())
+    monkeypatch.setattr("sable.write.generator.build_account_context", lambda acc: "ctx")
+    monkeypatch.setattr(
+        "sable.write.generator.call_claude_json",
+        lambda prompt, system="", **kwargs: (captured.update(kwargs) or _good_response()),
+    )
+
+    generate_tweet_variants(
+        handle="@testwriter",
+        org="testorg",
+        format_bucket="standalone_text",
+        topic="test topic",
+        source_url=None,
+        num_variants=1,
+        meta_db_path=None,
+        vault_root=None,
+    )
+
+    assert captured.get("org_id") is not None, "org_id must be passed to call_claude_json"
+    assert captured["org_id"] == "testorg"

@@ -760,3 +760,59 @@ def test_generate_no_caveats_when_healthy(conn, tmp_path, monkeypatch):
 
     content = Path(result).read_text(encoding="utf-8")
     assert "## Data Caveats" not in content, "No Data Caveats section when all flags healthy"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Export tests
+# ─────────────────────────────────────────────────────────────────────
+
+def test_export_calls_atomic_write_with_correct_path(conn, tmp_path, monkeypatch):
+    """generate_advise(export=True) calls atomic_write once with correct path and content."""
+    from datetime import date
+    from sable.advise.generate import generate_advise
+
+    _setup_generate_mocks(monkeypatch, conn, tmp_path)
+
+    today = date.today().isoformat()
+    atomic_write_calls = []
+
+    def fake_atomic_write(path, content, encoding="utf-8"):
+        atomic_write_calls.append({"path": Path(path), "content": content})
+
+    with patch("sable.shared.files.atomic_write", fake_atomic_write):
+        generate_advise("alice", export=True)
+
+    assert len(atomic_write_calls) == 1, f"Expected 1 call, got {len(atomic_write_calls)}"
+    assert atomic_write_calls[0]["path"] == Path("output") / f"advise_testorg_{today}.md"
+    assert "---" in atomic_write_calls[0]["content"]
+
+
+def test_no_export_does_not_call_atomic_write(conn, tmp_path, monkeypatch):
+    """generate_advise(export=False) does not call atomic_write."""
+    from sable.advise.generate import generate_advise
+
+    _setup_generate_mocks(monkeypatch, conn, tmp_path)
+
+    atomic_write_calls = []
+
+    def fake_atomic_write(path, content, encoding="utf-8"):
+        atomic_write_calls.append({"path": path, "content": content})
+
+    with patch("sable.shared.files.atomic_write", fake_atomic_write):
+        generate_advise("alice", export=False)
+
+    assert len(atomic_write_calls) == 0, "atomic_write should not be called when export=False"
+
+
+def test_export_output_dir_created_if_absent(tmp_path):
+    """atomic_write creates parent directory and writes file correctly."""
+    from sable.shared.files import atomic_write
+
+    out_dir = tmp_path / "out"
+    out_file = out_dir / "f.md"
+    assert not out_dir.exists()
+
+    atomic_write(out_file, "x")
+
+    assert out_dir.exists()
+    assert out_file.read_text() == "x"

@@ -104,7 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_scanned_tweets_org ON scanned_tweets(org);
 CREATE INDEX IF NOT EXISTS idx_scanned_tweets_bucket ON scanned_tweets(format_bucket);
 CREATE INDEX IF NOT EXISTS idx_scanned_tweets_scan ON scanned_tweets(scan_id);
 CREATE INDEX IF NOT EXISTS idx_format_baselines_org_bucket ON format_baselines(org, format_bucket);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_format_baselines_key ON format_baselines (org, format_bucket, period_days);
+CREATE INDEX IF NOT EXISTS idx_format_baselines_ts ON format_baselines (org, format_bucket, period_days, computed_at);
 CREATE INDEX IF NOT EXISTS idx_topic_signals_org_scan ON topic_signals(org, scan_id);
 
 CREATE TABLE IF NOT EXISTS hook_pattern_cache (
@@ -143,18 +143,8 @@ def get_conn() -> sqlite3.Connection:
 def migrate() -> None:
     """Initialize or migrate the meta database."""
     conn = get_conn()
-    # AR5-15: de-duplicate format_baselines before applying schema (unique index)
-    try:
-        conn.execute("""
-            DELETE FROM format_baselines
-            WHERE rowid NOT IN (
-                SELECT MAX(rowid) FROM format_baselines
-                GROUP BY org, format_bucket, period_days
-            )
-        """)
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
+    conn.execute("DROP INDEX IF EXISTS idx_format_baselines_key")
+    conn.commit()
     with conn:
         conn.executescript(_SCHEMA)
         version = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -395,12 +385,57 @@ def upsert_format_baseline(org: str, format_bucket: str, period_days: int,
     conn = get_conn()
     with conn:
         conn.execute(
-            """INSERT OR REPLACE INTO format_baselines
+            """INSERT INTO format_baselines
                (org, format_bucket, period_days, avg_total_lift, sample_count, unique_authors)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (org, format_bucket, period_days, avg_total_lift, sample_count, unique_authors),
         )
     conn.close()
+
+
+def get_format_baselines_as_of(org: str, as_of: str, period_days: int = 7,
+                                conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """Return the most-recent baseline row per format_bucket where computed_at <= as_of."""
+    _conn = conn or get_conn()
+    try:
+        rows = _conn.execute(
+            """SELECT f.*
+               FROM format_baselines f
+               WHERE f.org = ? AND f.period_days = ? AND f.computed_at <= ?
+                 AND f.computed_at = (
+                     SELECT MAX(f2.computed_at) FROM format_baselines f2
+                     WHERE f2.org = f.org AND f2.format_bucket = f.format_bucket
+                       AND f2.period_days = f.period_days AND f2.computed_at <= ?
+                 )""",
+            (org, period_days, as_of, as_of),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if conn is None:
+            _conn.close()
+
+
+def prune_format_baselines(org: str, keep_n: int = 90,
+                            conn: Optional[sqlite3.Connection] = None) -> None:
+    """Keep only the most-recent keep_n rows per (org, format_bucket, period_days)."""
+    _conn = conn or get_conn()
+    try:
+        with _conn:
+            _conn.execute(
+                """DELETE FROM format_baselines
+                   WHERE org = ? AND id NOT IN (
+                       SELECT id FROM format_baselines f2
+                       WHERE f2.org = format_baselines.org
+                         AND f2.format_bucket = format_baselines.format_bucket
+                         AND f2.period_days = format_baselines.period_days
+                       ORDER BY f2.computed_at DESC
+                       LIMIT ?
+                   )""",
+                (org, keep_n),
+            )
+    finally:
+        if conn is None:
+            _conn.close()
 
 
 def get_format_baselines(org: str, format_bucket: str, period_days: int,

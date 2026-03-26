@@ -68,3 +68,22 @@ def test_build_entity_note_renders_source_time_not_created_at():
 
     assert source_time in result
     assert created_at not in result
+
+
+def test_build_entity_note_tag_lines_not_multiplied_by_runs():
+    """2 tags × 3 diag runs must produce exactly 2 tag-mention lines, not 6."""
+    from sable.vault.platform_sync import _build_entity_note
+    entity = {"entity_id": "e1", "display_name": "Alice", "status": "active", "updated_at": None}
+    handles = [{"platform": "twitter", "handle": "@alice"}]
+    tags = [
+        {"tag": "top_contributor", "confidence": 0.9, "source": "auto", "added_at": "2026-03-01"},
+        {"tag": "bridge_node", "confidence": 0.7, "source": "auto", "added_at": "2026-03-02"},
+    ]
+    diag_runs = [
+        {"result_json": "{}", "run_date": "2026-03-10", "started_at": "2026-03-10T00:00:00", "overall_grade": "A"},
+        {"result_json": "{}", "run_date": "2026-03-17", "started_at": "2026-03-17T00:00:00", "overall_grade": "B"},
+        {"result_json": "{}", "run_date": "2026-03-24", "started_at": "2026-03-24T00:00:00", "overall_grade": "A"},
+    ]
+    note = _build_entity_note(entity, handles, tags, [], [], diag_runs, "testorg")
+    tag_lines = [ln for ln in note.splitlines() if "Tagged as" in ln and "score:" in ln]
+    assert len(tag_lines) == 2, f"Expected 2 tag-mention lines, got {len(tag_lines)}: {tag_lines}"

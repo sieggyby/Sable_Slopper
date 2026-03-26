@@ -10,10 +10,15 @@ High-volume crypto Twitter content production toolkit. CLI-driven, Claude-powere
 | `sable clip` | Video → vertical clips with brainrot + captions |
 | `sable meme` | Template-based meme generation |
 | `sable face` | Replicate-powered face swap |
-| `sable pulse` | Performance tracking + AI recommendations |
+| `sable pulse` | Performance tracking, format lift, attribution, and AI recommendations |
 | `sable character-explainer` | Brainrot explainer videos with famous character voices |
 | `sable vault` | Content catalog, search engine, and client knowledge base |
 | `sable wojak` | Wojak asset library and Claude-driven scene compositor |
+| `sable calendar` | Claude-generated posting schedule with vault inventory + trend alignment |
+| `sable diagnose` | Full account audit: format health, topic gaps, vault waste, cadence |
+| `sable write` | Draft tweets and threads in an account's voice |
+| `sable score` | Hook quality scorer |
+| `sable advise` | Multi-stage strategic brief (profile → pulse → vault → recommendations) |
 
 ## Quick Start
 
@@ -241,6 +246,15 @@ sable pulse report --account @tig_intern --followers 15000
 # Get AI recommendations
 sable pulse recommend --account @tig_intern --update-roster
 
+# Per-format lift report (how each format bucket performs relative to account baseline)
+sable pulse account @tig_intern --days 30 --org multisynq
+
+# Content attribution: what fraction of engagement came from Sable-produced content?
+sable pulse attribution @tig_intern --days 30 --org multisynq
+
+# Search trending content in the niche watchlist
+sable pulse trends --org multisynq --format short_clip
+
 # Export data
 sable pulse export --account @tig_intern --format csv --output report.csv
 ```
@@ -462,6 +476,41 @@ sable wojak scene render spec.yaml --account @tig_intern --output ~/Desktop/meme
 ```
 
 `scene generate` calls Claude to produce a YAML scene spec and then renders it. `scene render` takes an existing YAML spec and renders it directly, skipping the Claude call.
+
+## Calendar
+
+Generate a Claude-powered posting schedule that balances format diversity, niche trend alignment, and what's already ready in the vault.
+
+```bash
+# 7-day calendar for an account (default)
+sable calendar @tig_intern --org multisynq
+
+# Extend the horizon and target more format variety
+sable calendar @tig_intern --org multisynq --days 14 --formats-target 5
+
+# Save the output to ~/.sable/playbooks/
+sable calendar @tig_intern --org multisynq --save
+```
+
+Output example:
+
+```
+# @tig_intern — 7-Day Content Calendar
+Mon Mar 25 → Sun Mar 31
+
+## Mon Mar 25
+  ① standalone_text · "perp funding rate inversion" · CREATE
+     Why: standalone_text surging at 2.3x; account hasn't posted text-only in 4 days
+
+## Tue Mar 26
+  ① short_clip · "L2 scaling explained" · POST READY → clip-001
+     Why: clip in vault assigned to this account, topic aligned with niche signals
+
+---
+Summary: 4 formats across 7 days · 3 vault pieces scheduled · 4 new creation tasks
+```
+
+Saved calendars land at `~/.sable/playbooks/calendar_{handle}_{date}.md`.
 
 ## Workspace
 

@@ -266,3 +266,18 @@ def test_scanner_exception_marks_scan_run_failed(tmp_path, monkeypatch):
     assert row["claude_raw"] is not None, "claude_raw should be set"
     assert row["claude_raw"].startswith("FAILED:"), f"Expected FAILED: prefix, got: {row['claude_raw']}"
     assert row["tweets_collected"] >= 1, f"Expected partial count >= 1, got {row['tweets_collected']}"
+
+
+# ---------------------------------------------------------------------------
+# _parse_twitter_date — empty / None input
+# ---------------------------------------------------------------------------
+
+from sable.pulse.meta.scanner import _parse_twitter_date
+
+
+def test_parse_twitter_date_empty_string_returns_none():
+    assert _parse_twitter_date("") is None
+
+
+def test_parse_twitter_date_none_returns_none():
+    assert _parse_twitter_date(None) is None  # type: ignore[arg-type]

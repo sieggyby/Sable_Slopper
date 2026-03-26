@@ -69,6 +69,7 @@ def generate_advise(
     force: bool = False,
     cheap: bool = False,
     dry_run: bool = False,
+    export: bool = False,
 ) -> str:
     """
     Generate Twitter strategy brief for handle.
@@ -98,6 +99,11 @@ def generate_advise(
     cache_hit, cached_path = _check_cache(conn, org_id, normalized_handle, force)
     if cache_hit:
         assert cached_path is not None  # _check_cache returns non-None path on hit
+        if export:
+            from datetime import date as _date
+            from sable.shared.files import atomic_write as _atomic_write
+            _export_path = Path("output") / f"advise_{org_id}_{_date.today().isoformat()}.md"
+            _atomic_write(_export_path, Path(cached_path).read_text(encoding="utf-8"))
         return cached_path
 
     # Dry run: estimate cost and exit
@@ -289,5 +295,11 @@ def generate_advise(
             bak_path.unlink()
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+
+    if export:
+        from datetime import date as _date
+        from sable.shared.files import atomic_write as _atomic_write
+        _export_path = Path("output") / f"advise_{org_id}_{_date.today().isoformat()}.md"
+        _atomic_write(_export_path, content)
 
     return str(out_path)

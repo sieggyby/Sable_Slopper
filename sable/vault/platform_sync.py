@@ -152,14 +152,13 @@ def _build_entity_note(entity: dict, handles: list[dict], tags: list[dict],
                     grade = run["overall_grade"] or "?"
                     mentions.append(f"- Tagged as {role.rstrip('s')} in run {run_date} (grade: {grade})")
                     break
-        for t in tags:
-            score = t["confidence"]
-            run_date = (run["started_at"] or "")[:10]
-            if len(mentions) < 3:
-                mentions.append(
-                    f"- Tagged as {t['tag']} (score: {score:.2f}) in run {run_date}"
-                )
-            break
+    for t in tags:
+        score = t["confidence"]
+        added = t.get("added_at") or ""
+        if len(mentions) < 3:
+            mentions.append(
+                f"- Tagged as {t['tag']} (score: {score:.2f}) (added: {added})"
+            )
     if mentions:
         lines.append("\n## Diagnostic Mentions\n")
         for m in mentions[:3]:

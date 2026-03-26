@@ -117,8 +117,6 @@ def generate_digest(
     org: str,
     period_days: int,
     top_n: int,
-    meta_db_path: Path,
-    vault_root: Optional[Path] = None,
 ) -> DigestReport:
     from sable.pulse.meta.db import get_conn
 

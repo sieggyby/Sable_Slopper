@@ -180,7 +180,7 @@ def test_get_unanalyzed_respects_limit(monkeypatch):
 def test_analyze_viral_tweet_calls_claude_and_parses(monkeypatch):
     import sable.pulse.meta.anatomy as anatomy_mod
 
-    monkeypatch.setattr(anatomy_mod, "call_claude_json", lambda prompt, call_type: json.dumps(_SAMPLE_ANATOMY))
+    monkeypatch.setattr(anatomy_mod, "call_claude_json", lambda prompt, **kw: json.dumps(_SAMPLE_ANATOMY))
 
     tweet = {"tweet_id": "t1", "text": "Big alpha drop incoming", "total_lift": 14.0,
              "author_handle": "alice", "format_bucket": "standalone_text"}
@@ -194,7 +194,7 @@ def test_analyze_viral_tweet_calls_claude_and_parses(monkeypatch):
 def test_analyze_viral_tweet_propagates_error(monkeypatch):
     import sable.pulse.meta.anatomy as anatomy_mod
 
-    def _raise(prompt, call_type):
+    def _raise(prompt, **kw):
         raise SableError("QUOTA", "quota exceeded")
 
     monkeypatch.setattr(anatomy_mod, "call_claude_json", _raise)
@@ -209,7 +209,7 @@ def test_analyze_viral_tweet_propagates_error(monkeypatch):
 # run_anatomy_enrichment
 # ---------------------------------------------------------------------------
 
-def test_run_anatomy_enrichment_saves_and_returns_count(monkeypatch):
+def test_run_anatomy_enrichment_saves_and_returns_count(monkeypatch, tmp_path):
     import sable.pulse.meta.anatomy as anatomy_mod
 
     tweets = [
@@ -219,18 +219,18 @@ def test_run_anatomy_enrichment_saves_and_returns_count(monkeypatch):
          "author_handle": "bob", "format_bucket": "standalone_text"},
     ]
     monkeypatch.setattr(anatomy_mod, "get_unanalyzed_viral_tweets", lambda org, **kw: tweets)
-    monkeypatch.setattr(anatomy_mod, "call_claude_json", lambda prompt, call_type: json.dumps(_SAMPLE_ANATOMY))
+    monkeypatch.setattr(anatomy_mod, "call_claude_json", lambda prompt, **kw: json.dumps(_SAMPLE_ANATOMY))
 
     saved_calls = []
     monkeypatch.setattr(anatomy_mod, "save_anatomy", lambda **kw: saved_calls.append(kw))
 
-    count = anatomy_mod.run_anatomy_enrichment("testorg")
+    count = anatomy_mod.run_anatomy_enrichment("testorg", vault_root=tmp_path)
 
     assert count == 2
     assert len(saved_calls) == 2
 
 
-def test_run_enrichment_skips_failed_tweet(monkeypatch):
+def test_run_enrichment_skips_failed_tweet(monkeypatch, tmp_path):
     import sable.pulse.meta.anatomy as anatomy_mod
 
     tweets = [
@@ -243,7 +243,7 @@ def test_run_enrichment_skips_failed_tweet(monkeypatch):
 
     call_count = [0]
 
-    def _claude(prompt, call_type):
+    def _claude(prompt, **kw):
         call_count[0] += 1
         if call_count[0] == 2:
             raise RuntimeError("network error")
@@ -252,6 +252,97 @@ def test_run_enrichment_skips_failed_tweet(monkeypatch):
     monkeypatch.setattr(anatomy_mod, "call_claude_json", _claude)
     monkeypatch.setattr(anatomy_mod, "save_anatomy", lambda **kw: None)
 
-    count = anatomy_mod.run_anatomy_enrichment("testorg")
+    count = anatomy_mod.run_anatomy_enrichment("testorg", vault_root=tmp_path)
 
     assert count == 1  # second tweet skipped, no exception raised
+
+
+# ---------------------------------------------------------------------------
+# ViralAnatomy + write_anatomy_vault_note
+# ---------------------------------------------------------------------------
+
+def _make_anatomy(**overrides):
+    import sable.pulse.meta.anatomy as anatomy_mod
+    defaults = dict(
+        tweet_id="t_vault_1",
+        author_handle="alice",
+        total_lift=14.5,
+        format_bucket="standalone_text",
+        text="This will change everything.",
+        hook_structure="bold claim",
+        hook_length_words=5,
+        first_sentence="This will change everything.",
+        emotional_register="excited",
+        topic_cluster="DeFi yields",
+        has_cta=False,
+        cta_type=None,
+        retweet_bait=True,
+        retweet_bait_element="controversial prediction",
+        is_thread=False,
+        thread_length=None,
+        analyzed_at="2026-03-25T00:00:00+00:00",
+    )
+    defaults.update(overrides)
+    return anatomy_mod.ViralAnatomy(**defaults)
+
+
+def test_zero_viral_tweets_graceful(monkeypatch, tmp_path):
+    import sable.pulse.meta.anatomy as anatomy_mod
+    monkeypatch.setattr(anatomy_mod, "get_unanalyzed_viral_tweets", lambda org, **kw: [])
+    count = anatomy_mod.run_anatomy_enrichment("testorg", vault_root=tmp_path)
+    assert count == 0
+
+
+def test_max_per_run_cap(monkeypatch, tmp_path):
+    import sable.pulse.meta.anatomy as anatomy_mod
+
+    captured = {}
+
+    def _get_tweets(org, lift_threshold, limit):
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr(anatomy_mod, "get_unanalyzed_viral_tweets", _get_tweets)
+    anatomy_mod.run_anatomy_enrichment("testorg", vault_root=tmp_path, max_per_run=5)
+    assert captured["limit"] == 5
+
+
+def test_vault_note_written(tmp_path):
+    import sable.pulse.meta.anatomy as anatomy_mod
+    va = _make_anatomy()
+    path = anatomy_mod.write_anatomy_vault_note(va, tmp_path)
+    assert path.exists()
+    assert path == tmp_path / "content" / "viral_anatomy" / "t_vault_1.md"
+    import yaml
+    content = path.read_text(encoding="utf-8")
+    parts = content.split("---", 2)
+    fm = yaml.safe_load(parts[1])
+    assert fm["type"] == "viral_anatomy"
+    assert fm["lift"] == 14.5
+    assert fm["format"] == "standalone_text"
+    assert fm["hook_structure"] == "bold claim"
+
+
+def test_vault_note_body_contains_tweet_text(tmp_path):
+    import sable.pulse.meta.anatomy as anatomy_mod
+    va = _make_anatomy(text="Alpha is leaking early.")
+    anatomy_mod.write_anatomy_vault_note(va, tmp_path)
+    content = (tmp_path / "content" / "viral_anatomy" / "t_vault_1.md").read_text(encoding="utf-8")
+    assert "Alpha is leaking early." in content
+
+
+def test_run_enrichment_writes_vault_note(monkeypatch, tmp_path):
+    import sable.pulse.meta.anatomy as anatomy_mod
+
+    tweets = [
+        {"tweet_id": "t_note", "text": "Big alpha drop", "total_lift": 15.0,
+         "author_handle": "alice", "format_bucket": "standalone_text"},
+    ]
+    monkeypatch.setattr(anatomy_mod, "get_unanalyzed_viral_tweets", lambda org, **kw: tweets)
+    monkeypatch.setattr(anatomy_mod, "call_claude_json", lambda prompt, **kw: json.dumps(_SAMPLE_ANATOMY))
+    monkeypatch.setattr(anatomy_mod, "save_anatomy", lambda **kw: None)
+
+    anatomy_mod.run_anatomy_enrichment("testorg", vault_root=tmp_path)
+
+    note_path = tmp_path / "content" / "viral_anatomy" / "t_note.md"
+    assert note_path.exists()

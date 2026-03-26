@@ -226,6 +226,81 @@ def test_tracker_metadata_parse_failure_warns(tmp_path, monkeypatch, caplog):
 
 
 # ---------------------------------------------------------------------------
+# Test T-A: corrupt pulse.db warns on _open_db_readonly
+# ---------------------------------------------------------------------------
+
+def test_open_db_readonly_corrupt_file_warns(tmp_path, monkeypatch, caplog):
+    """_open_db_readonly warns on OS-level open failure (e.g. permission denied), returns None."""
+    import logging
+    import sqlite3 as _sqlite3
+    from unittest.mock import patch
+
+    pulse_db = tmp_path / "pulse.db"
+    # File must exist to pass _open_db_readonly's early exists() guard
+    pulse_db.write_bytes(b"\x00")
+
+    conn = _make_platform_conn()
+
+    monkeypatch.setattr("sable.shared.paths.sable_home", lambda: tmp_path)
+    monkeypatch.setattr("sable.shared.paths.pulse_db_path", lambda: pulse_db)
+    monkeypatch.setattr("sable.shared.paths.meta_db_path", lambda: tmp_path / "meta.db")
+
+    # Patch sqlite3.connect so that opening pulse.db raises (e.g. permission denied)
+    original_connect = _sqlite3.connect
+
+    def _fail_connect(path, **kw):
+        if "pulse.db" in str(path):
+            raise _sqlite3.OperationalError("unable to open database file")
+        return original_connect(path, **kw)
+
+    with patch("sqlite3.connect", side_effect=_fail_connect), \
+         caplog.at_level(logging.WARNING, logger="sable.advise.stage1"):
+        result = assemble_input("alice", "testorg", conn)
+
+    assert result["pulse_available"] is False
+    assert any("_open_db_readonly" in r.message for r in caplog.records)
+
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Test T-B: unreadable profile file warns on _read_profile_file
+# ---------------------------------------------------------------------------
+
+def test_read_profile_file_unreadable_warns(tmp_path, monkeypatch, caplog):
+    """PermissionError on tone.md → WARNING from _read_profile_file, fallback to '(not configured)'."""
+    import logging
+    from pathlib import Path as _Path
+
+    conn = _make_platform_conn()
+
+    monkeypatch.setattr("sable.shared.paths.sable_home", lambda: tmp_path)
+    monkeypatch.setattr("sable.shared.paths.pulse_db_path", lambda: tmp_path / "pulse.db")
+    monkeypatch.setattr("sable.shared.paths.meta_db_path", lambda: tmp_path / "meta.db")
+
+    profile_dir = tmp_path / "profiles" / "@alice"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "tone.md").write_text("original")
+
+    _orig = _Path.read_text
+
+    def _boom(self, *a, **kw):
+        if self.name == "tone.md":
+            raise PermissionError("no read")
+        return _orig(self, *a, **kw)
+
+    monkeypatch.setattr("pathlib.Path.read_text", _boom)
+
+    with caplog.at_level(logging.WARNING, logger="sable.advise.stage1"):
+        result = assemble_input("alice", "testorg", conn)
+
+    assert any("_read_profile_file" in r.message for r in caplog.records)
+    assert result["profile"]["tone"] == "(not configured)"
+
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Test 4: content_items ordered by posted_at not created_at (COALESCE fix)
 # ---------------------------------------------------------------------------
 

@@ -202,12 +202,10 @@ def test_empty_period(monkeypatch):
     import sable.platform.db as platform_db_mod
     monkeypatch.setattr(platform_db_mod, "get_db", lambda: conn, raising=False)
 
-    from pathlib import Path
     report = digest_mod.generate_digest(
         org="testorg",
         period_days=30,
         top_n=10,
-        meta_db_path=Path(":memory:"),
     )
 
     assert report.entries == []

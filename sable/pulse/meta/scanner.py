@@ -84,7 +84,7 @@ def _normalise_tweet(raw: dict, author_handle: str) -> dict:
 def _parse_twitter_date(date_str: str) -> Optional[str]:
     """Parse Twitter date format to ISO8601. Returns None on parse failure."""
     if not date_str:
-        return datetime.now(timezone.utc).isoformat()
+        return None
     # Twitter format: "Thu Mar 17 12:00:00 +0000 2026"
     try:
         dt = datetime.strptime(date_str, "%a %b %d %H:%M:%S +0000 %Y")

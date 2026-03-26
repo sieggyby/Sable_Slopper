@@ -521,15 +521,13 @@ def meta_digest(org: str, period_days: int, top_n: int, save_to_vault: bool) -> 
     """Generate a watchlist intelligence digest of top-lift posts."""
     from sable.pulse.meta.digest import generate_digest, render_digest, save_digest_to_vault
     from sable.pulse.meta import db as meta_db
-    from sable.shared.paths import meta_db_path, vault_dir
+    from sable.shared.paths import vault_dir
 
     meta_db.migrate()
     report = generate_digest(
         org=org,
         period_days=period_days,
         top_n=top_n,
-        meta_db_path=meta_db_path(),
-        vault_root=vault_dir(org) if save_to_vault else None,
     )
     console.print(render_digest(report))
     if save_to_vault:

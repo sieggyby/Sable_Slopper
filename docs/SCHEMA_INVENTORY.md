@@ -1,12 +1,12 @@
 # Sable Slopper — Schema Inventory
 
-> Research artifact. No implementation planned. Describes every defined schema in the codebase as of 2026-03-23.
+> Describes every defined schema in the codebase. Last updated 2026-03-26.
 
 ---
 
 ## Overview
 
-The codebase has **three SQLite databases**, **22 Python data models** (dataclasses + Pydantic), **one YAML config schema**, **one YAML watchlist schema**, **one markdown frontmatter schema** (vault notes), and **one YAML character profile schema**.
+The codebase has **three SQLite databases**, **26 Python data models** (dataclasses + Pydantic), **one YAML config schema**, **one YAML watchlist schema**, **one markdown frontmatter schema** (vault notes), and **one YAML character profile schema**.
 
 No formal ORM, no Pydantic-backed database layer. `pulse.db` and `meta.db` use hand-written SQL + dataclasses with no migration runner. `sable.db` uses `sable db migrate` (`sable/db/migrations/001_initial.sql`, extended by 002+003) via `ensure_schema()`. SableTracking's `_apply_pending_migrations()` also applies these migrations on sync startup.
 
@@ -489,6 +489,79 @@ sable_verdict        TEXT  -- nullable
 total_cost_usd       REAL  -- nullable
 ```
 Indexes: `idx_diagnostic_org`, `idx_diagnostic_cult_run_id` (UNIQUE), `idx_diagnostic_slug`
+
+---
+
+### Pulse Attribution — `sable/pulse/attribution.py`
+**Dataclass:** `ContentAttribution`
+
+Returned by `compute_attribution(account_handle, days, pulse_db_path, meta_db_path, org)`.
+Engagement formula: `likes×1 + replies×3 + retweets×4 + quotes×5 + bookmarks×2 + views×0.5`.
+
+```
+account_handle: str
+period_start: str               # ISO datetime
+period_end: str                 # ISO datetime
+total_posts: int
+sable_posts: int                # posts with sable_content_type in {clip, meme, faceswap, text}
+organic_posts: int
+sable_share_of_posts: float
+total_engagement: float
+sable_engagement: float
+organic_engagement: float
+sable_share_of_engagement: float
+sable_avg_engagement: float
+organic_avg_engagement: float
+sable_lift_vs_organic: Optional[float]  # None if < 2 posts in either group
+sable_by_format: dict           # {bucket: {posts, engagement, avg}}
+organic_by_format: dict         # {bucket: {posts, engagement, avg}}
+meta_informed_posts: int        # Sable posts where format had a baseline in meta.db
+meta_informed_engagement: float
+meta_informed_avg: float
+non_meta_informed_avg: float
+meta_lift: Optional[float]      # None if < 2 posts in either group
+meta_available: bool            # True if org was provided and meta.db had baseline rows
+weekly_breakdown: list          # [{week, sable, organic, share}]
+posts_excluded_no_snapshot: int
+```
+
+Format bucket mapping (`_content_type_to_format_bucket`):
+- `meme`, `faceswap` → `single_image`
+- `text` → `standalone_text`
+- `clip` → `short_clip` (≤60s or no duration metadata) or `long_clip` (>60s)
+
+---
+
+### Calendar Planner — `sable/calendar/planner.py`
+
+Three dataclasses used by `build_calendar()` and `render_calendar()`.
+
+**`CalendarSlot`**
+```
+format_bucket: str              # e.g. "standalone_text", "short_clip"
+topic_suggestion: str           # Claude-suggested topic for this slot
+action: str                     # "post_ready" | "create"
+vault_note_id: Optional[str]    # set when action == "post_ready"
+rationale: str                  # Claude's reasoning for this slot
+```
+
+**`CalendarDay`**
+```
+date: str                       # YYYY-MM-DD
+day_name: str                   # "Mon Mar 25"
+slots: list[CalendarSlot]
+```
+
+**`CalendarPlan`**
+```
+handle: str
+org: str
+days: list[CalendarDay]
+formats_covered: list[str]      # deduplicated format buckets across all slots
+vault_items_scheduled: int      # count of "post_ready" slots
+creation_tasks: int             # count of "create" slots
+generated_at: str               # ISO datetime
+```
 
 ---
 

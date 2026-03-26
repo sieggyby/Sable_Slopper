@@ -63,6 +63,7 @@ from sable.commands.onboard import onboard_command
 from sable.commands.write import write_command
 from sable.commands.score import score_command
 from sable.commands.diagnose import diagnose_command
+from sable.commands.calendar import calendar_command
 
 main.add_command(roster_group)
 main.add_command(clip_group)
@@ -84,3 +85,4 @@ main.add_command(onboard_command)
 main.add_command(write_command)
 main.add_command(score_command)
 main.add_command(diagnose_command)
+main.add_command(calendar_command)

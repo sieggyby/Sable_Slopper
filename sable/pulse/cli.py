@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+from typing import Optional
 
 import click
 from rich.console import Console
@@ -198,6 +199,27 @@ def pulse_account(account, days, org):
         )
 
     click.echo(render_account_report(report))
+
+
+@pulse_group.command("attribution")
+@click.argument("handle")
+@click.option("--days", default=30, show_default=True, help="Lookback window in days.")
+@click.option("--format", "output_format", default="markdown",
+              type=click.Choice(["markdown", "json"]), show_default=True)
+@click.option("--org", default=None, help="Org context for meta-informed classification.")
+def pulse_attribution(handle: str, days: int, output_format: str, org: Optional[str]) -> None:
+    """Show what fraction of engagement came from Sable-produced content."""
+    from sable.pulse.attribution import compute_attribution, render_attribution_report
+    try:
+        attr = compute_attribution(handle, days=days, org=org)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}", err=True)
+        raise SystemExit(1)
+    if output_format == "json":
+        import dataclasses
+        console.print(json.dumps(dataclasses.asdict(attr), indent=2))
+    else:
+        console.print(render_attribution_report(attr))
 
 
 @pulse_group.command("link")

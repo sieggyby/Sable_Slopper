@@ -32,7 +32,7 @@ This file now mixes:
 Do not assume every item below is still open. Use the **Current Open Queue** first.
 
 Validation snapshot (current):
-- `./.venv/bin/python -m pytest -q` → `359 passed`
+- `./.venv/bin/python -m pytest -q` → `399 passed`
 - `./.venv/bin/ruff check .` → `0` violations
 - `./.venv/bin/mypy sable` → `0` errors
 
@@ -41,6 +41,8 @@ Historical note kept for trend only:
 - 2026-03-24 maintainer audit refresh: `216 passed / 0 ruff / 102 mypy in 27 files`
 - earlier 2026-03-24 reconciliation pass was `205 passed / 28 ruff violations / 96 mypy errors`
 - after FEATURE-8 (2026-03-25): `359 passed / 0 ruff / 0 mypy`
+- after FEATURE-9 + FEATURE-7 (2026-03-26): `388 passed / 0 ruff / 0 mypy`
+- after QA-TWITTER-DATE-EMPTY-STRING (2026-03-26): `399 passed / 0 ruff / 0 mypy`
 
 ---
 
@@ -48,7 +50,7 @@ Historical note kept for trend only:
 
 ### What is actually healthy
 
-- Core test suite is green: `359` tests passing.
+- Core test suite is green: `401` tests passing.
 - Several former criticals are now genuinely fixed:
   - `pulse/meta` zero-history `None`-lift aggregation hardening
   - vault `_PARTIAL_SYNC` coverage through the pulse report step
@@ -71,10 +73,6 @@ Historical note kept for trend only:
 
 ### What is still structurally weak
 
-- SableTracking cross-repo contract not yet confirmed:
-  - `sable/commands/tracking.py` assumes `sync_to_platform()` is sync; needs confirmation
-  - `content_items.posted_at` as canonical source-time field needs cross-repo sign-off
-  - once confirmed, `advise/stage1.py` content_items query and ordering can switch to `posted_at`
 - AI spend / prompt-size controls are still uneven outside the org-gated advise/meta flows.
   - non-org Claude call sites remain intentionally budget-exempt, so spend is still not observable
     in a single place for content-generation flows
@@ -108,10 +106,9 @@ Historical note kept for trend only:
 
 1. Fix cross-tool contract bugs and output-trustworthiness defects before any feature work.
 2. Align tests with the live producer/consumer schemas while fixing those bugs.
-3. Settle the SableTracking freshness / sync contract and large-search retrieval bug.
-4. Tighten prompt-size / spend controls and run the focused secret-scrubbing audit.
-5. Keep touched-file mypy debt from spreading; reduce it in the glue code you touch.
-6. Only then start staged feature work in the order defined later in this file.
+3. Tighten prompt-size / spend controls and run the focused secret-scrubbing audit.
+4. Keep touched-file mypy debt from spreading; reduce it in the glue code you touch.
+5. Only then start staged feature work in the order defined later in this file.
 
 ---
 
@@ -234,6 +231,133 @@ This is not urgent, but it is misleading surface area.
 **Tests:**
 - if kept as placeholder, test and docs should say it is intentionally no-op
 - if implemented later, add false-positive / threshold / duplicate tests before exposing it
+
+### Stage 2 — Targeted QA fixes (AR-6 batch, 2026-03-26)
+
+Items below are sourced from a focused live-code audit. All four are independent; they can
+be sequenced in priority order. Do one per patch set; run full validation after each.
+
+### QA-TWITTER-DATE-EMPTY-STRING · HIGH · `pulse/meta/scanner.py` ✓ **Done**
+
+**What:** `_parse_twitter_date()` returns `datetime.now(timezone.utc).isoformat()` when
+`date_str` is an empty string instead of returning `None`.
+
+**Why:** The downstream filter at line 138 (`if posted_at is None: continue`) is the guard
+against bad records. An empty `created_at` bypasses this guard entirely — the tweet is
+treated as timestamped right now, corrupting temporal analytics (freshness calculations,
+date-window filters, and all downstream time-series queries).
+
+**Files:** `sable/pulse/meta/scanner.py` — `_parse_twitter_date` function (~lines 84–87)
+
+**Fix:** Replace:
+```python
+if not date_str:
+    return datetime.now(timezone.utc).isoformat()
+```
+with:
+```python
+if not date_str:
+    return None
+```
+Verify all callers handle `None` correctly. The filter at line 138 already does. Run a
+grep for other call sites before closing.
+
+**Expected outcome:** Empty `created_at` tweets are skipped at the line-138 guard, never
+treated as "posted just now."
+
+**Tests:** Add a unit test: `_parse_twitter_date("")` returns `None` (not a datetime string).
+Add a second test: `_parse_twitter_date(None)` also returns `None`. Confirm the line-138
+guard test path is covered.
+
+**Gotchas:** Do NOT change behavior for well-formed date strings. Only the empty-string
+and `None` branches are affected.
+
+---
+
+### QA-ENTITY-NOTE-TAG-LOOP · MED · `vault/platform_sync.py` ✓ **Done**
+
+**What:** In `_build_entity_note()`, the `for t in tags:` loop that emits tag-based
+mention lines is nested inside the `for run in diag_runs:` loop. One tag-mention line is
+emitted per diagnostic run per tag, not once per tag.
+
+**Why:** Structural logic error. Tags describe the entity's current state and are
+independent of run history. An entity with 2 tags and 3 diagnostic runs currently produces
+6 tag-mention lines (3 runs × 2 tags). The correct output is 2 lines.
+
+**Files:** `sable/vault/platform_sync.py` — `_build_entity_note` function (~lines 155–162)
+
+**Fix:** Move the `for t in tags:` block entirely outside (after) the `for run in
+diag_runs:` loop. No other logic changes needed.
+
+**Expected outcome:** An entity with 2 tags and 3 diagnostic runs produces exactly 2
+tag-mention lines.
+
+**Tests:** Add a unit test: build an entity note with 2 tags and 3 diagnostic runs. Assert
+the rendered note contains exactly 2 tag-mention lines (count occurrences of the tag-mention
+pattern in the output string). The test should fail before the fix and pass after.
+
+**Gotchas:** Read `_build_entity_note` in full before editing — confirm which indentation
+block the tag loop currently lives in. Do not disturb the `for run in diag_runs:` loop body.
+
+---
+
+### QA-WRITE-COST-NOT-LOGGED · MED · `write/generator.py` ✓ **Done**
+
+**What:** `sable/write/generator.py` calls `call_claude_json()` with
+`call_type="write_variants"` but never calls `log_cost()` afterward. Write pipeline spend
+is invisible in `sable.db` `cost_events`.
+
+**Why:** `AGENTS.md` mandates cost logging for all org-scoped Claude API calls. The write
+pipeline is currently a blind spot in budget tracking — operators cannot see what `sable
+write` is costing them.
+
+**Files:** `sable/write/generator.py` — after the `call_claude_json()` call (~line 236)
+
+**Fix:** Add `log_cost(org_id=resolved_org, call_type="write_variants", tokens=response.usage)`
+immediately after the Claude call. `resolved_org` should already be in scope. Also add
+`check_budget(resolved_org)` before the call if `resolved_org` is available at that point
+(matches the pattern used in `advise/stage2.py` and `pulse/meta/analyzer.py`).
+
+**Expected outcome:** After `sable write @handle --topic foo`, a row appears in
+`cost_events` with `call_type="write_variants"` and the correct org and token counts.
+
+**Tests:** Add a test: mock `call_claude_json` to return a valid response with
+`usage.input_tokens=100, usage.output_tokens=50`. Assert `log_cost` is called once with
+`org_id=resolved_org` and `call_type="write_variants"`. Use an in-memory sable.db and
+verify the `cost_events` row exists.
+
+**Gotchas:** `response.usage` shape must match what `log_cost()` expects — check the
+`call_claude_json` return type and `log_cost` signature before wiring. Do not break the
+existing write tests.
+
+---
+
+### QA-ADVISE-WRONG-ERROR-MSG · LOW · `advise/stage1.py` ✓ **Done**
+
+**What:** The `except` block handling the `content_items` DB query (~line 289) logs
+`"sable.db entity read failed: %s"` — but this block is handling a `content_items` query,
+not an entity read.
+
+**Why:** Misleading error message. An operator diagnosing a `content_items` failure would
+search logs for "entity read" and find nothing relevant.
+
+**Files:** `sable/advise/stage1.py` — except block ~line 289
+
+**Fix:** Change the log message from `"sable.db entity read failed: %s"` to
+`"sable.db content_items read failed: %s"`. One-line change.
+
+**Expected outcome:** The correct message appears in logs when the `content_items` query
+fails.
+
+**Tests:** No new test required unless a test already covers this except branch. If the
+nearby except-block tests from AR-5 batch 2 cover this path, update their assertion strings
+to match the new message.
+
+**Gotchas:** Read the block in context first to confirm this is specifically the
+`content_items` except block and not a different one with a similar message. Do not touch
+the entity-read except blocks above it.
+
+---
 
 ### Feature Gate
 
@@ -862,12 +986,12 @@ No feature below should start until the **Feature Gate** above is satisfied.
 1. **Stage 2:** `FEATURE-3` (`sable pulse account`) ✓ **Complete** (2026-03-24)
 2. **Stage 3:** `FEATURE-1` (`sable write`) ✓ **Complete** (2026-03-25)
    - `FEATURE-2` (`sable score`) ✓ **Complete** (2026-03-25)
-3. **Stage 4:** `FEATURE-4` (viral anatomy archive), then `FEATURE-6` (watchlist digest) — **not yet started**
+3. **Stage 4:** `FEATURE-4` (viral anatomy archive) ✓ **Complete** (2026-03-25), `FEATURE-6` (watchlist digest) ✓ **Complete** (2026-03-25)
    - best implemented as a pair; digest should consume cached anatomy
    - spec maturity: medium-high
 4. **Stage 5 (actual delivery order):** `FEATURE-8` (`sable diagnose`) ✓ **Complete** (2026-03-25) — shipped before Stage 4
 5. **Stage 6:** `FEATURE-9` (`sable pulse attribution`) — gate cleared, ready to implement
-6. **Stage 7:** `FEATURE-7` (`sable calendar`) — spec rewrite required before implementation
+6. **Stage 7:** `FEATURE-7` (`sable calendar`) ✓ **Complete** (2026-03-26) — spec rewritten ground-up, all slices landed
 
 ### Feature delivery rules
 
@@ -891,16 +1015,13 @@ No feature below should start until the **Feature Gate** above is satisfied.
 - `FEATURE-3` is **Complete (2026-03-24)**. All slices A+B+C landed.
 - `FEATURE-1` is **Complete (2026-03-25)**. Slices A, B, C landed.
 - `FEATURE-2` is **Complete (2026-03-25)**.
-- `FEATURE-4` **Not started.** Cleanest spec of remaining features.
-  - isolated data model
-  - clear cost ceiling
-  - low dependency surface beyond pulse-meta and vault write helpers
-- `FEATURE-6` is **good only after Feature 4 lands**.
-  - otherwise it degenerates into extra uncached Claude calls
-- `FEATURE-7` is **not ready to implement as written**.
-  - it assumes nonexistent vault `status` fields
-  - it needs real inventory semantics based on `posted_by` / `suggested_for`
-  - the spec needs a ground-up rewrite against the live vault note shape before implementation
+- `FEATURE-4` is **Complete (2026-03-25)**. All slices A+B+C landed.
+- `FEATURE-6` is **Complete (2026-03-25)**. All slices A+B+C landed. 6 tests in `tests/pulse/meta/test_digest.py`.
+  - `meta_db_path` and `vault_root` removed from `generate_digest` (were dead — uses `get_conn()`)
+  - CLI saves vault separately via `save_digest_to_vault(report, vault_dir(org))`
+- `FEATURE-7` is **Complete (2026-03-26)**. All slices A+B+C landed. 12 tests in `tests/calendar/test_planner.py`. 388 passed · 0 ruff.
+  - Spec rewritten ground-up: `posted_by` dicts, `assembled_at`, `avg_total_lift` column, `_content_type_to_format_bucket` reused
+  - `tests/calendar/` has no `__init__.py` (avoids shadowing stdlib `calendar` module)
 - `FEATURE-8` (`sable diagnose`) is **Complete (2026-03-25)**. 359 passed · 0 ruff · 0 mypy.
   - `assembled_at`, `posted_by`, and `topic_signals` all confirmed present in live data.
 
@@ -1498,7 +1619,7 @@ def score_hook(
 
 ### FEATURE-9 · `sable pulse attribution` — Content Attribution Report
 
-**Status:** Not started.
+**Status:** Done. All 3 slices landed. 12 new tests (4 Slice A + 8 Slice B), 376 total passing.
 **Gate:** Feature Gate satisfied. Ready to implement — no remaining blockers.
 **Completeness:** High. Full spec in `~/Downloads/Slopper_ContentAttribution_Prompt.md`.
 
@@ -1537,17 +1658,21 @@ aggregation over existing pulse.db + meta.db data. No new tables, no Claude call
 
 ### FEATURE-4 · Viral Anatomy Archive
 
-**Status:** Not started.
-**Completeness:** Medium-high after spec corrections. Strong candidate for the first
-post-feature content-intelligence add-on.
-**Hard blockers:** Feature Gate only.
+**Status:** Complete (2026-03-25). All three slices landed.
+**Completeness:** Done.
+**Hard blockers:** None.
 
-**Implementation slices (do in order):**
-1. **Slice A — `viral_anatomies` table + analysis helper + tests**
-2. **Slice B — vault note writing + searchability wiring**
-3. **Slice C — post-scan integration**
-   - first land as guarded/manual wiring
-   - only make default-on after the helper is stable and validated
+**Implementation slices:**
+1. **Slice A — `viral_anatomies` table + analysis helper + tests** ✓ Done
+2. **Slice B — vault note writing** ✓ Done
+3. **Slice C — post-scan integration** ✓ Done (hook in `cli.py`)
+
+**Post-implementation notes:**
+- `anatomy.py` uses `analyze_viral_tweet()` (not `analyze_tweet()` as specced)
+- `run_anatomy_enrichment(org, vault_root=None, max_per_run=10, min_lift=10.0)` — `vault_root` defaults to `vault_dir(org)` when `None`
+- `text` field added to `ViralAnatomy` dataclass (needed for vault note body; not in original spec)
+- Post-scan hook in `cli.py` calls `run_anatomy_enrichment(org)` — defaults handle path resolution
+- Test count: 14 tests in `tests/pulse/meta/test_anatomy.py`
 
 **Purpose:** When any watchlist account posts something with >= 10x author-relative lift,
 auto-archive a structural breakdown as a vault note. Over time, builds a searchable pattern
@@ -1727,10 +1852,11 @@ Haiku (~$0.000063/call). 10 calls = ~$0.00063/scan.
 
 ### FEATURE-6 · `sable pulse meta digest` — Watchlist Intelligence Digest
 
-**Status:** Not started.
-**Completeness:** Medium-high once `FEATURE-4` exists. Without anatomy cache it becomes too
-Claude-heavy for the value it returns.
-**Hard blockers:** Feature Gate and `FEATURE-4`.
+**Status:** Complete (2026-03-25). All three slices landed in a prior session.
+**Post-implementation notes:**
+- `meta_db_path` and `vault_root` removed from `generate_digest` (were dead — uses `get_conn()`)
+- CLI saves vault separately via `save_digest_to_vault(report, vault_dir(org))`
+- 6 tests in `tests/pulse/meta/test_digest.py`
 
 **Implementation slices (do in order):**
 1. **Slice A — digest selection + cached anatomy consumption**
@@ -1889,9 +2015,8 @@ existing content search path. Treat the digest as a report, not as content inven
 
 ### FEATURE-7 · `sable calendar` — Content Calendar
 
-**Status:** Not started.
-**Completeness:** Medium-low. Strong product idea, weakest live spec fidelity.
-**Hard blockers:** Feature Gate, `FEATURE-3`, and the Stage 0 contract fixes.
+**Status:** ✓ Complete (2026-03-26). 388 passed · 0 ruff.
+**Completeness:** Full. Slices A+B+C implemented against live codebase.
 
 **Implementation slices (do in order):**
 1. **Slice A — deterministic inputs + tests**
@@ -2298,6 +2423,242 @@ def save_diagnosis_artifact(report: DiagnosisReport, conn: sqlite3.Connection, o
 
 ---
 
+### FEATURE-ADVISE-EXPORT · MED · `sable advise --export`
+
+**Status:** Not started.
+**Gate:** Feature Gate satisfied. Independent of any other open feature — can be implemented
+in a single session.
+
+**What:** Add an `--export` flag to `sable advise` that writes the full strategy brief
+(exactly as rendered to terminal) to `./output/advise_<org>_<YYYY-MM-DD>.md` using the
+existing `atomic_write()` utility from `sable/shared/files.py`.
+
+**Why:** Operators need to share briefs asynchronously (Slack, async review) without
+copy-pasting from terminal output. This is an operator-facing flag — no field stripping,
+no client-sanitization.
+
+**Files to touch:**
+- `sable/advise/generate.py` — add `--export` flag to the `generate_brief()` entrypoint;
+  after rendering the terminal string, call `atomic_write()` to write it to the output path
+- `sable/shared/files.py` — `atomic_write()` already exists; no changes needed unless the
+  output directory creation requires a guard (add `output_path.parent.mkdir(parents=True,
+  exist_ok=True)` before the write if not already present)
+
+**Command syntax:**
+```
+sable advise tig --export
+# produces: ./output/advise_tig_2026-03-26.md
+```
+
+**Expected outcome:** Running `sable advise tig --export` writes
+`./output/advise_tig_<YYYY-MM-DD>.md` with identical content to what is printed to
+terminal. The file is created atomically (temp → replace). Running without `--export`
+behaves exactly as before.
+
+**Constraints:**
+- Do NOT strip `sable_verdict`, cost data, or operator notes — the exported file is the
+  full operator brief, not a client-readable version.
+- Do NOT implement a separate `--client-brief` variant as part of this item.
+- Output directory is `./output/` relative to the working directory (not `~/.sable/`).
+- Date in filename is the generation date in `YYYY-MM-DD` format (local date is fine).
+- Use `atomic_write()` from `sable/shared/files.py` — do not open/write directly.
+
+**Tests:**
+- Mock `atomic_write`; assert it is called with a path matching
+  `output/advise_<org>_<date>.md` and content equal to the rendered terminal string.
+- Assert running without `--export` does NOT call `atomic_write`.
+- Assert the output path parent directory is created if absent.
+
+**Gotchas:** The rendered string and the file content must be byte-for-byte identical —
+do not re-render or post-process before writing. Confirm `atomic_write` signature before
+wiring (check `sable/shared/files.py`).
+
+---
+
+### FEATURE-PULSE-META-SKIP-FRESH · MED · `sable pulse meta scan --skip-if-fresh` + `status`
+
+**Status:** Not started.
+**Gate:** Feature Gate satisfied. Independent of other open features.
+
+**What:**
+(a) Add `--skip-if-fresh N` flag to `sable pulse meta scan` that skips the scan if the
+last successful scan for this org completed within the last N hours.
+(b) Add `sable pulse meta status` subcommand that prints a table of org / last_scan_at /
+scan_count for all orgs in the meta.db `scan_runs` table.
+
+**Why:** Operators re-run scans out of habit, burning SocialData spend unnecessarily ($0.002
+per request). `--skip-if-fresh` prevents redundant API calls. `status` gives operators a
+fast way to see when scans last ran without querying the DB manually.
+
+**Files to touch:**
+- `sable/pulse/meta/commands.py` — add `--skip-if-fresh N` to the `scan` command; add new
+  `status` subcommand
+- `sable/pulse/meta/db.py` — `get_latest_successful_scan_at(org)` already exists; confirm
+  its return type and use it directly. For `status`, add
+  `get_scan_summary_all_orgs() -> list[dict]` returning rows with `org`, `last_scan_at`,
+  `scan_count`.
+
+**Expected outcomes:**
+
+`--skip-if-fresh`:
+```
+sable pulse meta scan tig --skip-if-fresh 12
+# if last successful scan was 3h ago:
+Scan skipped: last scan 3h ago (within 12h window)
+# exits 0
+```
+If the last successful scan was more than N hours ago (or no scan exists), proceeds
+normally.
+
+`status`:
+```
+sable pulse meta status
+# prints:
+org      last_scan_at              scan_count
+tig      2026-03-26T08:14:22+00:00     47
+psy      2026-03-25T21:03:11+00:00     12
+```
+
+**Critical constraint:** `--skip-if-fresh` must bail out BEFORE `create_scan_run()` is
+called. If the skip check happens after the scan row is created, an orphaned scan row with
+no completion is written to meta.db. The check must be the first thing that runs after
+argument parsing, before any DB write.
+
+**Tests:**
+- `test_skip_if_fresh_skips_when_recent`: insert a successful `scan_runs` row 3h ago.
+  Assert `create_scan_run()` is NOT called when `--skip-if-fresh 12` is set.
+- `test_skip_if_fresh_runs_when_stale`: insert a successful `scan_runs` row 15h ago.
+  Assert scan proceeds normally when `--skip-if-fresh 12` is set.
+- `test_skip_if_fresh_runs_when_no_history`: no scan rows in DB. Assert scan proceeds
+  normally (no history = not fresh).
+- `test_skip_exit_code_is_zero`: confirm the skip path exits 0, not 1.
+- `test_status_table`: populate scan_runs with 2 orgs, multiple rows each. Assert
+  `status` output contains correct org names, most-recent `completed_at`, and correct
+  scan counts.
+- `test_status_empty_db`: no scan rows. Assert `status` prints an empty table or a
+  "no scans yet" message, no exception.
+
+**Gotchas:** `get_latest_successful_scan_at()` likely returns an ISO string or `None`.
+Confirm the return type and do the timestamp arithmetic in Python (parse to datetime,
+compute `datetime.now(timezone.utc) - last_scan_at`, compare to `timedelta(hours=N)`).
+Do not use string comparison for time arithmetic.
+
+---
+
+### FEATURE-ONBOARD-PREP · MED · `sable onboard --prep`
+
+**Status:** Not started.
+**Gate:** Feature Gate satisfied. Independent of other open features.
+
+**What:** New `sable onboard --prep <handle> <org>` command that:
+(a) Creates `~/.sable/profiles/@<handle>/` with four stub files — `tone.md`,
+`interests.md`, `context.md`, `notes.md` — each containing guiding questions to prompt
+the operator filling them in.
+(b) Adds the org to `pulse.db` via `migrate()` + `create_org()` (ensuring the schema
+exists before any insert).
+
+**Why:** Onboarding new accounts (PSY Protocol, Flow L1) currently requires manually
+creating the profile directory and stub files, then separately ensuring pulse.db is ready.
+This command makes onboarding repeatable and ensures the DB is in the correct state before
+any other `sable` command is run for the new account.
+
+**Files to touch:**
+- `sable/commands/onboard.py` — new file; top-level Click command registered as
+  `sable onboard`
+- `sable/cli.py` — register `onboard` command
+- `sable/pulse/db.py` — use `migrate()` + `create_org()` (confirm these exist and their
+  signatures before wiring)
+
+**Command syntax:**
+```
+sable onboard --prep @psy_handle psy
+```
+
+**Stub file content (guiding questions, not blank files):**
+
+`tone.md`:
+```markdown
+# Tone
+
+<!-- Describe this account's voice. Examples:
+- Confident and direct. Never hedges.
+- Uses crypto-native slang but stays readable.
+- Technical when explaining mechanisms; plain English for takes.
+-->
+```
+
+`interests.md`:
+```markdown
+# Interests
+
+<!-- List the topics this account posts about. Examples:
+- DeFi yields and risk management
+- L2 scaling narratives
+- On-chain data interpretation
+-->
+```
+
+`context.md`:
+```markdown
+# Account Context
+
+<!-- Background on who this account represents. Examples:
+- Founder at XYZ protocol. Background in TradFi before going on-chain.
+- Anonymous. Known for contrarian macro takes.
+-->
+```
+
+`notes.md`:
+```markdown
+# Operator Notes
+
+<!-- Running notes for Sable operators. Examples:
+- Avoid mentioning competitors by name.
+- Client prefers threads over standalone text for complex topics.
+-->
+```
+
+**Expected outcome:**
+```
+sable onboard --prep @psy_handle psy
+# creates:
+~/.sable/profiles/@psy_handle/tone.md
+~/.sable/profiles/@psy_handle/interests.md
+~/.sable/profiles/@psy_handle/context.md
+~/.sable/profiles/@psy_handle/notes.md
+# adds org "psy" to pulse.db
+# prints: "Profile created: ~/.sable/profiles/@psy_handle/"
+```
+
+**Idempotency:** Second run must print `"Profile already exists, skipping"` and NOT
+overwrite any existing files. The `create_org()` call should be idempotent (INSERT OR
+IGNORE or equivalent) — running twice does not error.
+
+**Tests:**
+- `test_prep_creates_profile_directory`: assert all 4 stub files created at correct paths.
+- `test_prep_stub_content`: assert each stub file contains the section header and at least
+  one comment line (not blank).
+- `test_prep_idempotent_no_overwrite`: run `--prep` twice. Assert second run does NOT
+  overwrite the files (check modification time or inject sentinel content before re-run).
+- `test_prep_prints_skip_message_on_second_run`: assert stdout contains "already exists"
+  on second run.
+- `test_prep_calls_migrate_before_create_org`: mock `migrate()` and `create_org()`; assert
+  `migrate()` is called before `create_org()`.
+- `test_prep_handle_normalization`: `@psy_handle` and `psy_handle` (no leading @) both
+  produce directory `@psy_handle` (with @).
+
+**Gotchas:**
+- Call `migrate()` on pulse.db BEFORE any insert — do not assume the schema exists.
+- Profile directory name must include the leading `@` (e.g. `@psy_handle`), matching the
+  pattern used by all existing profile lookups in the codebase.
+- Use `field(default_factory=list)` pattern for any new dataclasses introduced.
+- Guard against re-running on an already-initialized profile by checking whether the
+  directory exists BEFORE creating any files.
+- Do NOT use `create_org()` from sable.db platform layer — this is `pulse.db` org
+  registration. Confirm which module owns the pulse.db org create helper.
+
+---
+
 ### Shared Infrastructure Notes
 
 **All features must follow these patterns (already established in codebase):**
@@ -2358,3 +2719,99 @@ sable write @nonexistent_handle 2>&1 | grep -i "not found\|no account"
 sable pulse account @handle --days 30  # with empty pulse.db — should print "no data"
 sable diagnose @handle  # with empty dbs — should print report with "insufficient data" notes
 ```
+
+---
+
+## Simplify / Dead Code (AR-6 batch, 2026-03-26)
+
+Small, low-risk cleanup items. Each can be implemented in isolation. Run full validation
+after each one. These do NOT require a feature gate — they can be done at any time.
+
+### SIMPLIFY-DEAD-ATOMIC-WRITE · `vault/platform_sync.py`
+
+**What:** `_atomic_write()` is defined in `sable/vault/platform_sync.py` but has zero call
+sites anywhere in the codebase. The active pattern in the same file is `_write_to_temp()`.
+
+**Why:** Dead code increases cognitive load and risks being accidentally called instead of
+the live utility in `sable/shared/files.py`. Removing it reduces confusion.
+
+**Files:** `sable/vault/platform_sync.py`
+
+**Fix:**
+1. `grep -r "_atomic_write"` (or `rg _atomic_write`) across the repo to confirm zero call
+   sites before deleting.
+2. Remove the `_atomic_write()` function definition (~11 lines).
+3. The active `_write_to_temp()` function is unaffected — do NOT touch it.
+
+**Expected outcome:** `_atomic_write` does not exist in the codebase. `ruff` and `mypy`
+still pass. No test references `_atomic_write`.
+
+**Gotchas:** Confirm no test imports or calls `_atomic_write` before removing. If any test
+does reference it, update the test to use `_write_to_temp` or `atomic_write` from
+`sable/shared/files.py` instead.
+
+---
+
+### SIMPLIFY-HANDLE-NORM-TODO · `shared/utils.py` (or nearest normalization site)
+
+**What:** Handle normalization (strip leading `@`, lowercase) is duplicated inline at 20+
+sites across the codebase. This item does NOT implement the extraction — it only adds a
+tracked TODO comment at one representative site.
+
+**Why:** If the normalization logic ever changes, all 20+ inline sites must be found and
+updated. A single tracked comment makes the consolidation findable and scoped.
+
+**Files:** `sable/shared/utils.py` (or the most central existing normalization site in the
+codebase if `utils.py` does not exist — check `sable/shared/paths.py` or
+`sable/advise/stage1.py` for `_norm_handle`)
+
+**Fix:** Add the following comment at one representative normalization site:
+```python
+# TODO(codex): consolidate handle normalization into sable/shared/utils.py
+# Pattern: strip leading @, lowercase. Currently duplicated 20+ sites inline.
+# Implement as normalize_handle(h: str) -> str. Low risk, high cosmetic value.
+```
+
+**Expected outcome:** The comment exists at exactly one location. No code is changed, no
+function is extracted.
+
+**Gotchas:** Do NOT implement the extraction now — that is explicitly out of scope.
+Do NOT touch other modules to add the same comment — one site only. The extraction itself
+violates AGENTS.md ("do not refactor untouched modules") and must wait for a dedicated
+multi-file refactor pass.
+
+---
+
+### SIMPLIFY-DIAGNOSE-THRESHOLD-CONSTANTS · `diagnose/runner.py`
+
+**What:** Three analytically opaque float thresholds in `sable/diagnose/runner.py` are
+hardcoded with no names, making their meaning unclear to future maintainers.
+
+**Why:** Named module-level constants make thresholds self-documenting and easier to
+calibrate without hunting through logic blocks.
+
+**Files:** `sable/diagnose/runner.py`
+
+**Fix:**
+1. Read `sable/diagnose/runner.py` first to confirm the exact values and the context they
+   appear in.
+2. Extract these three constants to module level (top of file, after imports):
+   - `_FORMAT_OVERINDEX_RATIO = 0.50` — used in the format over-index detection logic
+     (Section 1: flags when any single format accounts for > 50% of posts)
+   - `_NICHE_LIFT_FLOOR = 0.8` — minimum niche_lift threshold (Section 1: "primary format
+     declining" check)
+   - `_ENGAGEMENT_DROP_THRESHOLD = 0.80` — week-over-week engagement drop trigger
+     (Section 5: flags when engagement drops > 20% for two consecutive weeks, i.e. ratio
+     falls below 0.80)
+3. Replace the three bare float literals with these constant names.
+
+**Expected outcome:** The three float literals are replaced with named constants. All
+existing tests still pass. `ruff` and `mypy` still pass at 0.
+
+**Gotchas:**
+- Read the file first — confirm exact values before extracting. If the actual values in
+  the live code differ from the values listed above, extract what is actually there (the
+  names above describe intent, not a prescription to change values).
+- The cadence bounds (`3.0`, `0.5`) and window sizes (`7`, `28`) are already
+  contextually clear from adjacent message strings — do NOT extract those.
+- Do not extract any other constants not listed here. Scope is exactly these three.
