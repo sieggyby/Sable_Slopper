@@ -634,3 +634,18 @@ def get_prev_scan_topics(org: str, limit: int = 1) -> dict[str, int]:
         term = row["term"]
         result[term] = result.get(term, 0) + row["mention_count"]
     return result
+
+
+def get_scan_summary_all_orgs() -> list[dict]:
+    """Return [{org, last_scan_at, scan_count}] for all orgs with scan history."""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT org,
+                  MAX(completed_at) as last_scan_at,
+                  COUNT(*) as scan_count
+           FROM scan_runs
+           GROUP BY org
+           ORDER BY last_scan_at DESC NULLS LAST"""
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

@@ -361,3 +361,170 @@ def test_org_id_defaults_to_yaml_stem(conn, tmp_path):
     # Check org was created with stem name
     org = conn.execute("SELECT * FROM orgs WHERE org_id='stemproject'").fetchone()
     assert org is not None
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Test 16: --prep creates profile directory with 4 stub files
+# ─────────────────────────────────────────────────────────────────────
+
+def test_prep_creates_profile_directory(tmp_path, monkeypatch):
+    """--prep creates profile dir with tone/interests/context/notes stubs."""
+    from click.testing import CliRunner
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("SABLE_HOME", str(tmp_path))
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = MagicMock()
+
+    with patch("sable.pulse.db.migrate"), \
+         patch("sable.platform.db.get_db", return_value=mock_conn):
+        runner = CliRunner()
+        from sable.commands.onboard import onboard_command
+        result = runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+
+    profiles_root = tmp_path / "profiles" / "@testhandle"
+    assert profiles_root.exists(), f"Profile dir not found: {profiles_root}"
+    for stub in ("tone.md", "interests.md", "context.md", "notes.md"):
+        assert (profiles_root / stub).exists(), f"Missing stub: {stub}"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Test 17: --prep stub files contain correct headers and comment lines
+# ─────────────────────────────────────────────────────────────────────
+
+def test_prep_stub_content(tmp_path, monkeypatch):
+    """Each stub file contains its section header and at least one comment line."""
+    from click.testing import CliRunner
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("SABLE_HOME", str(tmp_path))
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = MagicMock()
+
+    with patch("sable.pulse.db.migrate"), \
+         patch("sable.platform.db.get_db", return_value=mock_conn):
+        runner = CliRunner()
+        from sable.commands.onboard import onboard_command
+        result = runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+
+    profiles_root = tmp_path / "profiles" / "@testhandle"
+    expected_headers = {
+        "tone.md": "# Tone",
+        "interests.md": "# Interests",
+        "context.md": "# Account Context",
+        "notes.md": "# Operator Notes",
+    }
+    for filename, header in expected_headers.items():
+        content = (profiles_root / filename).read_text(encoding="utf-8")
+        assert header in content, f"{filename} missing header {header!r}"
+        assert "<!--" in content, f"{filename} missing comment marker"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Test 18: --prep is idempotent — does not overwrite existing stub files
+# ─────────────────────────────────────────────────────────────────────
+
+def test_prep_idempotent_no_overwrite(tmp_path, monkeypatch):
+    """Running --prep twice does not overwrite existing stub files."""
+    from click.testing import CliRunner
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("SABLE_HOME", str(tmp_path))
+
+    # Pre-create the profile dir and write a sentinel value
+    profile_dir = tmp_path / "profiles" / "@testhandle"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    (profile_dir / "tone.md").write_text("SENTINEL", encoding="utf-8")
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = MagicMock()
+
+    with patch("sable.pulse.db.migrate"), \
+         patch("sable.platform.db.get_db", return_value=mock_conn):
+        runner = CliRunner()
+        from sable.commands.onboard import onboard_command
+        runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+
+    assert (profile_dir / "tone.md").read_text(encoding="utf-8") == "SENTINEL"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Test 19: --prep prints "already exists" message on second run
+# ─────────────────────────────────────────────────────────────────────
+
+def test_prep_prints_skip_message_on_second_run(tmp_path, monkeypatch):
+    """When profile already exists, --prep prints a skip/already-exists message."""
+    from click.testing import CliRunner
+    from unittest.mock import MagicMock, patch
+    from io import StringIO
+
+    monkeypatch.setenv("SABLE_HOME", str(tmp_path))
+
+    # Pre-create the profile dir
+    profile_dir = tmp_path / "profiles" / "@testhandle"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = MagicMock()
+
+    captured_messages = []
+
+    def mock_err_print(msg, *args, **kwargs):
+        captured_messages.append(str(msg))
+
+    with patch("sable.pulse.db.migrate"), \
+         patch("sable.platform.db.get_db", return_value=mock_conn), \
+         patch("sable.commands.onboard.err_console") as mock_err_console:
+        mock_err_console.print.side_effect = mock_err_print
+        runner = CliRunner()
+        from sable.commands.onboard import onboard_command
+        result = runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+
+    all_messages = " ".join(captured_messages).lower()
+    assert "already exists" in all_messages, (
+        f"Expected 'already exists' in err_console output. Got: {captured_messages!r}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Test 20: pulse_migrate is called before the DB org insert
+# ─────────────────────────────────────────────────────────────────────
+
+def test_prep_calls_migrate_before_create_org(tmp_path, monkeypatch):
+    """pulse_migrate() is called before the org INSERT in --prep mode."""
+    from click.testing import CliRunner
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("SABLE_HOME", str(tmp_path))
+
+    call_order = []
+
+    mock_conn = MagicMock()
+
+    def track_execute(sql, *args, **kwargs):
+        if "INSERT" in sql.upper():
+            call_order.append("db_insert")
+        return MagicMock()
+
+    mock_conn.execute.side_effect = track_execute
+    mock_conn.commit.return_value = None
+    mock_conn.close.return_value = None
+
+    def mock_migrate():
+        call_order.append("pulse_migrate")
+
+    with patch("sable.pulse.db.migrate", side_effect=mock_migrate), \
+         patch("sable.platform.db.get_db", return_value=mock_conn):
+        runner = CliRunner()
+        from sable.commands.onboard import onboard_command
+        result = runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+
+    assert "pulse_migrate" in call_order, f"pulse_migrate not called. Order: {call_order}"
+    assert "db_insert" in call_order, f"db_insert not called. Order: {call_order}"
+    migrate_idx = call_order.index("pulse_migrate")
+    insert_idx = call_order.index("db_insert")
+    assert migrate_idx < insert_idx, (
+        f"pulse_migrate must be called before db_insert. Order: {call_order}"
+    )

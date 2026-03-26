@@ -46,7 +46,7 @@ Tracked failures, fixes, and open problems from iterating the clip pipeline.
 
 - **Leading/trailing filler trim** — clips still sometimes start on "So..." or "And...". Need a sentence-level trim pass after variant selection to drop opener filler.
 - **Context backtrack for dangling references** — clips starting with "...and that's why" require the sentence before. Need a mechanism to extend clip start backward to the last major clause boundary.
-- **Per-clip score logging in CLI output** — currently score is in metadata but not printed. Would help when reviewing batch output.
+- **Per-clip score logging in CLI output** — ✓ Done (2026-03-26). Score column added to dry-run table; score shown in assembly status line.
 - **Brainrot theme matching** — e.g. space/tech topics paired with thematically fitting brainrot. Currently only energy-matched.
 
 ---

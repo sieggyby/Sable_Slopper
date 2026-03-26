@@ -8,7 +8,7 @@
 
 The codebase has **three SQLite databases**, **26 Python data models** (dataclasses + Pydantic), **one YAML config schema**, **one YAML watchlist schema**, **one markdown frontmatter schema** (vault notes), and **one YAML character profile schema**.
 
-No formal ORM, no Pydantic-backed database layer. `pulse.db` and `meta.db` use hand-written SQL + dataclasses with no migration runner. `sable.db` uses `sable db migrate` (`sable/db/migrations/001_initial.sql`, extended by 002+003) via `ensure_schema()`. SableTracking's `_apply_pending_migrations()` also applies these migrations on sync startup.
+No formal ORM, no Pydantic-backed database layer. `pulse.db` and `meta.db` use hand-written SQL + dataclasses with no migration runner. `sable.db` uses `sable db migrate` (`sable/db/migrations/001_initial.sql`, extended by 002–005) via `ensure_schema()`. SableTracking's `_apply_pending_migrations()` also applies these migrations on sync startup.
 
 ---
 
@@ -178,7 +178,7 @@ Pydantic BaseModel. Serialized to `~/.sable/roster.yaml`.
 | claude_model | str | claude-opus-... |
 | auto_enrich | bool | True |
 | enrich_batch_size | int | 10 |
-| min_relevance_score | int | 6 |
+| min_relevance_score | int | 40 |
 | max_suggestions | int | 5 |
 | draft_temperature | float | 0.7 |
 | include_media_in_export | bool | False |
@@ -424,12 +424,12 @@ orgs:
 ---
 
 ### sable.db — `~/.sable/sable.db`
-**Defined in:** `sable/db/migrations/001_initial.sql` (extended by 002+003) + `sable/platform/db.py`
+**Defined in:** `sable/db/migrations/001_initial.sql` (extended by 002–005) + `sable/platform/db.py`
 **Written by:** `sable/platform/` modules; SableTracking `app/platform_sync.py` (via `sable/platform/` helpers)
 
 | Table              | Purpose                                              |
 |--------------------|------------------------------------------------------|
-| `schema_version`   | Single-row version tracker (currently 3, after migrations 001–003) |
+| `schema_version`   | Single-row version tracker (currently 5, after migrations 001–005) |
 | `orgs`             | Registered client orgs (org_id, display_name, config)|
 | `entities`         | Known community members per org                      |
 | `entity_handles`   | Platform handles per entity (twitter, discord, etc.) |
@@ -445,7 +445,7 @@ orgs:
 | `cost_events`      | Per-call AI/API cost tracking                        |
 | `sync_runs`        | Audit log of platform sync operations (extended by migration 002) |
 
-#### sync_runs (migration 002 adds columns, schema_version → 3)
+#### sync_runs (migration 002 adds columns, schema_version → 2)
 ```sql
 sync_id               INTEGER PRIMARY KEY AUTOINCREMENT
 org_id                TEXT REFERENCES orgs
@@ -467,6 +467,12 @@ merge_candidates_created INTEGER DEFAULT 0
 Indexes: `idx_sync_org`, `idx_sync_cult_run_id`
 
 #### diagnostic_runs (migration 003 adds columns, schema_version → 3)
+
+#### jobs (migration 004 adds columns — `004_jobs_extend.sql`, schema_version → 4)
+Job completion tracking fields added to the `jobs` table.
+
+#### artifacts (migration 005 adds columns — `005_artifacts_degraded.sql`, schema_version → 5)
+Artifact degradation flags added to the `artifacts` table.
 ```sql
 run_id               INTEGER PRIMARY KEY AUTOINCREMENT
 org_id               TEXT REFERENCES orgs
@@ -573,4 +579,4 @@ generated_at: str               # ISO datetime
 Previously listed gaps that are now filled:
 - ~~No `Org` model or table~~ → `orgs` table in `sable.db`
 - ~~No `Job`, `DiagnosticRun`, or `Artifact` model~~ → `jobs`, `job_steps`, `diagnostic_runs`, `artifacts` tables
-- ~~No schema migrations~~ → `sable db migrate` + `sable/db/migrations/001_initial.sql`
+- ~~No schema migrations~~ → `sable db migrate` + `sable/db/migrations/001_initial.sql` (+ migrations 002–005)

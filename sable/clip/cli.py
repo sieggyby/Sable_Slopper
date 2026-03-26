@@ -114,6 +114,7 @@ def clip_process(
     if dry_run:
         table = Table(box=box.SIMPLE)
         table.add_column("Clip")
+        table.add_column("Score")
         table.add_column("Start")
         table.add_column("End")
         table.add_column("Duration")
@@ -122,6 +123,7 @@ def clip_process(
             dur = c["end"] - c["start"]
             table.add_row(
                 f"#{i+1}",
+                str(c.get("score", "?")),
                 f"{c['start']:.1f}s",
                 f"{c['end']:.1f}s",
                 f"{dur:.1f}s",
@@ -136,7 +138,8 @@ def clip_process(
 
     for i, clip in enumerate(clips):
         out_file = out_dir / f"clip_{i+1:02d}.mp4"
-        console.print(f"  Assembling clip {i+1}/{len(clips)}...")
+        score = clip.get("score", "?")
+        console.print(f"  Assembling clip {i+1}/{len(clips)} (score {score}/10)...")
         meta = assemble_clip(
             source_video=video,
             output_path=out_file,

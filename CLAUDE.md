@@ -101,7 +101,7 @@ The clip pipeline iterates a lot. Key settled decisions (from `CLIP_LESSONS.md`)
 **Still open (next iteration):**
 - Leading/trailing filler trim ("So...", "And...")
 - Context backtrack for dangling references ("...and that's why")
-- Per-clip score in CLI output
+- Per-clip score in CLI output ✓ done
 - Brainrot theme matching (not just energy)
 
 ---

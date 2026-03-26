@@ -5,6 +5,7 @@ import json as _json
 import sqlite3
 import pytest
 from pathlib import Path
+from unittest.mock import patch, Mock
 
 
 def _make_meta_conn(scanned_tweets_rows: list[dict]) -> sqlite3.Connection:
@@ -365,3 +366,50 @@ def test_write_generator_passes_org_id_to_call_claude_json(monkeypatch):
 
     assert captured.get("org_id") is not None, "org_id must be passed to call_claude_json"
     assert captured["org_id"] == "testorg"
+
+
+def test_write_variants_logs_cost_to_sable_db(monkeypatch):
+    """write_variants must log cost via call_claude_with_usage when org_id is set."""
+    import sable.shared.api as _api_mod
+    import sable.platform.cost as _cost_mod
+    import sable.platform.db as _db_mod
+    from sable.write.generator import generate_tweet_variants
+
+    # Mock Anthropic client response
+    mock_response = Mock()
+    mock_response.content = [Mock(text='{"variants": [{"text": "tweet one", "structural_move": "hook one", "format_fit_score": 7.0, "notes": ""}]}')]
+    mock_response.usage = Mock(input_tokens=100, output_tokens=50)
+    mock_client = Mock()
+    mock_client.messages.create.return_value = mock_response
+    monkeypatch.setattr(_api_mod, "get_client", lambda: mock_client)
+
+    # Track log_cost calls
+    log_cost_calls: list = []
+
+    def _fake_log_cost(conn, org_id, call_type, cost_usd, **kwargs):
+        log_cost_calls.append({"conn": conn, "org_id": org_id, "call_type": call_type, "cost_usd": cost_usd})
+
+    monkeypatch.setattr(_cost_mod, "check_budget", lambda conn, org_id: (0.0, 5.0))
+    monkeypatch.setattr(_cost_mod, "log_cost", _fake_log_cost)
+
+    mock_conn = Mock()
+    monkeypatch.setattr(_db_mod, "get_db", lambda: mock_conn)
+
+    monkeypatch.setattr("sable.write.generator.require_account", lambda h: _make_account())
+    monkeypatch.setattr("sable.write.generator.build_account_context", lambda acc: "ctx")
+
+    generate_tweet_variants(
+        handle="@testwriter",
+        org="testorg",
+        format_bucket="standalone_text",
+        topic="test topic",
+        source_url=None,
+        num_variants=1,
+        meta_db_path=None,
+        vault_root=None,
+    )
+
+    assert len(log_cost_calls) == 1, "log_cost must be called exactly once"
+    logged = log_cost_calls[0]
+    assert logged["org_id"] == "testorg", f"org_id must be 'testorg', got {logged['org_id']!r}"
+    assert logged["call_type"] == "write_variants", f"call_type must be 'write_variants', got {logged['call_type']!r}"

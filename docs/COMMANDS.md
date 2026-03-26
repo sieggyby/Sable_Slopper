@@ -1,0 +1,407 @@
+# Sable Slopper — CLI Command Reference
+
+Full reference for every `sable` command and flag. All commands run via `sable <command> [options]`.
+
+---
+
+## roster
+
+Account management and markdown profile system.
+
+```
+sable roster add HANDLE [options]        Add a managed account
+sable roster remove HANDLE               Remove an account from the roster
+sable roster show HANDLE                 Show account config + profile preview
+sable roster list [--org ORG]            List all accounts (optionally filtered by org)
+sable roster update HANDLE [options]     Update account fields
+```
+
+### roster add / update flags
+| Flag | Description |
+|------|-------------|
+| `--display-name NAME` | Account display name |
+| `--org ORG` | Org slug this account belongs to |
+| `--archetype ARCHETYPE` | Voice archetype (e.g. "degen analyst") |
+| `--platform PLATFORM` | Platform (default: twitter) |
+
+### roster profile
+```
+sable roster profile init HANDLE         Scaffold blank profile files (tone, interests, context, notes)
+sable roster profile show HANDLE         Print all profile files
+sable roster profile edit HANDLE --file FILE   Open a profile file in $EDITOR
+```
+
+| `--file` value | What it edits |
+|----------------|---------------|
+| `tone` | Voice, language patterns, what to avoid |
+| `interests` | Topics, crypto sub-communities, current meta |
+| `context` | Background, community standing, lore |
+| `notes` | What's landed, what flopped, current arcs |
+
+---
+
+## clip
+
+Video → vertical clips with brainrot + captions.
+
+```
+sable clip process SOURCE --account HANDLE [options]
+```
+
+`SOURCE` can be a local file path or a YouTube URL (yt-dlp handles download automatically).
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--account / -a` | required | Account handle e.g. `@tig_intern` |
+| `--num-clips / -n` | all worthy | Max clips to produce |
+| `--min-duration` | 15s | Drop clips shorter than this |
+| `--max-duration` | 45s | Trim clips longer than this at a sentence boundary |
+| `--target-duration` | — | Single duration target; sets min/max with ±10s tolerance |
+| `--clip-sizes` | — | Comma-separated targets e.g. `15,30` |
+| `--whisper-model` | `base.en` | faster-whisper model name |
+| `--dry-run` | — | Transcribe + detect windows, print plan, skip Claude and encoding |
+| `--platform` | `twitter` | Output encoding profile (`twitter`, `discord`, `telegram`) |
+| `--caption-style` | account default | `word`, `phrase`, `none` |
+| `--caption-color` | auto | `white`, `yellow`, `black`, `cyan`, `green`, `red`, `#RRGGBB` |
+| `--brainrot-energy` | account default | `low`, `medium`, `high` |
+| `--no-brainrot` | — | Skip brainrot overlay entirely |
+| `--image-overlay` | — | PNG to composite in bottom-left |
+| `--no-highlight` | — | Disable active-word karaoke highlight |
+
+### clip brainrot
+```
+sable clip brainrot add FILE --energy LEVEL [--tags TAGS]
+sable clip brainrot list
+sable clip brainrot remove FILE [--delete]
+sable clip brainrot trace FILE
+```
+
+---
+
+## meme
+
+Template-based meme generation.
+
+```
+sable meme list-templates
+sable meme generate --account HANDLE [--template NAME] [--topic TOPIC] [--dry-run]
+sable meme batch --account HANDLE --count N [--render]
+```
+
+---
+
+## face
+
+Replicate-powered face swap.
+
+```
+sable face library add PHOTO --name NAME --consent
+sable face swap TARGET --account HANDLE [--dry-run] [--quality LEVEL]
+```
+
+| `--quality` | Description |
+|-------------|-------------|
+| `low` | Fast, lower fidelity |
+| `medium` | Balanced (default) |
+| `high` | Slower, highest fidelity |
+
+---
+
+## pulse
+
+Performance tracking, format lift, attribution, and AI recommendations.
+
+```
+sable pulse track --account HANDLE [--mock]
+sable pulse report --account HANDLE [--followers N]
+sable pulse recommend --account HANDLE [--update-roster]
+sable pulse export --account HANDLE --format FORMAT --output PATH
+sable pulse trends --org ORG [--format BUCKET]
+sable pulse account HANDLE [--days N] [--org ORG]
+sable pulse attribution HANDLE [--days N] [--org ORG]
+sable pulse link CONTENT_ID POST_ID --account HANDLE --org ORG
+```
+
+### pulse meta
+
+Content shape intelligence: format trends, topic signals, watchlist management.
+
+```
+sable pulse meta --org ORG [--cheap] [--full] [--dry-run]
+sable pulse meta scan --org ORG [--cheap] [--full] [--dry-run]
+sable pulse meta watchlist list [--org ORG]
+sable pulse meta watchlist add HANDLE [--org ORG] [--niche NICHE]
+sable pulse meta watchlist remove HANDLE [--org ORG]
+sable pulse meta watchlist health --org ORG
+```
+
+---
+
+## character-explainer
+
+Brainrot explainer videos with famous character voices.
+
+```
+sable character-explainer list-characters
+sable character-explainer generate [options]
+sable character-explainer setup-voice [options]
+```
+
+### character-explainer generate flags
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--topic` | required | Topic to explain |
+| `--character` | required | Character ID (see `list-characters`) |
+| `--bg-video` | random from brainrot library | Brainrot background video |
+| `--output` | auto | Output mp4 path |
+| `--background-md` | — | Markdown context file injected into script prompt |
+| `--tts-backend` | character default | `local` (F5-TTS) or `elevenlabs` |
+| `--target-duration` | `30` | Target video length in seconds |
+| `--orientation` | `landscape` | `landscape` (1280×720) or `portrait` (720×1280) |
+| `--platform` | `twitter` | Encoding preset: `twitter`, `youtube`, `discord`, `telegram` |
+| `--no-talking-head` | — | Disable mouth animation |
+
+### character-explainer setup-voice flags
+| Flag | Description |
+|------|-------------|
+| `--character` | Character ID |
+| `--source` | YouTube URL or local file path |
+| `--start N` | Trim start (seconds) |
+| `--end N` | Trim end (seconds) |
+| `--mouth-open PATH` | PNG for open mouth animation |
+| `--mouth-closed PATH` | PNG for closed mouth animation |
+
+---
+
+## vault
+
+Content catalog, search engine, and client knowledge base.
+
+```
+sable vault init --org ORG [--vault PATH]
+sable vault sync --org ORG [--workspace PATH] [--vault PATH] [--dry-run]
+sable vault enrich --org ORG [--vault PATH]
+sable vault status --org ORG [--vault PATH]
+sable vault search QUERY --org ORG [--depth DEPTH] [--type TYPE] [--available-for HANDLE] [--reply-to TWEET] [--format BUCKET]
+sable vault suggest --org ORG [--tweet-text TEXT] [--tweet-url URL] [--account HANDLE]
+sable vault log [CONTENT_ID] --account HANDLE --tweet-id ID --org ORG [--sync-from-pulse] [--bulk CSV]
+sable vault assign CONTENT_ID --account HANDLE --org ORG [--caption TEXT]
+sable vault gaps --org ORG
+sable vault export --org ORG [--output PATH] [--include-media]
+sable vault topic add SLUG --display-name NAME --org ORG
+sable vault topic list --org ORG
+sable vault topic refresh --org ORG
+```
+
+---
+
+## wojak
+
+Wojak asset library and Claude-driven scene compositor.
+
+```
+sable wojak list
+sable wojak add URL --id ID --name NAME --emotion EMOTION [--tags TAGS] [--description DESC]
+sable wojak download-missing
+sable wojak scene generate --account HANDLE --topic TOPIC
+sable wojak scene render SPEC_YAML --account HANDLE [--output PATH]
+```
+
+---
+
+## calendar
+
+Claude-generated posting schedule with vault inventory + trend alignment.
+
+```
+sable calendar HANDLE [--org ORG] [--days N] [--formats-target N] [--save]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--org` | roster org | Org slug |
+| `--days` | 7 | Planning horizon in days |
+| `--formats-target` | 4 | Unique format types to target |
+| `--save` | — | Save to `~/.sable/playbooks/calendar_{handle}_{date}.md` |
+
+---
+
+## diagnose
+
+Full account audit: format health, topic gaps, vault waste, cadence, engagement.
+
+```
+sable diagnose HANDLE [--org ORG] [--days N] [--save]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--org` | roster org | Org slug |
+| `--days` | 30 | Look-back window in days |
+| `--save` | — | Save diagnosis artifact to sable.db |
+
+---
+
+## write
+
+Generate tweet variants for a managed account in their voice.
+
+```
+sable write HANDLE [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format BUCKET` | auto | Format bucket (e.g. `standalone_text`, `short_clip`) |
+| `--topic TEXT` | account interests | Topic to write about |
+| `--source-url URL` | — | Source tweet URL for quote-tweet format |
+| `--variants N` | 3 | Number of variants to generate |
+| `--org ORG` | roster org | Org context for trend data |
+| `--score` | — | Score each variant's hook against recent high-performing patterns |
+
+---
+
+## score
+
+Score a draft tweet's hook against recent high-performing patterns.
+
+```
+sable score HANDLE --text "draft tweet" [--format BUCKET] [--org ORG]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--text` | required | Draft tweet text to score |
+| `--format` | `standalone_text` | Format bucket to score against |
+| `--org` | roster org | Org slug |
+
+---
+
+## advise
+
+Multi-stage strategic brief: profile → pulse → vault → recommendations.
+
+```
+sable advise HANDLE [--cheap] [--force] [--dry-run] [--export]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--cheap` | Use cheaper/faster model |
+| `--force` | Force regeneration even if cached |
+| `--dry-run` | Estimate cost without generating |
+| `--export` | Export brief to `./output/advise_<org>_<YYYY-MM-DD>.md` |
+
+---
+
+## onboard
+
+Onboard a new client org through a 6-step pipeline from a prospect YAML.
+
+```
+sable onboard PROSPECT_YAML [--org ORG_ID] [--yes] [--non-interactive]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--org ORG_ID` | Override org_id (default: from YAML or filename) |
+| `--yes` | Accept all defaults without prompting |
+| `--non-interactive` | Fail if disambiguation is needed |
+
+---
+
+## playbook
+
+Generate Discord engagement playbook. Delegates to Cult Grader.
+
+```
+sable playbook discord ORG_ID [--force] [--cheap] [--dry-run]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Force regeneration even if cached |
+| `--cheap` | Use cheaper/faster model |
+| `--dry-run` | Estimate cost without generating |
+
+---
+
+## tracking
+
+Sync SableTracking data into sable.db. Delegates to SableTracking's `platform_sync`.
+
+```
+sable tracking sync ORG_ID
+```
+
+---
+
+## config
+
+Read and write config values in `~/.sable/config.yaml`.
+
+```
+sable config get KEY
+sable config set KEY VALUE
+sable config list
+```
+
+Common keys: `anthropic_api_key`, `replicate_api_key`, `socialdata_api_key`, `default_model`, `workspace`.
+
+---
+
+## org
+
+Manage orgs in sable.db.
+
+```
+sable org add ORG_ID [--display-name NAME]
+sable org list
+sable org show ORG_ID
+```
+
+---
+
+## entity
+
+Manage community members (entities) in sable.db.
+
+```
+sable entity search QUERY [--org ORG]
+sable entity show ENTITY_ID
+sable entity merge ENTITY_A ENTITY_B [--force]
+sable entity tag ENTITY_ID TAG [--replace]
+sable entity note ENTITY_ID TEXT
+```
+
+---
+
+## job
+
+Inspect job lifecycle records in sable.db.
+
+```
+sable job list [--org ORG] [--status STATUS]
+sable job show JOB_ID
+```
+
+---
+
+## db
+
+Run sable.db migrations and inspect schema state.
+
+```
+sable db migrate
+sable db status
+```
+
+---
+
+## resume
+
+Resume a paused or failed job from its last checkpoint.
+
+```
+sable resume JOB_ID [--force]
+```

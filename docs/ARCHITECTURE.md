@@ -14,9 +14,19 @@ sable/
 ├── db/
 │   └── migrations/001_initial.sql  ← 15-table schema for sable.db
 │
+├── commands/                        ← CLI entry-point modules (one per top-level command)
+│   ├── advise.py                    ← sable advise
+│   ├── calendar.py                  ← sable calendar
+│   ├── diagnose.py                  ← sable diagnose
+│   ├── onboard.py                   ← sable onboard
+│   ├── playbook.py                  ← sable playbook
+│   ├── score.py                     ← sable score
+│   ├── tracking.py                  ← sable tracking
+│   └── write.py                     ← sable write
+│
 ├── platform/                        ← shared cross-tool data layer
 │   ├── db.py                        ← get_db(), ensure_schema()
-│   ├── errors.py                    ← SableError + 16 error codes
+│   ├── errors.py                    ← SableError + 19 error codes
 │   ├── entities.py                  ← entity CRUD
 │   ├── tags.py                      ← tag helpers (replace-current / append-history)
 │   ├── merge.py                     ← merge candidate + execute_merge
@@ -81,7 +91,7 @@ sable/pulse/meta/
 
 ## Databases
 
-Three SQLite databases, all stored in `$SABLE_HOME/` (default `~/.sable/`).
+Three SQLite databases stored under `$SABLE_HOME/` (default `~/.sable/`). Note: `meta.db` lives at `$SABLE_HOME/pulse/meta.db`, not directly in `$SABLE_HOME/`.
 
 | File | Contains | Written by |
 |------|---------|-----------|

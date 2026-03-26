@@ -27,6 +27,9 @@ def profiles_dir() -> Path:
 
 
 def profile_dir(handle: str) -> Path:
+    # TODO(codex): consolidate handle normalization into sable/shared/utils.py
+    # Pattern: strip leading @, lowercase. Currently duplicated 20+ sites inline.
+    # Implement as normalize_handle(h: str) -> str. Low risk, high cosmetic value.
     handle = handle.lstrip("@")
     d = profiles_dir() / f"@{handle}"
     return d

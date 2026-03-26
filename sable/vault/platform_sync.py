@@ -27,19 +27,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp_", suffix=".md")
-    try:
-        os.write(fd, content.encode("utf-8"))
-        os.close(fd)
-        os.replace(tmp, path)
-    except Exception:
-        os.close(fd)
-        os.unlink(tmp)
-        raise
-
-
 def _write_to_temp(path: Path, content: str) -> Path:
     """Write content to a temp file in path's parent dir. Return the temp Path.
     Does NOT rename to final — caller is responsible for os.replace or cleanup."""

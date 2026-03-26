@@ -30,7 +30,7 @@ Implemented in Sable_Cult_Grader (not in this repo directly):
 - `bot/`: operator Discord bot with 6 slash commands (`/entity search`, `/merge`, `/run status`, `/playbook latest`)
 - `sable_org` field on ProspectConfig: gates sync
 - DB migrations 002+003: extended `sync_runs` + `diagnostic_runs` schemas
-- Schema version: 3
+- Schema version: 5
 - Tests: 50 passing (`pytest tests/` in Sable_Cult_Grader)
 
 ### Round 3 — SableTracking ✅ COMPLETE (2026-03-23)

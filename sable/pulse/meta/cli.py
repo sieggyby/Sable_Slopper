@@ -159,7 +159,9 @@ def watchlist_health(org):
 @click.option("--full", is_flag=True, help="Ignore incremental cursors — full 48h rescan")
 @click.option("--cheap", is_flag=True, help="Scan + classify only, skip Claude analysis")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show cost estimate without API calls")
-def meta_scan(org, deep, full, cheap, dry_run):
+@click.option("--skip-if-fresh", "skip_if_fresh", type=int, default=None,
+              help="Skip scan if last successful scan completed within N hours.")
+def meta_scan(org, deep, full, cheap, dry_run, skip_if_fresh=None):
     """Scan watchlist accounts and collect/classify tweets."""
     from sable.pulse.meta import db as meta_db
     from sable.pulse.meta.watchlist import list_watchlist
@@ -204,6 +206,22 @@ def meta_scan(org, deep, full, cheap, dry_run):
                 f"Use --cheap or increase max_cost_per_run in config.[/red]"
             )
         return
+
+    if skip_if_fresh is not None:
+        from sable.pulse.meta.db import get_latest_successful_scan_at
+        from datetime import datetime, timezone, timedelta
+        last = get_latest_successful_scan_at(org)
+        if last is not None:
+            last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
+            if age_hours < skip_if_fresh:
+                console.print(
+                    f"[dim]Scan skipped: last scan {age_hours:.1f}h ago "
+                    f"(within {skip_if_fresh}h window)[/dim]"
+                )
+                return
 
     scan_id = meta_db.create_scan_run(org, mode=mode, watchlist_size=len(watchlist))
 
@@ -263,6 +281,22 @@ def meta_scan(org, deep, full, cheap, dry_run):
             "\n[dim]First scan(s) use per-follower fallback for normalization. "
             "Run 2-3 more times to build author history for better accuracy.[/dim]"
         )
+
+
+@meta_group.command("status")
+def meta_status():
+    """Show scan history summary for all orgs."""
+    from sable.pulse.meta import db as meta_db
+    meta_db.migrate()
+    rows = meta_db.get_scan_summary_all_orgs()
+    if not rows:
+        console.print("[dim]No scans recorded yet.[/dim]")
+        return
+    console.print(f"{'Org':<20} {'Last Scan':<22} {'Count':>6}")
+    console.print("-" * 50)
+    for r in rows:
+        last = r["last_scan_at"] or "never"
+        console.print(f"{r['org']:<20} {last:<22} {r['scan_count']:>6}")
 
 
 # ---------------------------------------------------------------------------

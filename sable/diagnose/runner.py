@@ -15,6 +15,9 @@ from sable.platform.db import get_db
 from sable.pulse.account_report import compute_account_format_lift
 from sable.vault.notes import load_all_notes
 
+_FORMAT_OVERINDEX_RATIO = 0.50
+_NICHE_LIFT_FLOOR = 0.8
+_ENGAGEMENT_DROP_THRESHOLD = 0.80
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -97,7 +100,7 @@ def _audit_format_portfolio(
     if report.total_posts >= 5:
         for entry in report.entries:
             ratio = entry.post_count / report.total_posts
-            if ratio > 0.50:
+            if ratio > _FORMAT_OVERINDEX_RATIO:
                 findings.append(Finding(
                     section=_SECTION_FORMAT,
                     severity=FindingSeverity.WARNING,
@@ -128,7 +131,7 @@ def _audit_format_portfolio(
                 detail=detail,
             ))
 
-        if primary.niche_lift is not None and primary.niche_lift < 0.8:
+        if primary.niche_lift is not None and primary.niche_lift < _NICHE_LIFT_FLOOR:
             findings.append(Finding(
                 section=_SECTION_FORMAT,
                 severity=FindingSeverity.WARNING,
@@ -425,7 +428,7 @@ def _audit_engagement_trend(
         prev = week_means[i - 1]
         curr = week_means[i]
         if prev is not None and curr is not None and prev > 0:
-            if curr / prev < 0.80:
+            if curr / prev < _ENGAGEMENT_DROP_THRESHOLD:
                 consecutive_drops += 1
                 max_consecutive = max(max_consecutive, consecutive_drops)
             else:

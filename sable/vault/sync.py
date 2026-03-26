@@ -264,7 +264,7 @@ def sync(
             generate_voice_profiles(org, vault_path)
             regenerate_index(org, vault_path)
         except Exception as e:
-            logger.warning("vault sync: supporting page refresh failed (org=%s): %s", org, e)
+            logger.warning("vault sync: supporting page refresh failed (org=%s): %s", org, e, exc_info=True)
 
     return report
 

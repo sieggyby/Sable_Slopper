@@ -19,6 +19,9 @@ High-volume crypto Twitter content production toolkit. CLI-driven, Claude-powere
 | `sable write` | Draft tweets and threads in an account's voice |
 | `sable score` | Hook quality scorer |
 | `sable advise` | Multi-stage strategic brief (profile → pulse → vault → recommendations) |
+| `sable onboard` | Onboard a new client org via prospect YAML (6-step pipeline) |
+| `sable playbook` | Generate Discord engagement playbook (delegates to Cult Grader) |
+| `sable tracking` | Sync SableTracking data into sable.db |
 
 ## Quick Start
 

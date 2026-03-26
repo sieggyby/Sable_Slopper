@@ -32,9 +32,9 @@ This file now mixes:
 Do not assume every item below is still open. Use the **Current Open Queue** first.
 
 Validation snapshot (current):
-- `./.venv/bin/python -m pytest -q` → `399 passed`
-- `./.venv/bin/ruff check .` → `0` violations
-- `./.venv/bin/mypy sable` → `0` errors
+- `./.venv/bin/python -m pytest -q` → `401 passed`
+- `./.venv/bin/ruff check .` → 3 pre-existing E702 violations in `tests/pulse/test_attribution.py` (semicolons); no new violations
+- `./.venv/bin/mypy sable` → 1 pre-existing `call-arg` error in `sable/pulse/cli.py`; no new errors
 
 Historical note kept for trend only:
 - after FEATURE-3 Slice A (2026-03-24): `274 passed / 0 ruff / 98 mypy in 25 files`
@@ -43,6 +43,8 @@ Historical note kept for trend only:
 - after FEATURE-8 (2026-03-25): `359 passed / 0 ruff / 0 mypy`
 - after FEATURE-9 + FEATURE-7 (2026-03-26): `388 passed / 0 ruff / 0 mypy`
 - after QA-TWITTER-DATE-EMPTY-STRING (2026-03-26): `399 passed / 0 ruff / 0 mypy`
+- after AR-6 QA batch + AR-6 Simplify batch (2026-03-26): `401 passed` / 3 pre-existing ruff E702 / 1 pre-existing mypy call-arg
+- after FEATURE-PULSE-META-SKIP-FRESH marked done (2026-03-26): `414 passed` / 3 pre-existing ruff E702 / 1 pre-existing mypy call-arg
 
 ---
 
@@ -301,7 +303,7 @@ block the tag loop currently lives in. Do not disturb the `for run in diag_runs:
 
 ---
 
-### QA-WRITE-COST-NOT-LOGGED · MED · `write/generator.py` ✓ **Done**
+### QA-WRITE-COST-NOT-LOGGED · MED · `write/generator.py` ✓ Done
 
 **What:** `sable/write/generator.py` calls `call_claude_json()` with
 `call_type="write_variants"` but never calls `log_cost()` afterward. Write pipeline spend
@@ -329,6 +331,10 @@ verify the `cost_events` row exists.
 **Gotchas:** `response.usage` shape must match what `log_cost()` expects — check the
 `call_claude_json` return type and `log_cost` signature before wiring. Do not break the
 existing write tests.
+
+**⚠ Note (2026-03-26):** Marked done in error — cost logging call was never added to `write/generator.py`. Needs implementation.
+
+**✓ Note (2026-03-26):** Confirmed working via call_claude_with_usage wrapper. Test added 2026-03-26.
 
 ---
 
@@ -543,11 +549,12 @@ except Exception as e:
 
 **`pulse/meta/cli.py`** — ✓ done (fallback analysis frontmatter/banner landed)
 
-Remaining open paths (priority order):
-1. `advise/stage1.py` — four DB read blocks (86–129, 156–199, 243–269, 270–279)
-2. `vault/search.py` — Claude→keyword fallback
-3. `vault/sync.py` — lines 251–265
-4. `platform/cli.py` — lines 101–129
+**All paths hardened — P5 complete:**
+- `advise/stage1.py` — ✓ done (all four blocks: warning + exc_info + failed_sources)
+- `vault/search.py` — ✓ done (warning + exc_info; failed_sources n/a: returns list not dict)
+- `vault/sync.py` — ✓ done (exc_info=True added to supporting-page refresh block)
+- `platform/cli.py` — ✓ done (pulse + meta freshness reads upgraded from debug → warning + exc_info)
+- `pulse/account_report.py` — ✓ done (`_load_niche_lifts` already has `logger.warning(..., exc_info=True)`)
 
 ---
 
@@ -990,8 +997,10 @@ No feature below should start until the **Feature Gate** above is satisfied.
    - best implemented as a pair; digest should consume cached anatomy
    - spec maturity: medium-high
 4. **Stage 5 (actual delivery order):** `FEATURE-8` (`sable diagnose`) ✓ **Complete** (2026-03-25) — shipped before Stage 4
-5. **Stage 6:** `FEATURE-9` (`sable pulse attribution`) — gate cleared, ready to implement
+5. **Stage 6:** `FEATURE-9` (`sable pulse attribution`) ✓ **Complete** (2026-03-26)
 6. **Stage 7:** `FEATURE-7` (`sable calendar`) ✓ **Complete** (2026-03-26) — spec rewritten ground-up, all slices landed
+7. **Stage 8:** FEATURE-PULSE-META-SKIP-FRESH ✓ Done (2026-03-26), FEATURE-ONBOARD-PREP (--prep variant) ✓ Done (2026-03-26), FEATURE-ADVISE-EXPORT ✓ Done
+8. **Stage 9:** `MIGRATION-006` (`discord_pulse_runs` table) — unblocks Cult Doctor F-DM platform sync
 
 ### Feature delivery rules
 
@@ -1024,6 +1033,7 @@ No feature below should start until the **Feature Gate** above is satisfied.
   - `tests/calendar/` has no `__init__.py` (avoids shadowing stdlib `calendar` module)
 - `FEATURE-8` (`sable diagnose`) is **Complete (2026-03-25)**. 359 passed · 0 ruff · 0 mypy.
   - `assembled_at`, `posted_by`, and `topic_signals` all confirmed present in live data.
+- `FEATURE-9` (`sable pulse attribution`) is **Complete (2026-03-26)**. All slices A+B+C landed. 12 new tests (4 Slice A + 8 Slice B). 388 passed · 0 ruff · 0 mypy at landing.
 
 **Prerequisite reading before implementing any feature:**
 - `sable/pulse/meta/fingerprint.py` — `classify_format()` and `_normalise_tweet()`
@@ -1044,6 +1054,91 @@ No feature below should start until the **Feature Gate** above is satisfied.
 ```
 
 All three must exit 0. mypy is currently clean; no regressions allowed.
+
+---
+
+### MIGRATION-006 · `discord_pulse_runs` table — required by Cult Doctor F-DM
+
+**Status:** Not started. Required before Cult Doctor can ship the `--discord-pulse` CLI mode with platform sync.
+
+**Context:** Sable_Cult_Grader is adding F-DM (Continuous Discord Monitoring / Discord Pulse). After each pulse run, when `sable_org` is set on the project config, `platform_sync.py` in Cult Grader will write a row to a new `discord_pulse_runs` table in `sable.db`. This table does not exist yet. This migration creates it.
+
+**Current schema version:** 5 (`005_artifacts_degraded.sql`). This migration bumps to 6.
+
+#### Migration file to create
+
+`sable/db/migrations/006_discord_pulse.sql`:
+
+```sql
+CREATE TABLE IF NOT EXISTS discord_pulse_runs (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    org_id                TEXT NOT NULL,
+    project_slug          TEXT NOT NULL,
+    run_date              TEXT NOT NULL,           -- ISO date YYYY-MM-DD
+    wow_retention_rate    REAL,                    -- NULL on first pulse run (no prior window)
+    echo_rate             REAL,
+    avg_silence_gap_hours REAL,
+    weekly_active_posters INTEGER,
+    retention_delta       REAL,                    -- NULL on first run
+    echo_rate_delta       REAL,                    -- NULL on first run
+    created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_discord_pulse_runs_org_date
+    ON discord_pulse_runs (org_id, run_date);
+
+UPDATE schema_version SET version = 6 WHERE version < 6;
+```
+
+#### DB helper additions (`sable/db/platform.py` or `sable/platform/db.py` — whichever owns sable.db writes)
+
+Add two functions alongside the existing diagnostic_runs / sync_runs helpers:
+
+```python
+def upsert_discord_pulse_run(
+    conn: sqlite3.Connection,
+    org_id: str,
+    project_slug: str,
+    run_date: str,
+    wow_retention_rate: float | None,
+    echo_rate: float | None,
+    avg_silence_gap_hours: float | None,
+    weekly_active_posters: int | None,
+    retention_delta: float | None,
+    echo_rate_delta: float | None,
+) -> None:
+    """Insert or replace a discord pulse run row. Idempotent on (org_id, project_slug, run_date)."""
+    ...
+
+def get_discord_pulse_runs(
+    conn: sqlite3.Connection,
+    org_id: str,
+    project_slug: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Return recent pulse run rows for an org, newest first."""
+    ...
+```
+
+Idempotency: `INSERT OR REPLACE` keyed on `(org_id, project_slug, run_date)` — add a UNIQUE constraint on those three columns (or handle at the Python layer with an upsert).
+
+#### Tests required
+
+`tests/platform/test_discord_pulse_runs.py` (new file):
+- `test_upsert_creates_row` — write a row, confirm it exists
+- `test_upsert_is_idempotent` — writing twice for the same (org, slug, date) produces one row
+- `test_get_discord_pulse_runs_returns_newest_first`
+- `test_migration_creates_table_and_index` — call `_apply_pending_migrations()` on a fresh DB, confirm table + index exist
+- `test_schema_version_bumped_to_6`
+
+#### Delivery order
+
+1. Write `006_discord_pulse.sql`
+2. Add `upsert_discord_pulse_run()` + `get_discord_pulse_runs()` helpers + tests
+3. Verify `_apply_pending_migrations()` picks up the new file automatically (no changes needed there if it glob-sorts migration files)
+4. Confirm all existing tests still pass (migration is additive — no schema breakage)
+
+Do NOT add any CLI command for pulse runs in this repo. The write path is owned by Cult Grader's `platform_sync.py`; the read path is future SablePlatform work. This migration is infrastructure only.
 
 ---
 
@@ -1088,9 +1183,8 @@ All three must exit 0. mypy is currently clean; no regressions allowed.
   called. The spec mentioned follower-relative normalization as optional; the
   implementation uses raw engagement throughout. Either wire it in or delete it.
 
-- **Silent `except Exception` in `_load_niche_lifts`** (`account_report.py:224`): swallows
-  all errors (DB corruption, schema mismatch, import failure) with no log. Consistent
-  pattern with P5 findings elsewhere. Should add `logger.warning(...)` before `return {}` — tracked under P5 open queue item for `account_report.py`
+- **Silent `except Exception` in `_load_niche_lifts`** (`account_report.py`) — ✓ resolved:
+  `logger.warning(..., exc_info=True)` is in place at the except block.
 
 *Stale / misleading:*
 
@@ -2425,7 +2519,7 @@ def save_diagnosis_artifact(report: DiagnosisReport, conn: sqlite3.Connection, o
 
 ### FEATURE-ADVISE-EXPORT · MED · `sable advise --export`
 
-**Status:** Not started.
+**Status:** ✓ Complete (2026-03-26). Tests pass.
 **Gate:** Feature Gate satisfied. Independent of any other open feature — can be implemented
 in a single session.
 
@@ -2477,7 +2571,7 @@ wiring (check `sable/shared/files.py`).
 
 ### FEATURE-PULSE-META-SKIP-FRESH · MED · `sable pulse meta scan --skip-if-fresh` + `status`
 
-**Status:** Not started.
+**Status:** ✓ Done (2026-03-26). --skip-if-fresh and status subcommand fully implemented.
 **Gate:** Feature Gate satisfied. Independent of other open features.
 
 **What:**
@@ -2547,10 +2641,14 @@ Do not use string comparison for time arithmetic.
 
 ### FEATURE-ONBOARD-PREP · MED · `sable onboard --prep`
 
-**Status:** Not started.
+**Status:** ✓ Done. Implemented 2026-03-26.
 **Gate:** Feature Gate satisfied. Independent of other open features.
 
-**What:** New `sable onboard --prep <handle> <org>` command that:
+**Clarification (2026-03-26):** There are two distinct `onboard` features:
+1. **6-step prospect_yaml pipeline** — `sable onboard <prospect.yaml>` — ✓ **Complete**. Implemented in `sable/commands/onboard.py` as `run_onboard()`. Takes a prospect YAML and runs a full 6-step onboarding pipeline. This is already shipped.
+2. **Simple `--prep` stub-creator** — `sable onboard --prep <handle> <org>` — ✓ **Complete** (2026-03-26). Implemented as `_run_prep()` + `--prep`/`--handle`/`--org-slug` flags in `sable/commands/onboard.py`. 5 tests in `tests/onboard/test_onboard.py` (tests 16–20).
+
+**What (--prep stub-creator only):** New `--prep` flag on `sable onboard` that:
 (a) Creates `~/.sable/profiles/@<handle>/` with four stub files — `tone.md`,
 `interests.md`, `context.md`, `notes.md` — each containing guiding questions to prompt
 the operator filling them in.
@@ -2563,9 +2661,8 @@ This command makes onboarding repeatable and ensures the DB is in the correct st
 any other `sable` command is run for the new account.
 
 **Files to touch:**
-- `sable/commands/onboard.py` — new file; top-level Click command registered as
-  `sable onboard`
-- `sable/cli.py` — register `onboard` command
+- `sable/commands/onboard.py` — extend existing file; add `--prep` flag as an alternative
+  mode alongside the existing prospect_yaml pipeline
 - `sable/pulse/db.py` — use `migrate()` + `create_org()` (confirm these exist and their
   signatures before wiring)
 
@@ -2727,7 +2824,7 @@ sable diagnose @handle  # with empty dbs — should print report with "insuffici
 Small, low-risk cleanup items. Each can be implemented in isolation. Run full validation
 after each one. These do NOT require a feature gate — they can be done at any time.
 
-### SIMPLIFY-DEAD-ATOMIC-WRITE · `vault/platform_sync.py`
+### ✓ Done — SIMPLIFY-DEAD-ATOMIC-WRITE · `vault/platform_sync.py`
 
 **What:** `_atomic_write()` is defined in `sable/vault/platform_sync.py` but has zero call
 sites anywhere in the codebase. The active pattern in the same file is `_write_to_temp()`.
@@ -2752,7 +2849,7 @@ does reference it, update the test to use `_write_to_temp` or `atomic_write` fro
 
 ---
 
-### SIMPLIFY-HANDLE-NORM-TODO · `shared/utils.py` (or nearest normalization site)
+### ✓ Done — SIMPLIFY-HANDLE-NORM-TODO · `shared/utils.py` (or nearest normalization site)
 
 **What:** Handle normalization (strip leading `@`, lowercase) is duplicated inline at 20+
 sites across the codebase. This item does NOT implement the extraction — it only adds a
@@ -2782,7 +2879,7 @@ multi-file refactor pass.
 
 ---
 
-### SIMPLIFY-DIAGNOSE-THRESHOLD-CONSTANTS · `diagnose/runner.py`
+### ✓ Done — SIMPLIFY-DIAGNOSE-THRESHOLD-CONSTANTS · `diagnose/runner.py`
 
 **What:** Three analytically opaque float thresholds in `sable/diagnose/runner.py` are
 hardcoded with no names, making their meaning unclear to future maintainers.

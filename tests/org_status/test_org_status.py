@@ -1,6 +1,8 @@
 """Tests for the enhanced org status command."""
+import logging
+import sqlite3 as _sqlite3
 from click.testing import CliRunner
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 
 def _run_org_status(conn, org_id):
@@ -124,3 +126,54 @@ def test_org_status_all_none_freshness(org_conn):
     assert result.exit_code == 0
     # At minimum none/None should appear for missing freshness data
     assert "(none)" in result.output
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Test 9: pulse freshness read failure logs WARNING
+# ─────────────────────────────────────────────────────────────────────
+
+def test_org_status_pulse_read_failure_logs_warning(org_conn, caplog, tmp_path):
+    """Corrupt pulse.db → WARNING logged, command still exits 0."""
+    from sable.platform.cli import org_status
+    runner = CliRunner()
+
+    corrupt_db = tmp_path / "pulse.db"
+    corrupt_db.write_bytes(b"not a sqlite db")
+
+    fake_path = MagicMock()
+    fake_path.exists.return_value = True
+    fake_path.__str__ = lambda self: str(corrupt_db)
+    fake_path.__fspath__ = lambda self: str(corrupt_db)
+
+    with patch("sable.platform.db.get_db", return_value=org_conn), \
+         patch("sable.shared.paths.pulse_db_path", return_value=corrupt_db), \
+         patch("sable.shared.paths.meta_db_path", return_value=tmp_path / "meta.db"), \
+         caplog.at_level(logging.WARNING, logger="sable.platform.cli"):
+        result = runner.invoke(org_status, ["testorg"])
+
+    assert result.exit_code == 0
+    warnings = [r for r in caplog.records if "pulse freshness" in r.message]
+    assert len(warnings) >= 1
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Test 10: meta freshness read failure logs WARNING
+# ─────────────────────────────────────────────────────────────────────
+
+def test_org_status_meta_read_failure_logs_warning(org_conn, caplog, tmp_path):
+    """Corrupt meta.db → WARNING logged, command still exits 0."""
+    from sable.platform.cli import org_status
+    runner = CliRunner()
+
+    corrupt_db = tmp_path / "meta.db"
+    corrupt_db.write_bytes(b"not a sqlite db")
+
+    with patch("sable.platform.db.get_db", return_value=org_conn), \
+         patch("sable.shared.paths.pulse_db_path", return_value=tmp_path / "pulse.db"), \
+         patch("sable.shared.paths.meta_db_path", return_value=corrupt_db), \
+         caplog.at_level(logging.WARNING, logger="sable.platform.cli"):
+        result = runner.invoke(org_status, ["testorg"])
+
+    assert result.exit_code == 0
+    warnings = [r for r in caplog.records if "meta freshness" in r.message]
+    assert len(warnings) >= 1
