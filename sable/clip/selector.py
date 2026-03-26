@@ -15,6 +15,25 @@ _MIN_WINDOW_DURATION = 5.0  # discard windows shorter than this
 _MAX_EVAL_BATCH = 20        # maximum clips per single Claude eval call
 _MAX_WINDOW_CONTEXT: int = 80   # why: caps first-stage prompt; keeps input tokens bounded
 
+_FILLER_SINGLE = frozenset({
+    "so", "yeah", "yep", "like", "um", "uh",
+    "okay", "ok", "well", "alright",
+})
+_FILLER_BIGRAMS = frozenset({"you know", "i mean"})
+
+_DANGLING_PATTERNS = (
+    # Demonstrative + resolution (unambiguous danglers)
+    "that's why", "that's what", "that's how", "that is why", "that is what",
+    "this is why", "this is what", "this is how",
+    # Relative clause openers
+    "which means", "which is why", "which is what",
+    # Causal continuers
+    "because of that", "because of this", "because of it",
+    "because that's", "because it's", "because they",
+    # Temporal/logical result
+    "so that's why", "so that's what", "so that's how",
+)
+
 
 def _candidate_endpoints(
     start: float,
@@ -278,6 +297,126 @@ def _snap_to_pause_backed_sentence(
     return None
 
 
+def _normalize_word(text: str) -> str:
+    return text.strip().lower().rstrip(".,!?;:—")
+
+
+def _trim_leading_filler(
+    start: float,
+    words: list[dict],
+    max_trim: float = 4.0,
+) -> float | None:
+    """Advance clip start past leading filler tokens. Returns new start or None."""
+    if not words:
+        return None
+    clip_words = sorted(
+        [w for w in words if w["start"] >= start - 0.05],
+        key=lambda w: w["start"],
+    )
+    if not clip_words:
+        return None
+
+    deadline = start + max_trim
+    cursor = 0
+
+    while cursor < len(clip_words):
+        w = clip_words[cursor]
+        if w["start"] >= deadline:
+            return None  # hit wall — treat as all-filler, no change
+
+        # bigram lookahead
+        if cursor + 1 < len(clip_words):
+            bigram = (
+                _normalize_word(w["text"])
+                + " "
+                + _normalize_word(clip_words[cursor + 1]["text"])
+            )
+            if bigram in _FILLER_BIGRAMS:
+                cursor += 2
+                if cursor >= len(clip_words):
+                    return None
+                continue
+
+        # single filler
+        if _normalize_word(w["text"]) in _FILLER_SINGLE:
+            cursor += 1
+            if cursor >= len(clip_words):
+                return None
+            continue
+
+        # first non-filler
+        new_start = w["start"]
+        if new_start <= start + 0.1:
+            return None  # negligible move
+        return new_start
+
+    return None  # loop exhausted without non-filler
+
+
+def _backtrack_for_context(
+    start: float,
+    words: list[dict],
+    segments: list[dict],
+    max_dur: float,
+    end: float,
+    max_backtrack: float = 12.0,
+) -> float | None:
+    """
+    If clip start is a dangling reference, backtrack to the start of the prior
+    sentence. Returns new start or None. Aborts if backtrack would cross a speech
+    window boundary or violate the duration contract.
+    """
+    # Step 1: extract first ~6 tokens from clip start
+    if words:
+        clip_words = [w for w in words if w["start"] >= start - 0.05]
+        first_tokens = [_normalize_word(w["text"]) for w in clip_words[:6]]
+    else:
+        clip_segs = [s for s in segments if s["start"] >= start - 0.05]
+        if not clip_segs:
+            return None
+        first_tokens = clip_segs[0]["text"].strip().lower().split()[:6]
+
+    if not first_tokens:
+        return None
+
+    prefix = " ".join(first_tokens)
+
+    # Step 2: pattern match (longest-first ordering prevents short-pattern shadowing)
+    if not any(prefix.startswith(p) for p in _DANGLING_PATTERNS):
+        return None
+
+    # Step 3: find immediately prior sentence-ending segment
+    prior_segs = [
+        s for s in segments
+        if s["end"] < start - 0.05
+        and s["text"].strip().endswith((".", "?", "!"))
+    ]
+    if not prior_segs:
+        return None
+
+    boundary_seg = max(prior_segs, key=lambda s: s["end"])
+    new_start = boundary_seg["start"]
+
+    # Step 4: hard limit — max backtrack distance
+    if start - new_start > max_backtrack:
+        return None
+
+    # Step 5: window-boundary check — abort if the range crosses a ≥0.8s pause
+    # (backtracking across a window boundary adds silence the windowing excluded)
+    if words:
+        range_words = [w for w in words if new_start - 0.05 <= w["start"] <= start + 0.05]
+        for j in range(len(range_words) - 1):
+            gap = range_words[j + 1]["start"] - range_words[j]["end"]
+            if gap >= _PAUSE_THRESHOLD:
+                return None
+
+    # Step 6: duration contract — abort if the extended clip exceeds max_dur
+    if end - new_start > max_dur:
+        return None
+
+    return new_start
+
+
 def _evaluate_variants_batch(
     clips_with_variants: list[dict],
     segments: list[dict],
@@ -414,8 +553,24 @@ Set lands=false when the chosen variant cuts off before the rhetorical point is 
                     print(f"  [extend] clip {i} extended from {long_end:.1f}s to {extended:.1f}s")
                     end = extended
 
+        # --- Post-processing: leading filler trim + context backtrack ---
+        clip_start = vv["start"]
+
+        # 1. Filler trim (advance start past opener tokens)
+        if words:
+            trimmed = _trim_leading_filler(clip_start, words, max_trim=4.0)
+            if trimmed is not None:
+                _logger.info("  [trim-filler] clip %d start %.1fs → %.1fs", i, clip_start, trimmed)
+                clip_start = trimmed
+
+        # 2. Context backtrack (extend start back to prior sentence if dangling ref)
+        new_start = _backtrack_for_context(clip_start, words or [], segments, max_dur, end)
+        if new_start is not None:
+            _logger.info("  [backtrack] clip %d start %.1fs → %.1fs", i, clip_start, new_start)
+            clip_start = new_start
+
         resolved.append({
-            "start": vv["start"],
+            "start": clip_start,
             "end": end,
             "reason": clip.get("reason", ""),
             "hook": clip.get("hook", ""),
