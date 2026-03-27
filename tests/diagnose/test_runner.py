@@ -12,6 +12,7 @@ from sable.diagnose.runner import (
     DiagnosisReport,
     Finding,
     FindingSeverity,
+    _attach_suggested_commands,
     _audit_engagement_trend,
     _audit_format_portfolio,
     _audit_posting_cadence,
@@ -508,3 +509,168 @@ def test_insufficient_data_graceful(tmp_path):
     assert len(findings) == 1
     assert findings[0].severity == FindingSeverity.INFO
     assert "insufficient" in findings[0].message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Test 13: suggested_command — over-indexed WARNING
+# ---------------------------------------------------------------------------
+
+def test_suggested_command_over_indexed():
+    """Over-indexed WARNING gets --watchlist-wire command."""
+    findings = [
+        Finding(
+            section="Format Portfolio",
+            severity=FindingSeverity.WARNING,
+            message="Over-indexed on standalone_text (8/10 posts, 80%)",
+        )
+    ]
+    _attach_suggested_commands(findings, "@alice", "testorg")
+    assert findings[0].suggested_command is not None
+    assert "--watchlist-wire" in findings[0].suggested_command
+    assert "@alice" in findings[0].suggested_command
+
+
+# ---------------------------------------------------------------------------
+# Test 14: suggested_command — stale inventory WARNING
+# ---------------------------------------------------------------------------
+
+def test_suggested_command_stale_inventory():
+    """Stale inventory WARNING gets vault search --available command."""
+    findings = [
+        Finding(
+            section="Vault Utilization",
+            severity=FindingSeverity.WARNING,
+            message="Stale inventory: 5 unposted note(s) older than 7 days",
+        )
+    ]
+    _attach_suggested_commands(findings, "@alice", "testorg")
+    cmd = findings[0].suggested_command
+    assert cmd is not None
+    assert "vault search" in cmd
+    assert "@alice" in cmd
+    assert "--available" in cmd
+
+
+# ---------------------------------------------------------------------------
+# Test 15: suggested_command — hot topic WARNING extracts topic
+# ---------------------------------------------------------------------------
+
+def test_suggested_command_hot_topic():
+    """Hot topic WARNING extracts topic name into --topic flag."""
+    findings = [
+        Finding(
+            section="Vault Utilization",
+            severity=FindingSeverity.WARNING,
+            message="Hot topic sitting idle: note on 'solana' matches niche signal but is unposted",
+        )
+    ]
+    _attach_suggested_commands(findings, "@alice", "testorg")
+    cmd = findings[0].suggested_command
+    assert cmd is not None
+    assert "--topic" in cmd
+    assert "solana" in cmd
+
+
+# ---------------------------------------------------------------------------
+# Test 16: suggested_command — topic gap INFO with --watchlist-wire
+# ---------------------------------------------------------------------------
+
+def test_suggested_command_topic_gap():
+    """Topic gap INFO gets --topic and --watchlist-wire command."""
+    findings = [
+        Finding(
+            section="Topic Freshness",
+            severity=FindingSeverity.INFO,
+            message="Topic gap: 'defi rails' trending in niche but absent from recent posts",
+        )
+    ]
+    _attach_suggested_commands(findings, "@bob", "psy")
+    cmd = findings[0].suggested_command
+    assert cmd is not None
+    assert "--topic" in cmd
+    assert "defi rails" in cmd
+    assert "--watchlist-wire" in cmd
+    assert "@bob" in cmd
+
+
+# ---------------------------------------------------------------------------
+# Test 17: suggested_command — niche surging format unused INFO
+# ---------------------------------------------------------------------------
+
+def test_suggested_command_niche_format():
+    """Niche surging format unused INFO gets --format command."""
+    findings = [
+        Finding(
+            section="Format Portfolio",
+            severity=FindingSeverity.INFO,
+            message="Niche surging format unused by account: short_clip",
+        )
+    ]
+    _attach_suggested_commands(findings, "@carol", "grvt")
+    cmd = findings[0].suggested_command
+    assert cmd is not None
+    assert "--format" in cmd
+    assert "short_clip" in cmd
+    assert "@carol" in cmd
+
+
+# ---------------------------------------------------------------------------
+# Test 18: render_diagnosis shows → Run: line inline
+# ---------------------------------------------------------------------------
+
+def test_render_diagnosis_shows_action_line():
+    """render_diagnosis emits '→ Run:' line for findings with suggested_command."""
+    report = DiagnosisReport(
+        handle="@alice",
+        org="testorg",
+        days=30,
+        generated_at=_iso(0),
+        findings=[
+            Finding(
+                section="Posting Cadence",
+                severity=FindingSeverity.WARNING,
+                message="Low activity: 0.10 posts/day avg over 30 days",
+                suggested_command="sable write @alice --watchlist-wire",
+            )
+        ],
+    )
+    output = render_diagnosis(report)
+    assert "→ Run:" in output
+    assert "sable write @alice --watchlist-wire" in output
+
+
+# ---------------------------------------------------------------------------
+# Test 19: render_diagnosis Quick Actions block
+# ---------------------------------------------------------------------------
+
+def test_render_diagnosis_quick_actions_block():
+    """render_diagnosis emits 'Quick Actions:' section for WARNING findings with commands."""
+    report = DiagnosisReport(
+        handle="@alice",
+        org="testorg",
+        days=30,
+        generated_at=_iso(0),
+        findings=[
+            Finding(
+                section="Posting Cadence",
+                severity=FindingSeverity.WARNING,
+                message="Low activity: 0.10 posts/day avg over 30 days",
+                suggested_command="sable write @alice --watchlist-wire",
+            ),
+            Finding(
+                section="Format Portfolio",
+                severity=FindingSeverity.INFO,
+                message="Niche surging format unused by account: short_clip",
+                suggested_command="sable write @alice --format short_clip",
+            ),
+        ],
+    )
+    output = render_diagnosis(report)
+    assert "Quick Actions:" in output
+    # WARNING command appears in Quick Actions; INFO command does NOT
+    assert "1. sable write @alice --watchlist-wire" in output
+    # INFO finding's command should NOT appear in Quick Actions block
+    lines = output.splitlines()
+    qa_start = next(i for i, l in enumerate(lines) if "Quick Actions:" in l)
+    qa_section = "\n".join(lines[qa_start:])
+    assert "short_clip" not in qa_section

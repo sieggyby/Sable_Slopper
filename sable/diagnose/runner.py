@@ -35,6 +35,7 @@ class Finding:
     severity: FindingSeverity
     message: str
     detail: str | None = None
+    suggested_command: str | None = None
 
 
 @dataclass
@@ -447,6 +448,48 @@ def _audit_engagement_trend(
 
 
 # ---------------------------------------------------------------------------
+# Action mapper
+# ---------------------------------------------------------------------------
+
+def _map_finding_to_command(finding: Finding, handle: str, org: str) -> str | None:
+    """Return a runnable sable command for actionable findings, or None."""
+    h = handle if handle.startswith("@") else f"@{handle}"
+    m = finding.message
+    if "Over-indexed on" in m:
+        return f"sable write {h} --watchlist-wire"
+    if "Execution gap on primary format" in m:
+        return f"sable pulse meta scan --org {org}"
+    if "declining in niche" in m:
+        return f"sable vault niche-gaps --org {org}"
+    if "Stale inventory:" in m:
+        return f"sable vault search {h} --available"
+    if "Hot topic sitting idle: note on" in m:
+        match = re.search(r"note on '([^']+)'", m)
+        topic = match.group(1) if match else "?"
+        return f'sable write {h} --topic "{topic}"'
+    if "Low activity:" in m or "dry spell" in m:
+        return f"sable write {h} --watchlist-wire"
+    if "Engagement declining" in m:
+        return f"sable vault niche-gaps --org {org}"
+    if "Niche surging format unused" in m:
+        match = re.search(r"unused(?:\s+by\s+account)?:\s+(\S+)", m)
+        fmt = match.group(1) if match else "?"
+        return f"sable write {h} --format {fmt}"
+    if "Topic gap:" in m:
+        match = re.search(r"'([^']+)' trending", m)
+        term = match.group(1) if match else "?"
+        return f'sable write {h} --topic "{term}" --watchlist-wire'
+    return None
+
+
+def _attach_suggested_commands(findings: list[Finding], handle: str, org: str) -> None:
+    """Mutate findings in place: set suggested_command on actionable findings."""
+    for f in findings:
+        if f.severity in (FindingSeverity.WARNING, FindingSeverity.INFO):
+            f.suggested_command = _map_finding_to_command(f, handle, org)
+
+
+# ---------------------------------------------------------------------------
 # Assembly
 # ---------------------------------------------------------------------------
 
@@ -466,6 +509,7 @@ def run_diagnosis(
     findings += _audit_vault_utilization(handle, org, vault_root, meta_db_path)
     findings += _audit_posting_cadence(handle, pulse_db_path, days)
     findings += _audit_engagement_trend(handle, pulse_db_path)
+    _attach_suggested_commands(findings, handle, org)
     return DiagnosisReport(
         handle=handle,
         org=org,
@@ -516,10 +560,24 @@ def render_diagnosis(report: DiagnosisReport) -> str:
             lines.append(f"  {icon}  {finding.message}")
             if finding.detail:
                 lines.append(f"      {finding.detail}")
+            if finding.suggested_command:
+                lines.append(f"     → Run: {finding.suggested_command}")
         lines.append("")
 
     warnings = sum(1 for f in report.findings if f.severity == FindingSeverity.WARNING)
     infos = sum(1 for f in report.findings if f.severity == FindingSeverity.INFO)
+
+    quick_actions = [
+        f.suggested_command
+        for f in report.findings
+        if f.severity == FindingSeverity.WARNING and f.suggested_command
+    ]
+    if quick_actions:
+        lines.append("Quick Actions:")
+        for i, cmd in enumerate(quick_actions, 1):
+            lines.append(f"  {i}. {cmd}")
+        lines.append("")
+
     lines.append(f"{warnings} warnings, {infos} info items")
 
     if report.artifact_id:
@@ -557,3 +615,24 @@ def save_diagnosis_artifact(report: DiagnosisReport, org: str) -> str:
     )
     conn.commit()
     return str(cur.lastrowid)
+
+
+def diagnosis_to_json(report: DiagnosisReport) -> dict:
+    """Serialize a DiagnosisReport to a plain dict (for --save JSON artifact)."""
+    return {
+        "handle": report.handle,
+        "org": report.org,
+        "days": report.days,
+        "generated_at": report.generated_at,
+        "artifact_id": report.artifact_id,
+        "findings": [
+            {
+                "section": f.section,
+                "severity": f.severity.value,
+                "message": f.message,
+                "detail": f.detail,
+                "suggested_command": f.suggested_command,
+            }
+            for f in report.findings
+        ],
+    }

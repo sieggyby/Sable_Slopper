@@ -186,7 +186,7 @@ sable vault search QUERY --org ORG [--depth DEPTH] [--type TYPE] [--available-fo
 sable vault suggest --org ORG [--tweet-text TEXT] [--tweet-url URL] [--account HANDLE]
 sable vault log [CONTENT_ID] --account HANDLE --tweet-id ID --org ORG [--sync-from-pulse] [--bulk CSV]
 sable vault assign CONTENT_ID --account HANDLE --org ORG [--caption TEXT]
-sable vault gaps --org ORG
+sable vault niche-gaps --org ORG [--top N] [--min-authors N] [--json]
 sable vault export --org ORG [--output PATH] [--include-media]
 sable vault topic add SLUG --display-name NAME --org ORG
 sable vault topic list --org ORG
@@ -341,9 +341,8 @@ sable tracking sync ORG_ID
 Read and write config values in `~/.sable/config.yaml`.
 
 ```
-sable config get KEY
-sable config set KEY VALUE
-sable config list
+sable config show          # Print current config (API keys masked)
+sable config set KEY VALUE # Set a config value
 ```
 
 Common keys: `anthropic_api_key`, `replicate_api_key`, `socialdata_api_key`, `default_model`, `workspace`.

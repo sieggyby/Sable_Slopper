@@ -22,6 +22,7 @@ High-volume crypto Twitter content production toolkit. CLI-driven, Claude-powere
 | `sable onboard` | Onboard a new client org via prospect YAML (6-step pipeline) |
 | `sable playbook` | Generate Discord engagement playbook (delegates to Cult Grader) |
 | `sable tracking` | Sync SableTracking data into sable.db |
+| `sable org` / `sable entity` / `sable job` / `sable db` / `sable resume` | Platform management: orgs, entities, jobs, sable.db migrations |
 
 ## Quick Start
 
@@ -452,7 +453,7 @@ sable vault log content_abc123 --account @tig_intern --tweet-id 1234567890 --org
 | `vault suggest --org ORG [--tweet-text] [--tweet-url] [--account]` | Generate reply suggestions from vault content |
 | `vault log [CONTENT_ID] --account --tweet-id --org [--sync-from-pulse] [--bulk CSV]` | Log posted content; `--bulk` accepts a CSV of multiple posts |
 | `vault assign CONTENT_ID --account --org [--caption]` | Assign content to account queue |
-| `vault gaps --org ORG` | Show topic coverage gaps |
+| `vault niche-gaps --org ORG` | Show topic coverage gaps: topics with niche signal but no vault content |
 | `vault export --org ORG [--output] [--include-media]` | Export as client-ready zip |
 | `vault topic add SLUG --display-name --org` | Add topic hub page |
 | `vault topic list --org ORG` | List topic hubs |

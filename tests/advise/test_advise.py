@@ -816,3 +816,22 @@ def test_export_output_dir_created_if_absent(tmp_path):
 
     assert out_dir.exists()
     assert out_file.read_text() == "x"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# _normalize_handle
+# ─────────────────────────────────────────────────────────────────────
+
+def test_normalize_handle_strips_at_prefix():
+    from sable.advise.generate import _normalize_handle
+    assert _normalize_handle("@Alice") == "alice"
+
+
+def test_normalize_handle_lowercases():
+    from sable.advise.generate import _normalize_handle
+    assert _normalize_handle("ALICE") == "alice"
+
+
+def test_normalize_handle_empty_string():
+    from sable.advise.generate import _normalize_handle
+    assert _normalize_handle("") == ""

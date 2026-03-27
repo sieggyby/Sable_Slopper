@@ -8,7 +8,7 @@
 
 The codebase has **three SQLite databases**, **26 Python data models** (dataclasses + Pydantic), **one YAML config schema**, **one YAML watchlist schema**, **one markdown frontmatter schema** (vault notes), and **one YAML character profile schema**.
 
-No formal ORM, no Pydantic-backed database layer. `pulse.db` and `meta.db` use hand-written SQL + dataclasses with no migration runner. `sable.db` uses `sable db migrate` (`sable/db/migrations/001_initial.sql`, extended by 002–005) via `ensure_schema()`. SableTracking's `_apply_pending_migrations()` also applies these migrations on sync startup.
+No formal ORM, no Pydantic-backed database layer. `pulse.db` and `meta.db` use hand-written SQL + dataclasses with no migration runner. `sable.db` uses `sable db migrate` (`sable/db/migrations/001_initial.sql`, extended by 002–006) via `ensure_schema()`. SableTracking's `_apply_pending_migrations()` also applies these migrations on sync startup.
 
 ---
 
@@ -424,12 +424,12 @@ orgs:
 ---
 
 ### sable.db — `~/.sable/sable.db`
-**Defined in:** `sable/db/migrations/001_initial.sql` (extended by 002–005) + `sable/platform/db.py`
+**Defined in:** `sable/db/migrations/001_initial.sql` (extended by 002–006) + `sable/platform/db.py`
 **Written by:** `sable/platform/` modules; SableTracking `app/platform_sync.py` (via `sable/platform/` helpers)
 
 | Table              | Purpose                                              |
 |--------------------|------------------------------------------------------|
-| `schema_version`   | Single-row version tracker (currently 5, after migrations 001–005) |
+| `schema_version`   | Single-row version tracker (currently 6, after migrations 001–006) |
 | `orgs`             | Registered client orgs (org_id, display_name, config)|
 | `entities`         | Known community members per org                      |
 | `entity_handles`   | Platform handles per entity (twitter, discord, etc.) |
@@ -473,6 +473,25 @@ Job completion tracking fields added to the `jobs` table.
 
 #### artifacts (migration 005 adds columns — `005_artifacts_degraded.sql`, schema_version → 5)
 Artifact degradation flags added to the `artifacts` table.
+
+#### discord_pulse_runs (migration 006 — `006_discord_pulse.sql`, schema_version → 6)
+Week-over-week Discord health metric tracking. Written by `sable/platform/discord_pulse.py`.
+```sql
+id                    INTEGER PRIMARY KEY AUTOINCREMENT
+org_id                TEXT NOT NULL
+project_slug          TEXT NOT NULL
+run_date              TEXT NOT NULL    -- ISO YYYY-MM-DD
+wow_retention_rate    REAL             -- NULL on first run
+echo_rate             REAL
+avg_silence_gap_hours REAL
+weekly_active_posters INTEGER
+retention_delta       REAL             -- NULL on first run
+echo_rate_delta       REAL             -- NULL on first run
+created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+-- UNIQUE (org_id, project_slug, run_date)
+-- INDEX idx_discord_pulse_runs_org_date (org_id, run_date)
+```
+
 ```sql
 run_id               INTEGER PRIMARY KEY AUTOINCREMENT
 org_id               TEXT REFERENCES orgs
@@ -579,4 +598,4 @@ generated_at: str               # ISO datetime
 Previously listed gaps that are now filled:
 - ~~No `Org` model or table~~ → `orgs` table in `sable.db`
 - ~~No `Job`, `DiagnosticRun`, or `Artifact` model~~ → `jobs`, `job_steps`, `diagnostic_runs`, `artifacts` tables
-- ~~No schema migrations~~ → `sable db migrate` + `sable/db/migrations/001_initial.sql` (+ migrations 002–005)
+- ~~No schema migrations~~ → `sable db migrate` + `sable/db/migrations/001_initial.sql` (+ migrations 002–006)

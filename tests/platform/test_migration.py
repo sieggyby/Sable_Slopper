@@ -6,7 +6,7 @@ from sable.platform.db import ensure_schema
 
 def test_schema_version_is_current(conn):
     row = conn.execute("SELECT version FROM schema_version").fetchone()
-    assert row["version"] == 5
+    assert row["version"] == 6
 
 
 def test_all_tables_exist(conn):
@@ -14,6 +14,7 @@ def test_all_tables_exist(conn):
         "schema_version", "orgs", "entities", "entity_handles", "entity_tags",
         "entity_notes", "merge_candidates", "merge_events", "content_items",
         "diagnostic_runs", "jobs", "job_steps", "artifacts", "cost_events", "sync_runs",
+        "discord_pulse_runs",
     }
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
@@ -26,7 +27,7 @@ def test_ensure_schema_idempotent(conn):
     """Calling ensure_schema again on a migrated DB must not error or change version."""
     ensure_schema(conn)
     row = conn.execute("SELECT version FROM schema_version").fetchone()
-    assert row["version"] == 5
+    assert row["version"] == 6
 
 
 def test_ensure_schema_on_fresh_db():
@@ -35,7 +36,7 @@ def test_ensure_schema_on_fresh_db():
     c.row_factory = sqlite3.Row
     ensure_schema(c)
     row = c.execute("SELECT version FROM schema_version").fetchone()
-    assert row["version"] == 5
+    assert row["version"] == 6
     c.close()
 
 

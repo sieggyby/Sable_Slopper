@@ -163,6 +163,7 @@ def generate_tweet_variants(
     num_variants: int,
     meta_db_path: Optional[Path],
     vault_root: Optional[Path],
+    watchlist_wire: bool = False,
 ) -> list[TweetVariant]:
     """Assemble context, call Claude, return parsed TweetVariant list."""
     acc = require_account(handle)
@@ -188,6 +189,19 @@ def generate_tweet_variants(
             examples = []
 
         vault_context = _get_vault_context(topic, vault_root, resolved_org)
+
+        # Watchlist wire: inject top niche signals into prompt if requested
+        niche_wire_block = ""
+        if watchlist_wire:
+            try:
+                from sable.pulse.meta.db import get_top_topic_signals as _get_signals
+                wire_signals = _get_signals(resolved_org, limit=3, min_unique_authors=1,
+                                            conn=conn)
+                if wire_signals:
+                    terms = ", ".join(s["term"] for s in wire_signals)
+                    niche_wire_block = f"\nTrending niche topics to consider: {terms}"
+            except Exception as e:
+                logger.warning("watchlist_wire fetch failed: %s", e)
 
         # Prompt assembly
         if examples:
@@ -218,7 +232,8 @@ def generate_tweet_variants(
             f"(study structure, not content):\n{examples_block}\n\n"
             f"Topic to write about: {topic_str}"
             f"{source_block}"
-            f"{vault_block}\n\n"
+            f"{vault_block}"
+            f"{niche_wire_block}\n\n"
             f"Generate {num_variants} tweet variants. For each:\n"
             "- Write the tweet text (respect Twitter's 280-char limit for standalone; "
             "280 per tweet for threads)\n"

@@ -16,7 +16,10 @@ import click
               help="Org context for trend data (defaults to roster org).")
 @click.option("--score", "run_score", is_flag=True, default=False,
               help="Score each variant's hook against recent high-performing patterns.")
-def write_command(handle, format_bucket, topic, source_url, variants, org, run_score):
+@click.option("--watchlist-wire", is_flag=True, default=False,
+              help="Inject top niche topics from meta.db into prompt.")
+def write_command(handle, format_bucket, topic, source_url, variants, org, run_score,
+                  watchlist_wire):
     """Generate tweet variants for a managed account."""
     from sable.platform.errors import SableError
     from sable.roster.manager import require_account
@@ -42,6 +45,7 @@ def write_command(handle, format_bucket, topic, source_url, variants, org, run_s
             num_variants=variants,
             meta_db_path=meta_db_path() if resolved_org else None,
             vault_root=vault_root,
+            watchlist_wire=watchlist_wire,
         )
     except SableError as e:
         click.echo(f"Error [{e.code}]: {e.message}", err=True)

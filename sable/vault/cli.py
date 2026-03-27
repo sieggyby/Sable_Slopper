@@ -505,6 +505,30 @@ def vault_gaps(org, vault):
 
 
 # ---------------------------------------------------------------------------
+# niche-gaps
+# ---------------------------------------------------------------------------
+
+@vault_group.command("niche-gaps")
+@click.option("--org", required=True)
+@click.option("--vault", default=None)
+@click.option("--top", default=10, show_default=True)
+@click.option("--min-authors", default=2, show_default=True)
+@click.option("--json", "as_json", is_flag=True)
+def vault_niche_gaps(org, vault, top, min_authors, as_json):
+    """Show niche-trending topics with no vault coverage (requires meta scan data)."""
+    from sable.vault.gaps import compute_signal_gaps, render_signal_gaps
+    import json as json_mod
+
+    vault_path = _resolve_vault(org, vault) if vault else None
+    gaps = compute_signal_gaps(org, vault_path=vault_path, top_n=top, min_unique_authors=min_authors)
+    if as_json:
+        import dataclasses
+        click.echo(json_mod.dumps([dataclasses.asdict(g) for g in gaps], indent=2))
+    else:
+        click.echo(render_signal_gaps(gaps, org))
+
+
+# ---------------------------------------------------------------------------
 # export
 # ---------------------------------------------------------------------------
 

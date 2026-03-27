@@ -32,7 +32,9 @@ Five new CLI commands: `sable org`, `sable entity`, `sable job`, `sable db`, `sa
 **SableTracking (Round 3) is complete.** `app/platform_sync.py` in SableTracking bridges
 Google Sheets (contributors + content_log) → `sable.db` (entities, handles, tags, content_items).
 Async sync runner, `_apply_pending_migrations()`, `SABLE_CLIENT_ORG_MAP` env var config.
-36 tests passing. Schema version remains 3.
+36 tests passing. Schema version is now 6.
+
+**Discord Pulse (MIGRATION-006) is complete.** `discord_pulse_runs` table added to sable.db (schema version 6) for week-over-week Discord health metric tracking via `sable/platform/discord_pulse.py`.
 
 **Phase 2 (local web UI) is planned but not started.**
 - Entry point: `sable serve` → FastAPI app in `sable/serve/`
@@ -49,7 +51,7 @@ Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
 - **Three SQLite databases, no ORM.** `pulse.db` (performance + posting log), `meta.db`
   (watchlist tweet cache + format intelligence), and `sable.db` (platform cross-tool store).
   Hand-written SQL + dataclasses throughout. `sable db migrate` runs
-  `sable/db/migrations/001_initial.sql` via `ensure_schema()`.
+  all migrations (001–006) via `ensure_schema()`.
   See `docs/SCHEMA_INVENTORY.md` for full table and model inventory.
 
 - **No shared DB connection factory for pulse/meta.** Each module (`sable/pulse/db.py`,
@@ -120,7 +122,7 @@ The clip pipeline iterates a lot. Key settled decisions (from `CLIP_LESSONS.md`)
 | `docs/QA_WORKFLOW.md` | Default hardening workflow |
 | `docs/THREAT_MODEL.md` | Adversarial testing lens |
 | `CLIP_LESSONS.md` | Tracked failures and fixes in the clip pipeline |
-| `TODO.md` | Non-MVP features deferred to Phase 2+ |
+| `TODO.md` | Main development queue: audit remediation log, open hardening items, and completed feature history |
 | `AGENTS.md` | Instructions for Codex review role (QA layer) |
 
 ---

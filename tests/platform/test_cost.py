@@ -67,3 +67,43 @@ def test_check_budget_at_exact_cap_raises(org_conn):
     with pytest.raises(SableError) as exc:
         check_budget(org_conn, "testorg")
     assert exc.value.code == BUDGET_EXCEEDED
+
+
+def test_check_budget_logs_warning_at_90_percent(org_conn, caplog):
+    import logging
+    # 90% of default cap (5.00) = 4.50; just over 90% to trigger warning
+    log_cost(org_conn, "testorg", "call", cost_usd=4.60)
+    with caplog.at_level(logging.WARNING, logger="sable.platform.cost"):
+        spend, cap = check_budget(org_conn, "testorg")
+    assert spend == pytest.approx(4.60)
+    assert any("90%" in r.message or ">90" in r.message for r in caplog.records)
+
+
+def test_get_weekly_spend_excludes_prior_week_events(org_conn):
+    # Construct a timestamp definitely in the previous ISO week
+    now = datetime.datetime.now(datetime.timezone.utc)
+    y, w, _ = now.isocalendar()
+    # Monday of current week, then go back 7 days to get previous Monday
+    current_monday = datetime.datetime.fromisocalendar(y, w, 1).replace(tzinfo=datetime.timezone.utc)
+    prev_week_ts = (current_monday - datetime.timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Insert a cost event with last week's timestamp directly (bypassing log_cost's NOW default)
+    org_conn.execute(
+        """INSERT INTO cost_events (org_id, call_type, cost_usd, call_status, created_at)
+           VALUES ('testorg', 'old_call', 2.00, 'success', ?)""",
+        (prev_week_ts,),
+    )
+    org_conn.commit()
+
+    spend = get_weekly_spend(org_conn, "testorg")
+    assert spend == pytest.approx(0.0)
+
+
+def test_get_org_cost_cap_invalid_json_uses_default(org_conn):
+    org_conn.execute(
+        "UPDATE orgs SET config_json=? WHERE org_id='testorg'",
+        ("{invalid json",),
+    )
+    org_conn.commit()
+    cap = get_org_cost_cap(org_conn, "testorg")
+    assert cap == pytest.approx(5.00)

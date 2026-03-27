@@ -616,6 +616,41 @@ def get_unanalyzed_viral_tweets(
         conn.close()
 
 
+def get_top_topic_signals(
+    org: str,
+    limit: int = 20,
+    min_unique_authors: int = 1,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Return top topic signals from the latest successful scan for org.
+
+    Returns a list of dicts with keys:
+    term, avg_lift, acceleration, unique_authors, mention_count
+    Sorted by (avg_lift * acceleration * unique_authors) descending.
+    """
+    _conn = conn or get_conn()
+    try:
+        rows = _conn.execute(
+            """SELECT ts.term, ts.avg_lift, ts.acceleration,
+                      ts.unique_authors, ts.mention_count
+               FROM topic_signals ts
+               INNER JOIN (
+                   SELECT MAX(id) AS max_id FROM scan_runs
+                   WHERE org = ?
+                     AND completed_at IS NOT NULL
+                     AND (claude_raw IS NULL OR claude_raw NOT LIKE 'FAILED:%')
+               ) latest ON ts.scan_id = latest.max_id
+               WHERE ts.org = ? AND ts.unique_authors >= ?
+               ORDER BY (ts.avg_lift * ts.acceleration * ts.unique_authors) DESC
+               LIMIT ?""",
+            (org, org, min_unique_authors, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if conn is None:
+            _conn.close()
+
+
 def get_prev_scan_topics(org: str, limit: int = 1) -> dict[str, int]:
     """Get term -> mention_count from most recent scan(s)."""
     conn = get_conn()

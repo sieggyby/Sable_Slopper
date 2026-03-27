@@ -332,9 +332,11 @@ verify the `cost_events` row exists.
 `call_claude_json` return type and `log_cost` signature before wiring. Do not break the
 existing write tests.
 
-**⚠ Note (2026-03-26):** Marked done in error — cost logging call was never added to `write/generator.py`. Needs implementation.
-
-**✓ Note (2026-03-26):** Confirmed working via call_claude_with_usage wrapper. Test added 2026-03-26.
+**✓ Done (2026-03-26):** Cost logging is wired via the `call_claude_with_usage()` wrapper.
+`generate_tweet_variants()` passes `org_id` + `call_type="write_variants"` through
+`call_claude_json()` → `call_claude()` → `call_claude_with_usage()`, which calls
+`log_cost()` internally. No explicit `log_cost()` call needed in `generator.py`.
+Confirmed by `test_write_variants_logs_cost_to_sable_db` in `tests/write/test_generator.py`.
 
 ---
 
@@ -1000,7 +1002,7 @@ No feature below should start until the **Feature Gate** above is satisfied.
 5. **Stage 6:** `FEATURE-9` (`sable pulse attribution`) ✓ **Complete** (2026-03-26)
 6. **Stage 7:** `FEATURE-7` (`sable calendar`) ✓ **Complete** (2026-03-26) — spec rewritten ground-up, all slices landed
 7. **Stage 8:** FEATURE-PULSE-META-SKIP-FRESH ✓ Done (2026-03-26), FEATURE-ONBOARD-PREP (--prep variant) ✓ Done (2026-03-26), FEATURE-ADVISE-EXPORT ✓ Done
-8. **Stage 9:** `MIGRATION-006` (`discord_pulse_runs` table) — unblocks Cult Doctor F-DM platform sync
+8. **Stage 9:** `MIGRATION-006` (`discord_pulse_runs` table) ✓ **Complete** (2026-03-26) — Cult Doctor F-DM platform sync fully wired
 
 ### Feature delivery rules
 
@@ -1059,11 +1061,21 @@ All three must exit 0. mypy is currently clean; no regressions allowed.
 
 ### MIGRATION-006 · `discord_pulse_runs` table — required by Cult Doctor F-DM
 
-**Status:** Not started. Required before Cult Doctor can ship the `--discord-pulse` CLI mode with platform sync.
+**Status:** ✓ Complete (2026-03-26). Schema v6 live. Cult Grader `sync_after_pulse_run` wired and tested.
 
-**Context:** Sable_Cult_Grader is adding F-DM (Continuous Discord Monitoring / Discord Pulse). After each pulse run, when `sable_org` is set on the project config, `platform_sync.py` in Cult Grader will write a row to a new `discord_pulse_runs` table in `sable.db`. This table does not exist yet. This migration creates it.
+**What landed:**
+- `sable/db/migrations/006_discord_pulse.sql` — creates `discord_pulse_runs` table + index, bumps schema to 6
+- `sable/platform/discord_pulse.py` — `upsert_discord_pulse_run()` + `get_discord_pulse_runs()`
+- `tests/platform/test_discord_pulse_runs.py` — 5 tests (upsert, idempotency, get newest-first, migration, schema version)
+- Sable_Cult_Grader `platform_sync.py` — `sync_after_pulse_run(config, pulse)` (fire-and-forget, two-level ImportError guard)
+- Sable_Cult_Grader `diagnose.py` — `cmd_discord_pulse()` calls `sync_after_pulse_run` after archive save
+- Sable_Cult_Grader `tests/platform_sync/test_sync.py` — 4 new tests in `TestSyncAfterPulseRun`
 
-**Current schema version:** 5 (`005_artifacts_degraded.sql`). This migration bumps to 6.
+**Validation (2026-03-26):** 392 passed · 2 pre-existing failures (unrelated TweetMetrics schema drift in `TestIntegrationRealArchive`)
+
+**Context:** Sable_Cult_Grader is adding F-DM (Continuous Discord Monitoring / Discord Pulse). After each pulse run, when `sable_org` is set on the project config, `platform_sync.py` in Cult Grader writes a row to `discord_pulse_runs` in `sable.db`.
+
+**Schema version:** bumped from 5 → 6.
 
 #### Migration file to create
 
