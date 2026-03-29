@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS viral_anatomies (
 );
 CREATE INDEX IF NOT EXISTS idx_viral_anatomies_org
     ON viral_anatomies (org);
+CREATE INDEX IF NOT EXISTS idx_viral_anatomies_org_bucket
+    ON viral_anatomies (org, format_bucket);
 """
 
 
@@ -591,6 +593,35 @@ def save_anatomy(
             )
     finally:
         conn.close()
+
+
+def get_viral_anatomies(
+    org: str,
+    format_bucket: str,
+    min_lift: float = 2.5,
+    limit: int = 5,
+    days: int = 30,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Return top viral anatomy rows for org+format_bucket, sorted by total_lift desc.
+
+    Returns dicts with: tweet_id, author_handle, total_lift, anatomy_json (raw string).
+    """
+    _conn = conn or get_conn()
+    try:
+        rows = _conn.execute(
+            """SELECT tweet_id, author_handle, total_lift, anatomy_json
+               FROM viral_anatomies
+               WHERE org = ? AND format_bucket = ? AND total_lift >= ?
+                 AND analyzed_at >= datetime('now', ? || ' days')
+               ORDER BY total_lift DESC
+               LIMIT ?""",
+            (org, format_bucket, min_lift, f"-{days}", limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if conn is None:
+            _conn.close()
 
 
 def get_unanalyzed_viral_tweets(

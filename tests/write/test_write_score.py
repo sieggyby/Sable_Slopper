@@ -56,7 +56,8 @@ def _patch_deps(monkeypatch, variants=None, score_result=None, score_side_effect
     monkeypatch.setattr(rm, "require_account", lambda handle: acc)
 
     import sable.write.generator as gen
-    monkeypatch.setattr(gen, "generate_tweet_variants", lambda **kw: variants)
+    from sable.write.generator import WriteResult
+    monkeypatch.setattr(gen, "generate_tweet_variants", lambda **kw: WriteResult(variants=variants))
 
     import sable.write.scorer as sc
     if score_side_effect is not None:

@@ -18,8 +18,10 @@ import click
               help="Score each variant's hook against recent high-performing patterns.")
 @click.option("--watchlist-wire", is_flag=True, default=False,
               help="Inject top niche topics from meta.db into prompt.")
+@click.option("--no-anatomy", "no_anatomy", is_flag=True, default=False,
+              help="Skip viral anatomy pattern injection.")
 def write_command(handle, format_bucket, topic, source_url, variants, org, run_score,
-                  watchlist_wire):
+                  watchlist_wire, no_anatomy):
     """Generate tweet variants for a managed account."""
     from sable.platform.errors import SableError
     from sable.roster.manager import require_account
@@ -36,7 +38,7 @@ def write_command(handle, format_bucket, topic, source_url, variants, org, run_s
     vault_root = vault_dir(resolved_org) if resolved_org else None
 
     try:
-        variant_list = generate_tweet_variants(
+        result = generate_tweet_variants(
             handle=acc.handle,
             org=resolved_org or "",
             format_bucket=format_bucket,
@@ -46,6 +48,7 @@ def write_command(handle, format_bucket, topic, source_url, variants, org, run_s
             meta_db_path=meta_db_path() if resolved_org else None,
             vault_root=vault_root,
             watchlist_wire=watchlist_wire,
+            use_anatomy=not no_anatomy,
         )
     except SableError as e:
         click.echo(f"Error [{e.code}]: {e.message}", err=True)
@@ -54,6 +57,10 @@ def write_command(handle, format_bucket, topic, source_url, variants, org, run_s
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
+    if result.anatomy_ref:
+        click.echo(f"Structural ref: {result.anatomy_ref}")
+
+    variant_list = result.variants
     if not variant_list:
         click.echo("No variants generated. Check logs for details.", err=True)
         sys.exit(1)
@@ -81,4 +88,7 @@ def write_command(handle, format_bucket, topic, source_url, variants, org, run_s
         click.echo(v.text)
         if v.notes:
             click.echo(f"\nNotes: {v.notes}")
+
+    if result.vault_hint:
+        click.echo(f"\nTo pair with media: {result.vault_hint}")
     click.echo()

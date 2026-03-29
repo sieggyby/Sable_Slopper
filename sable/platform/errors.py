@@ -1,10 +1,32 @@
-"""Sable platform error codes and base exception."""
+"""Sable platform error codes — re-exported from sable_platform.
+
+NOTE: redact_error is defined locally here (not re-exported from sable_platform)
+because Slopper's version covers two additional patterns that sable_platform.errors
+does not yet include:
+  - ELEVENLABS_API_KEY env var assignments
+  - ElevenLabs xi-api-key header values
+Existing Slopper tests (test_redact_error.py) verify these patterns. Once
+sable_platform.errors is updated to include them, redact_error can be re-exported
+too and this local copy removed.
+"""
 from __future__ import annotations
 
 import re
 
+from sable_platform.errors import (  # noqa: F401
+    SableError,
+    ORG_EXISTS, ORG_NOT_FOUND, ENTITY_NOT_FOUND, ENTITY_ARCHIVED,
+    HANDLE_NOT_IN_ROSTER, NO_ORG_FOR_HANDLE, CROSS_ORG_MERGE_BLOCKED,
+    SLUG_ORG_CONFLICT, STALE_DIAGNOSTIC, NO_DISCORD_DIAGNOSTIC, INVALID_CONFIG,
+    ORG_MAPPING_ERROR, BUDGET_EXCEEDED, BRIEF_CAP_EXCEEDED, MAX_RETRIES_EXCEEDED,
+    AMBIGUOUS_INPUT, AWAITING_OPERATOR_INPUT, INVALID_ORG_ID, INVALID_PATH,
+    WORKFLOW_NOT_FOUND, STEP_EXECUTION_ERROR,
+)
+
 # ---------------------------------------------------------------------------
 # Error message redaction (for DB persistence paths)
+# Local copy covers ELEVENLABS_API_KEY and xi-api-key patterns not yet in
+# sable_platform.errors.redact_error.
 # ---------------------------------------------------------------------------
 
 _SECRET_PATTERNS: list[tuple[re.Pattern, str]] = [
@@ -34,32 +56,3 @@ def redact_error(message: str) -> str:
     for pattern, replacement in _SECRET_PATTERNS:
         message = pattern.sub(replacement, message)
     return message
-
-
-class SableError(Exception):
-    def __init__(self, code: str, message: str):
-        self.code = code
-        self.message = message
-        super().__init__(f"Error [{code}]: {message}")
-
-
-# Error code constants
-ORG_EXISTS = "ORG_EXISTS"
-ORG_NOT_FOUND = "ORG_NOT_FOUND"
-ENTITY_NOT_FOUND = "ENTITY_NOT_FOUND"
-ENTITY_ARCHIVED = "ENTITY_ARCHIVED"
-HANDLE_NOT_IN_ROSTER = "HANDLE_NOT_IN_ROSTER"
-NO_ORG_FOR_HANDLE = "NO_ORG_FOR_HANDLE"
-CROSS_ORG_MERGE_BLOCKED = "CROSS_ORG_MERGE_BLOCKED"
-SLUG_ORG_CONFLICT = "SLUG_ORG_CONFLICT"
-STALE_DIAGNOSTIC = "STALE_DIAGNOSTIC"
-NO_DISCORD_DIAGNOSTIC = "NO_DISCORD_DIAGNOSTIC"
-INVALID_CONFIG = "INVALID_CONFIG"
-ORG_MAPPING_ERROR = "ORG_MAPPING_ERROR"
-BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
-BRIEF_CAP_EXCEEDED = "BRIEF_CAP_EXCEEDED"
-MAX_RETRIES_EXCEEDED = "MAX_RETRIES_EXCEEDED"
-AMBIGUOUS_INPUT = "AMBIGUOUS_INPUT"
-AWAITING_OPERATOR_INPUT = "AWAITING_OPERATOR_INPUT"
-INVALID_ORG_ID = "INVALID_ORG_ID"
-INVALID_PATH = "INVALID_PATH"

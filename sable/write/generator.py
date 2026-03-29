@@ -22,6 +22,13 @@ class TweetVariant:
     notes: str = ""
 
 
+@dataclass
+class WriteResult:
+    variants: list[TweetVariant]
+    anatomy_ref: Optional[str] = None  # e.g. "contrarian_stat + counter-intuitive_payoff, 3.8x lift"
+    vault_hint: Optional[str] = None   # suggested vault search command
+
+
 def _load_format_trends(org: str, conn: sqlite3.Connection) -> dict[str, dict]:
     """Load format trend results from an open meta.db connection.
 
@@ -154,6 +161,63 @@ def _get_vault_context(
         return None
 
 
+def _load_viral_anatomy_patterns(
+    org: str,
+    format_bucket: str,
+    conn: sqlite3.Connection,
+    min_lift: float = 2.5,
+    limit: int = 5,
+) -> tuple[list[dict], Optional[str]]:
+    """Load and parse viral anatomy patterns from meta.db for prompt injection.
+
+    Returns (patterns, anatomy_ref_str).
+    patterns: list of dicts with hook_type, structural_move, payoff_mechanism, total_lift.
+    anatomy_ref_str: human-readable reference for display, or None if no usable data.
+    Falls back gracefully if table missing, rows absent, or JSON malformed.
+    """
+    try:
+        rows = conn.execute(
+            """SELECT total_lift, anatomy_json
+               FROM viral_anatomies
+               WHERE org = ? AND format_bucket = ? AND total_lift >= ?
+                 AND analyzed_at >= datetime('now', '-30 days')
+               ORDER BY total_lift DESC
+               LIMIT ?""",
+            (org, format_bucket, min_lift, limit),
+        ).fetchall()
+    except Exception as e:
+        logger.warning("_load_viral_anatomy_patterns: query failed: %s", e)
+        return [], None
+
+    patterns: list[dict] = []
+    for row in rows:
+        try:
+            anatomy = json.loads(row["anatomy_json"])
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+        pattern = {
+            "total_lift": row["total_lift"],
+            "hook_type": anatomy.get("hook_type", ""),
+            "structural_move": anatomy.get("structural_move", ""),
+            "payoff_mechanism": anatomy.get("payoff_mechanism", ""),
+        }
+        patterns.append(pattern)
+
+    if not patterns:
+        return [], None
+
+    # Human-readable ref from top pattern (for display in write output)
+    top = patterns[0]
+    ref_parts = [c for c in [top.get("hook_type"), top.get("payoff_mechanism")] if c]
+    if not ref_parts and top.get("structural_move"):
+        ref_parts = [top["structural_move"]]
+    anatomy_ref = (
+        f"{' + '.join(ref_parts)}, {top['total_lift']:.1f}x lift"
+        if ref_parts else None
+    )
+    return patterns, anatomy_ref
+
+
 def generate_tweet_variants(
     handle: str,
     org: str,
@@ -164,12 +228,15 @@ def generate_tweet_variants(
     meta_db_path: Optional[Path],
     vault_root: Optional[Path],
     watchlist_wire: bool = False,
-) -> list[TweetVariant]:
-    """Assemble context, call Claude, return parsed TweetVariant list."""
+    use_anatomy: bool = True,
+) -> WriteResult:
+    """Assemble context, call Claude, return WriteResult with variants and metadata."""
     acc = require_account(handle)
     resolved_org = org or acc.org
     account_context = build_account_context(acc)
 
+    anatomy_ref: Optional[str] = None
+    vault_hint: Optional[str] = None
     conn: Optional[sqlite3.Connection] = None
     try:
         if meta_db_path and meta_db_path.exists():
@@ -203,15 +270,44 @@ def generate_tweet_variants(
             except Exception as e:
                 logger.warning("watchlist_wire fetch failed: %s", e)
 
+        # Viral anatomy patterns: inject structural DNA from highest-lift tweets
+        anatomy_block = ""
+        if use_anatomy and conn is not None:
+            patterns, anatomy_ref = _load_viral_anatomy_patterns(
+                resolved_org, resolved_bucket, conn
+            )
+            if patterns:
+                lines = []
+                for p in patterns:
+                    parts = []
+                    if p.get("hook_type"):
+                        parts.append(f"hook: {p['hook_type']}")
+                    if p.get("structural_move"):
+                        parts.append(f"move: {p['structural_move']}")
+                    if p.get("payoff_mechanism"):
+                        parts.append(f"payoff: {p['payoff_mechanism']}")
+                    if parts:
+                        lines.append(f"  • [{p['total_lift']:.1f}x] " + " | ".join(parts))
+                if lines:
+                    anatomy_block = (
+                        "\nStructural patterns from highest-performing content in this niche"
+                        " (use as inspiration, not templates):\n" + "\n".join(lines) + "\n"
+                    )
+
+        # Vault search suggestion (keyword hint, zero cost)
+        if topic and vault_root and vault_root.exists():
+            safe_topic = topic.replace("'", "").replace('"', "")
+            vault_hint = f"sable vault search '{safe_topic}' --available-for {handle}"
+
         # Prompt assembly
         if examples:
-            lines = []
+            example_lines = []
             for i, ex in enumerate(examples, 1):
                 lift = ex.get("total_lift") or 0.0
                 author = ex.get("author_handle") or "?"
                 text = ex.get("text") or ""
-                lines.append(f"{i}. [{author}, {lift:.1f}x lift]\n{text}")
-            examples_block = "\n\n".join(lines)
+                example_lines.append(f"{i}. [{author}, {lift:.1f}x lift]\n{text}")
+            examples_block = "\n\n".join(example_lines)
         else:
             examples_block = "(no recent high-lift examples available for this format)"
 
@@ -230,6 +326,7 @@ def generate_tweet_variants(
             f"Format target: {resolved_bucket} (currently {trend_summary})\n\n"
             f"Examples of what's performing at {resolved_bucket} right now "
             f"(study structure, not content):\n{examples_block}\n\n"
+            f"{anatomy_block}"
             f"Topic to write about: {topic_str}"
             f"{source_block}"
             f"{vault_block}"
@@ -265,7 +362,7 @@ def generate_tweet_variants(
             variant_dicts = data.get("variants", [])
             if not isinstance(variant_dicts, list):
                 raise ValueError(f"Expected 'variants' list, got {type(variant_dicts)}")
-            return [
+            variant_list = [
                 TweetVariant(
                     text=str(v.get("text", "")),
                     structural_move=str(v.get("structural_move", "")),
@@ -274,9 +371,14 @@ def generate_tweet_variants(
                 )
                 for v in variant_dicts
             ]
+            return WriteResult(
+                variants=variant_list,
+                anatomy_ref=anatomy_ref,
+                vault_hint=vault_hint,
+            )
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             logger.warning("generate_tweet_variants: JSON parse failed: %s", e)
-            return []
+            return WriteResult(variants=[], anatomy_ref=anatomy_ref, vault_hint=vault_hint)
 
     finally:
         if conn is not None:

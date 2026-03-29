@@ -124,4 +124,4 @@ def test_watchlist_wire_true_no_meta_db_no_error(monkeypatch):
     # Should not crash, wire block absent since no signals
     assert "Trending niche topics" not in captured["prompt"]
     # Should still return variants
-    assert len(result) == 1
+    assert len(result.variants) == 1

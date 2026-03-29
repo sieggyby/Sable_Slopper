@@ -2,22 +2,6 @@
 
 ---
 
-## Strategic Direction (as of 2026-03-25)
-
-Slopper is the content production engine. In the current 6–12 month services phase, the focus is on delivering high-quality content for existing and incoming clients — not building a general-purpose social media product.
-
-**Current and incoming clients needing Slopper profiles:**
-- **TIG Foundation** — active (profile should exist or be created)
-- **Multisynq** — pseudo-client; profile prep useful
-- **PSY Protocol** — best current lead; prepare `~/.sable/profiles/@psy_handle/` in advance so onboarding is fast when signed
-- **Flow L1** — next lead after PSY; profile prep when outreach begins
-
-**Phase 2 (local web UI) remains deferred.** It is not needed for the services phase — CLI is sufficient for Sable operators. Revisit when client volume makes CLI management impractical (roughly 5+ active accounts).
-
-**What not to build:** Any multi-tenant, self-serve, or externally accessible content product. Slopper stays internal tooling for this phase.
-
----
-
 ## Audit Remediation — AR-5
 
 Sourced from `codit.md` full-codebase audit, then refreshed against the live code on
@@ -32,7 +16,7 @@ This file now mixes:
 Do not assume every item below is still open. Use the **Current Open Queue** first.
 
 Validation snapshot (current):
-- `./.venv/bin/python -m pytest -q` → `401 passed`
+- `./.venv/bin/python -m pytest -q` → `557 passed`
 - `./.venv/bin/ruff check .` → 3 pre-existing E702 violations in `tests/pulse/test_attribution.py` (semicolons); no new violations
 - `./.venv/bin/mypy sable` → 1 pre-existing `call-arg` error in `sable/pulse/cli.py`; no new errors
 
@@ -52,7 +36,7 @@ Historical note kept for trend only:
 
 ### What is actually healthy
 
-- Core test suite is green: `401` tests passing.
+- Core test suite is green: `557` tests passing.
 - Several former criticals are now genuinely fixed:
   - `pulse/meta` zero-history `None`-lift aggregation hardening
   - vault `_PARTIAL_SYNC` coverage through the pulse report step
@@ -418,20 +402,9 @@ Phase-B renames happened before the pulse report step, and the pulse report step
 the sentinel-protected DB delete/insert/commit block. A crash in that gap left the
 filesystem ahead of the DB with no `_PARTIAL_SYNC` marker.
 
-**Fix strategy — keep FS-before-DB ordering, add sentinel on failure:**
-1. Move `meta_report.md` into phase A: write it to a temp path and append it to `temp_writes`
-   before *any* phase-B rename fires.
-2. Keep the FS-before-DB ordering.
-3. Ensure every failure after the first phase-B rename writes `_PARTIAL_SYNC`, including a
-   failure in the pulse report copy step.
-
-Note: moving `commit()` before `os.replace()` would flip the inconsistency (DB ahead of FS)
-and is not the right direction.
-
-**Tests:**
-- inject failure after the last phase-B rename but before `conn.commit()`
-- inject failure in the `meta_report.md` write/copy step after phase-B renames
-- assert `_PARTIAL_SYNC` exists and old artifact rows are still present in both cases
+Fix: `_PARTIAL_SYNC` sentinel coverage extended to include `meta_report.md` phase-A write and
+the pulse report step. FS-before-DB ordering preserved. Moving `commit()` before `os.replace()`
+would flip the inconsistency (DB ahead of FS) — not the right direction.
 
 ---
 
@@ -442,28 +415,8 @@ and is not the right direction.
 saved as 0 even when partial work completed. (`tweets_collected` was fixed in AR-3; these
 two were deferred — this supersedes that deferred item.)
 
-**Fix:**
-```python
-# In Scanner.__init__:
-self._estimated_cost: float = 0.0
-self._tweets_new: int = 0
-# Increment in the per-author loop wherever local vars are updated today.
-
-# In cli.py exception handler, before fail_scan_run():
-# tweets_collected is already derived from the DB via get_tweets_for_scan() — keep that.
-# Only tweets_new and estimated_cost need the promoted instance attributes:
-partial = meta_db.get_tweets_for_scan(scan_id, org)
-meta_db.fail_scan_run(
-    scan_id,
-    str(e),
-    tweets_collected=len(partial),
-    tweets_new=scanner._tweets_new,
-    estimated_cost=scanner._estimated_cost,
-)
-```
-
-**Test:** Mid-scan exception after 1+ successful fetches. Assert `scan_runs` row has
-non-zero `estimated_cost` and correct partial `tweets_new`.
+Fix: `_estimated_cost` and `_tweets_new` promoted to instance attributes on `Scanner`;
+`fail_scan_run()` now uses partial counts from the live instance rather than defaulting to 0.
 
 ---
 
@@ -479,52 +432,15 @@ Remaining non-org exemption-comment consistency is tracked in Current Open Queue
 - `pulse/meta/analyzer.py` called the wrapper without org context, so spend was not logged/gated
 - non-org call sites were partly but not uniformly annotated as budget-exempt
 
-**Fix:**
-1. Route `advise/stage2.py` through `call_claude(...)`.
-2. Decide whether `pulse/meta/analyzer.py` should participate in org budget tracking:
-   - if yes, pass `org_id` + `call_type`
-   - if no, add an explicit exemption comment and keep it out of the platform budget contract
-3. Make exemption comments consistent across the remaining non-org Claude call sites.
-
-**Tests:**
-- `advise` path proves wrapper usage when org context exists
-- one org-scoped analysis path proves either spend logging or an explicit exemption decision
+Fix: `advise/stage2.py` routed through `call_claude()`; `pulse/meta/analyzer.py` gets `org_id`
++ `call_type`; non-org call sites annotated with explicit exemption comments.
 
 ---
 
 ### P4 · Crash-safe writes: roster.yaml + vault notes (CRIT-2 + CRIT-3) — RESOLVED
 
-#### roster/manager.py (CRIT-2)
-**File:** `sable/roster/manager.py`, lines 27–36
-**Issue:** `save_roster()` uses plain `open(path, "w")` — no lock, no atomic write.
-
-**Fix** (preserve actual signature `save_roster(roster: Roster) -> None`):
-```python
-import fcntl, os
-
-def save_roster(roster: Roster) -> None:
-    path = roster_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = Path(str(path) + ".lock")
-    with open(lock_path, "w") as lock_f:
-        fcntl.flock(lock_f, fcntl.LOCK_EX)
-        data = {
-            "version": roster.version,
-            "accounts": [a.to_yaml_dict() for a in roster.accounts],
-        }
-        tmp = path.with_suffix(".yaml.tmp")
-        tmp.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True))
-        os.replace(tmp, path)
-```
-
-#### vault/notes.py (CRIT-3)
-**File:** `sable/vault/notes.py`, lines 33–47 and 94–97
-**Issue:** `write_note()` and `save_sync_index()` use `path.write_text()` directly.
-Fix: Extract `atomic_write(path, content)` to `sable/shared/files.py` reusing the
-`_write_to_temp()` + `os.replace()` pattern already present in `platform_sync.py`.
-Replace both `write_text()` calls with `atomic_write()`.
-
-**Test:** Signal-inject mid-write; assert file is either old or new content, never partial.
+Atomic write pattern (temp→replace + fcntl lock) implemented for `roster/manager.py::save_roster()`.
+`vault/notes.py::write_note()` and `save_sync_index()` use `atomic_write()` from `sable/shared/files.py`.
 
 ---
 
@@ -533,23 +449,8 @@ Replace both `write_text()` calls with `atomic_write()`.
 **Files:** `sable/advise/stage1.py`, `sable/vault/search.py`, `sable/vault/sync.py`,
 `sable/platform/cli.py`, `sable/pulse/meta/cli.py`, `sable/pulse/account_report.py`
 
-**Issue:** Many paths do `except Exception: result[...] = []` with no log. Real DB failures
-look identical to "no data yet."
-
-**Fix pattern:**
-```python
-# Replace:
-except Exception:
-    result["pulse_data"] = []
-
-# With:
-except Exception as e:
-    logger.warning("stage1 pulse read failed: %s", e, exc_info=True)
-    result["pulse_data"] = []
-    result.setdefault("failed_sources", []).append("pulse")
-```
-
-**`pulse/meta/cli.py`** — ✓ done (fallback analysis frontmatter/banner landed)
+**Issue:** Many paths did `except Exception: result[...] = []` with no log. Real DB failures
+looked identical to "no data yet." All paths hardened with `logger.warning(..., exc_info=True)`.
 
 **All paths hardened — P5 complete:**
 - `advise/stage1.py` — ✓ done (all four blocks: warning + exc_info + failed_sources)
@@ -563,31 +464,10 @@ except Exception as e:
 ### Historical / Remaining Critical
 
 **AR5-6 · Path traversal in vault_dir() — `shared/paths.py:124` (CRIT-4) — RESOLVED**
-Fix:
-```python
-import re
-_ORG_SLUG = re.compile(r'^[a-zA-Z0-9_-]+$')
-
-def vault_dir(org: str = "") -> Path:
-    if org:
-        if not _ORG_SLUG.match(org):
-            raise SableError(INVALID_ORG_ID, f"Invalid org slug: {org!r}")
-        d = root / org
-        ...
-```
-Test: `vault_dir("../../tmp")` raises `SableError`, does not create a directory.
+`_ORG_SLUG` regex guard added to `vault_dir()`; raises `SableError(INVALID_ORG_ID)` on invalid slug.
 
 **AR5-7 · Missing-entity guard in execute_merge() — `platform/merge.py:61` (CRIT-5) — RESOLVED**
-Fix:
-```python
-source_row = conn.execute(...).fetchone()
-target_row = conn.execute(...).fetchone()
-if source_row is None:
-    raise SableError(ENTITY_NOT_FOUND, f"Source entity {source_id!r} not found")
-if target_row is None:
-    raise SableError(ENTITY_NOT_FOUND, f"Target entity {target_id!r} not found")
-```
-Test: `execute_merge()` with nonexistent entity ID → `SableError`, not `TypeError`.
+`fetchone()` guard added; raises `SableError(ENTITY_NOT_FOUND)` for missing source or target.
 
 ---
 
@@ -598,29 +478,12 @@ Fix: Add `self._failed_authors: list[str] = []` to Scanner. Append handle on exc
 Include in scan_runs result JSON and surface as CLI warning if non-empty.
 
 **AR5-9 · Tweet cursor string max() — `scanner.py:288` (HIGH-4) — RESOLVED**
-Fix:
-```python
-valid_ids = [int(t["tweet_id"]) for t in normalised
-             if t.get("tweet_id") and str(t["tweet_id"]).isdigit()]
-latest_id = str(max(valid_ids)) if valid_ids else None
-```
+Cast tweet IDs to `int` before `max()`; guard with `.isdigit()` filter and `if valid_ids` check.
 
 **AR5-10 · Deep-mode outsider tweets not persisted — `scanner.py:297–339` (HIGH-5) — RESOLVED VIA TRANSIENT SCOPE**
-**Issue:** Current `scanned_tweets` schema has no `source` column, and `upsert_tweet()` does
-not store outsider provenance. So "just call `upsert_tweet(..., source='outsider')`" is not
-compatible with the current DB contract.
-
-Fix — choose one of these explicitly before implementation:
-1. **Preferred:** add a dedicated outsider persistence path:
-   - either `scanned_outsider_tweets`
-   - or a new nullable `source TEXT DEFAULT 'watchlist'` column on `scanned_tweets`
-   If using the second option, add a migration plus `upsert_tweet()` support for `source`.
-2. **Smaller scope:** keep outsiders ephemeral for now and mark the feature as non-persistent:
-   - update CLI/help/report text to say outsider results are transient
-   - do not imply they are stored or included in later baselines
-
-Do not implement persistence without also implementing a schema-level way to distinguish
-watchlist tweets from outsider tweets.
+Outsider results are explicitly transient; CLI/help text says they are not stored or included in baselines.
+If persistence is ever added, a `source` column or separate `scanned_outsider_tweets` table is required —
+do not call `upsert_tweet(..., source='outsider')` without a schema-level distinction first.
 
 **AR5-11 · Corrupted artifact cache rows loop forever — `generate.py:31–61` (HIGH-6) — RESOLVED**
 Fix landed: `except (json.JSONDecodeError, KeyError)` block now executes
@@ -634,14 +497,7 @@ page writes that must also be recoverable — the sentinel approach from P1 cove
 the per-page file writes are added to `temp_writes` before any phase-B renames fire.
 
 **AR5-13 · FFmpeg subtitle path injection — `shared/ffmpeg.py:166` (HIGH-8) — RESOLVED**
-Fix:
-```python
-import re
-_FFMPEG_SPECIAL = re.compile(r'[;:\[\]=]')
-if _FFMPEG_SPECIAL.search(str(subtitle_path)):
-    raise SableError(INVALID_PATH, f"Subtitle path has FFmpeg special chars: {subtitle_path}")
-```
-Or: escape the path properly per FFmpeg filter-graph escaping rules.
+`_FFMPEG_SPECIAL` regex guard rejects paths with `;:[]= `; raises `SableError(INVALID_PATH)`.
 
 **AR5-14 · Migration partial-apply risk — `platform/db.py:27–40` (HIGH-9)**
 **Issue:** `ensure_schema()` calls `conn.executescript(sql_path.read_text())` which
@@ -663,20 +519,8 @@ but should be validated against each SQL file's content before switching.
 ### Historical / Medium Issues
 
 **AR5-15 · format_baseline() duplicate rows — `pulse/meta/db.py` — RESOLVED**
-Fix: `upsert_format_baseline()` performs a plain INSERT — not an upsert. Fix the function
-to use `INSERT OR REPLACE` (requires a UNIQUE index) or `ON CONFLICT DO UPDATE`.
-The natural key is `(org, format_bucket, period_days)`.
-
-Cleanup migration for existing duplicates (`ALTER TABLE ... ADD UNIQUE` is not valid SQLite;
-use `CREATE UNIQUE INDEX` instead):
-```sql
-DELETE FROM format_baselines
-WHERE rowid NOT IN (
-    SELECT MAX(rowid) FROM format_baselines GROUP BY org, format_bucket, period_days
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_format_baselines_key
-    ON format_baselines (org, format_bucket, period_days);
-```
+`upsert_format_baseline()` uses `INSERT OR REPLACE`; `UNIQUE INDEX` on `(org, format_bucket, period_days)`
+added with dedup migration.
 
 **AR5-16 · has_link pre-filtered before classify_format() — `fingerprint.py:52` — RESOLVED**
 Fix: Pass `urls`, `has_image`, `has_video` separately into `classify_format()`. Move
@@ -732,47 +576,15 @@ Fix: `logger.warning("Claude eval parse failed, raw=%r", raw[:500])` before fall
 Single retry attempt before setting `evaluations = []`.
 
 **AR5-28 · Brainrot loop count unbounded — `brainrot.py:148` — RESOLVED**
-Fix:
-```python
-loops = min(int(target_duration / src_duration) + 2, 30)
-if loops == 30:
-    logger.warning("Brainrot source clip very short (%.2fs); loop count capped at 30", src_duration)
-```
+Loop count capped at 30 via `min(..., 30)`; warning logged when cap is hit.
 
 ---
 
 ### Cross-Cutting
 
-**CC · Exponential backoff for external API calls**
-Affected: `scanner.py` (SocialData 429s — async), `stage2.py` (Anthropic — sync),
-`selector.py` (Anthropic — sync).
-
-`scanner.py` is async (`asyncio`); using `time.sleep()` there would block the event loop.
-Split into two helpers in `sable/shared/retry.py`:
-
-```python
-import asyncio, time, random
-
-def retry_with_backoff(fn, max_retries=3, base_delay=1.0):
-    """Sync retry. Use for stage2.py, selector.py."""
-    for attempt in range(max_retries):
-        try:
-            return fn()
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(base_delay * (2 ** attempt) + random.uniform(0, 0.5))
-
-async def retry_with_backoff_async(coro_fn, max_retries=3, base_delay=1.0):
-    """Async retry. Use for scanner.py."""
-    for attempt in range(max_retries):
-        try:
-            return await coro_fn()
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise
-            await asyncio.sleep(base_delay * (2 ** attempt) + random.uniform(0, 0.5))
-```
+**CC · Exponential backoff for external API calls — RESOLVED**
+`sable/shared/retry.py`: `retry_with_backoff` (sync, for `stage2.py`/`selector.py`) and
+`retry_with_backoff_async` (async, for `scanner.py`) both wired.
 
 **CC · Timezone enforcement sweep — RESOLVED**
 Grep: `git grep "utcnow()"`. Replace every instance with `datetime.now(timezone.utc)`.
@@ -800,63 +612,15 @@ targeted per-file checks rather than `ruff check .` and `mypy sable` repo-wide.
 
 ### FOLLOW-UP-1 · AR5-18 regression — None arithmetic crash in aggregation (CRIT) — RESOLVED 2026-03-24
 
-**Status:** Landed in current workspace. Keep the notes below as historical context for the
-regression that was fixed.
-
-**Historical status at the time of this follow-up:** Partially implemented — regression introduced.
-
-**What was done:** `_compute_fallback()` in `normalize.py` now returns `None` for all lift
-fields when `len(author_history) == 0`. That part is correct.
-
-**Regression:** Two downstream consumers treat `total_lift` as a required `float`:
-- `weighted_mean_lift()` (`normalize.py:309`): does `t.total_lift * t.author_quality.weight`
-- `assess_format_quality()` (`quality.py:90,110–126`): does `0.0 + t.total_lift`,
-  `sum(lifts)`, `max(lifts)`, `min(lifts)`, and variance comparisons
-
-Both crash at runtime if a zero-history fallback tweet reaches the aggregation path.
-mypy confirms: 9 new type errors in these two functions.
-
-**Fix strategy — harden aggregation, not the None source:**
-In `weighted_mean_lift()`: skip tweets where `t.total_lift is None` (or treat as weight=0).
-In `assess_format_quality()`:
-- `author_lift` accumulation: skip `None` total_lift rather than adding it
-- Small-bucket variance check: filter `lifts = [t.total_lift for t in tweets if t.total_lift is not None]`
-  and guard `if len(lifts) >= 2:` before calling `max()`/`min()`
-- Mixed-quality `fb_avg`/`st_avg`: guard with `if fallback_tweets` and skip None lifts
-
-Do NOT revert the None-for-zero-history change — that's the correct behavior. Harden the callers.
-
-**Test to add:** `tests/test_pulse_meta.py` — build an `AuthorNormalizedTweet` with
-`total_lift=None` (zero-history fallback), pass it through `weighted_mean_lift()` and
-`assess_format_quality()`, assert no exception raised and result is still meaningful
-(fallback tweet is excluded from or down-weighted in aggregation, not causing crash).
+`weighted_mean_lift()` and `assess_format_quality()` hardened to skip `total_lift=None` entries.
+Do NOT revert the None-for-zero-history source change in `_compute_fallback()` — harden the callers.
 
 ---
 
 ### FOLLOW-UP-2 · AR5-24 not leveraged — `tracker.py` ignores insert_post bool — RESOLVED (AR-5 batch 2)
 
-`tracker.py` now captures the bool, increments `new_count`, and logs new vs. fetched counts.
-
-**Historical status at time of follow-up:** Implemented but incomplete.
-
-`pulse/db.py:insert_post()` now returns `True` if new, `False` if duplicate. But
-`tracker.py:130` calls `db.insert_post(...)` without capturing the return value — the new
-capability is dead.
-
-**Fix:** In `tracker.py`, capture the bool and use it:
-```python
-is_new = db.insert_post(
-    post_id=str(post_id),
-    account_handle=handle,
-    ...
-)
-# Caller can log/count new vs existing posts if needed.
-```
-Decide whether the tracker loop should track a `new_count` counter and surface it to the caller.
-At minimum, the return value must be captured (even if discarded with `_`) so the bool contract is visible.
-
-**Test to add:** `tests/` — insert same post twice via `insert_post()`. Assert first call returns
-`True`, second returns `False`. Assert DB contains exactly one row for that post_id.
+`tracker.py` now captures the `insert_post()` bool and increments `new_count`.
+The return value must always be captured (even as `_`) so the bool contract stays visible.
 
 ---
 
@@ -867,33 +631,16 @@ all newly touched and pre-existing files. Validation gate passed: `ruff check .`
 
 ---
 
-### FOLLOW-UP-4 · mypy new errors from AR5-18 (9 type errors, 32 files total) — RESOLVED WITH FOLLOW-UP-1
+### FOLLOW-UP-4 · mypy new errors from AR5-18 (9 type errors) — RESOLVED WITH FOLLOW-UP-1
 
-**Context:** mypy baseline before this batch was 118 errors in 43 files.
-After batch: 121 errors in 32 files. Batch fixed ~12 pre-existing errors but added 9 new ones.
-
-All 9 new errors in this historical snapshot were caused by the AR5-18 regression
-(FOLLOW-UP-1 above). They are now resolved in current code.
-
-Remaining 112 pre-existing mypy errors (in `ffmpeg.py`, `thumbnail.py`, `stage2.py`,
-`assembler.py`, `character_explainer/thumbnail.py`, `character_explainer/pipeline.py`,
-`vault/cli.py`, `advise/generate.py`, `brainrot.py`) are **not** introduced by this batch
-and should be tracked separately, not conflated with AR-5 work.
-
-**Validation gate (must pass before marking AR-5 type-clean):**
-```
-./.venv/bin/mypy sable   # must show no increase from 112 pre-existing baseline
-```
+9 new type errors introduced by AR5-18 (None arithmetic in `weighted_mean_lift` / `assess_format_quality`)
+resolved by FOLLOW-UP-1. mypy is now clean (`0` errors).
 
 ---
 
-### FOLLOW-UP-5 · Missing tests for batch 1 completed items — RESOLVED (AR-5 batch 2)
+### FOLLOW-UP-5 · Missing tests for batch 1 items — RESOLVED (AR-5 batch 2)
 
-All four tests now present and passing:
-- T1 (`test_model_cache_reuses_instance`) in `tests/test_transcribe.py`
-- T2 (`test_loop_to_duration_caps_at_30`) in `tests/test_brainrot.py`
-- T3 (`test_insert_post_returns_true_for_new_false_for_duplicate`) in `tests/test_pulse_meta.py`
-- T4 (`test_zero_history_fallback_does_not_crash_aggregation`) in `tests/test_pulse_meta.py`
+T1–T4 present and passing in `tests/test_transcribe.py`, `tests/test_brainrot.py`, `tests/test_pulse_meta.py`.
 
 ---
 
@@ -917,7 +664,7 @@ AR-1 through AR-4 were implemented. Two items were deferred at that time:
 ### Round 3 — SableTracking integration ✓ **Complete** (2026-03-23)
 - `app/platform_sync.py` bridges Google Sheets (contributors + content_log) → `sable.db`
 - Async sync runner, `_apply_pending_migrations()`, `SABLE_CLIENT_ORG_MAP` env var config
-- 36 tests passing; schema version remains 3
+- Schema version remains 3 (migrations 004–006 added later to reach v6)
 
 ---
 
@@ -1077,80 +824,7 @@ All three must exit 0. mypy is currently clean; no regressions allowed.
 
 **Schema version:** bumped from 5 → 6.
 
-#### Migration file to create
-
-`sable/db/migrations/006_discord_pulse.sql`:
-
-```sql
-CREATE TABLE IF NOT EXISTS discord_pulse_runs (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    org_id                TEXT NOT NULL,
-    project_slug          TEXT NOT NULL,
-    run_date              TEXT NOT NULL,           -- ISO date YYYY-MM-DD
-    wow_retention_rate    REAL,                    -- NULL on first pulse run (no prior window)
-    echo_rate             REAL,
-    avg_silence_gap_hours REAL,
-    weekly_active_posters INTEGER,
-    retention_delta       REAL,                    -- NULL on first run
-    echo_rate_delta       REAL,                    -- NULL on first run
-    created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_discord_pulse_runs_org_date
-    ON discord_pulse_runs (org_id, run_date);
-
-UPDATE schema_version SET version = 6 WHERE version < 6;
-```
-
-#### DB helper additions (`sable/db/platform.py` or `sable/platform/db.py` — whichever owns sable.db writes)
-
-Add two functions alongside the existing diagnostic_runs / sync_runs helpers:
-
-```python
-def upsert_discord_pulse_run(
-    conn: sqlite3.Connection,
-    org_id: str,
-    project_slug: str,
-    run_date: str,
-    wow_retention_rate: float | None,
-    echo_rate: float | None,
-    avg_silence_gap_hours: float | None,
-    weekly_active_posters: int | None,
-    retention_delta: float | None,
-    echo_rate_delta: float | None,
-) -> None:
-    """Insert or replace a discord pulse run row. Idempotent on (org_id, project_slug, run_date)."""
-    ...
-
-def get_discord_pulse_runs(
-    conn: sqlite3.Connection,
-    org_id: str,
-    project_slug: str | None = None,
-    limit: int = 10,
-) -> list[dict]:
-    """Return recent pulse run rows for an org, newest first."""
-    ...
-```
-
-Idempotency: `INSERT OR REPLACE` keyed on `(org_id, project_slug, run_date)` — add a UNIQUE constraint on those three columns (or handle at the Python layer with an upsert).
-
-#### Tests required
-
-`tests/platform/test_discord_pulse_runs.py` (new file):
-- `test_upsert_creates_row` — write a row, confirm it exists
-- `test_upsert_is_idempotent` — writing twice for the same (org, slug, date) produces one row
-- `test_get_discord_pulse_runs_returns_newest_first`
-- `test_migration_creates_table_and_index` — call `_apply_pending_migrations()` on a fresh DB, confirm table + index exist
-- `test_schema_version_bumped_to_6`
-
-#### Delivery order
-
-1. Write `006_discord_pulse.sql`
-2. Add `upsert_discord_pulse_run()` + `get_discord_pulse_runs()` helpers + tests
-3. Verify `_apply_pending_migrations()` picks up the new file automatically (no changes needed there if it glob-sorts migration files)
-4. Confirm all existing tests still pass (migration is additive — no schema breakage)
-
-Do NOT add any CLI command for pulse runs in this repo. The write path is owned by Cult Grader's `platform_sync.py`; the read path is future SablePlatform work. This migration is infrastructure only.
+Note: the write path is owned by Cult Grader's `platform_sync.py`; no CLI command should be added to this repo for pulse runs. Schema reference: `docs/SCHEMA_INVENTORY.md`.
 
 ---
 
@@ -1230,162 +904,7 @@ Do NOT add any CLI command for pulse runs in this repo. The write path is owned 
 **Purpose:** Applies the same normalized lift computation used for watchlist accounts to
 the managed account's own posting history. Reveals what formats actually work for the
 specific account (vs what works in the niche generally), and flags divergence between them.
-
-**Command syntax:**
-```
-sable pulse account @handle [--days 30] [--org ORG]
-```
-
-If `--org` is omitted, default to the roster account org. If no org is available, still
-run the account-only report and skip divergence-to-niche analysis cleanly.
-
-**Files already created (Slices A+B):**
-- `sable/pulse/account_report.py` — all computation logic (279 tests passing)
-- `tests/pulse/test_account_report.py` — 40 tests
-
-**Remaining file to modify (Slice C):**
-- `sable/pulse/cli.py` — add `account` subcommand (following pattern of existing subcommands)
-
-**No new database tables.** Reads pulse.db (posts + snapshots) and meta.db
-(`scanned_tweets` plus baselines/trend-helper inputs).
-
-**Computation steps in `account_report.py`:**
-
-1. **Load posts with their most-recent snapshot engagement:**
-   ```sql
-   SELECT p.id, p.text, p.posted_at, p.sable_content_type,
-          s.likes, s.retweets, s.replies, s.views, s.bookmarks, s.quotes
-   FROM posts p
-   LEFT JOIN snapshots s ON (
-       p.id = s.post_id
-       AND s.id = (
-           SELECT MAX(s2.id) FROM snapshots s2 WHERE s2.post_id = p.id
-       )
-   )
-   WHERE p.account_handle = ? AND p.posted_at >= ?
-   ORDER BY p.posted_at DESC
-   ```
-   - use the canonical `@handle` contract from Stage 0 item 1
-   - if a post has no snapshot yet, keep it in the post count but treat engagement as `0`
-   - if follower-relative normalization is attempted, read the latest `account_stats` row
-     separately; do not try to join it into the post query in a way that duplicates rows
-
-2. **Classify each post by format bucket:**
-   Call `sable/pulse/meta/fingerprint.py::classify_format()`. Posts don't have the same
-   tweet-dict structure as meta.db tweets, so map before calling:
-   - `sable_content_type = 'clip'` → default to `short_clip`; only upgrade to `long_clip`
-     when a real duration signal exists from sidecar/vault metadata
-   - `sable_content_type = 'meme'` → `single_image`
-   - `sable_content_type = 'explainer'` → `long_clip`
-   - `sable_content_type = 'faceswap'` → `short_clip`
-   - `sable_content_type = 'text'` or `unknown` → build a minimal tweet-dict with `text`,
-     `has_image=False`, `has_video=False`, `urls=[]`, `is_retweet=False`,
-     `is_quote_tweet=False`, then pass to `classify_format()`
-   - do **not** assume `sable_content_type` is already a pulse-meta format bucket
-
-3. **Compute account engagement rate baseline:**
-   For this account, compute median engagement per post across all posts in the window.
-   Use the same engagement formula as `normalize.py`: `likes + 3*replies + 4*retweets +
-   5*quotes + 2*bookmarks + 0.5*views`. Divide by follower count if available from
-   `account_stats` table, otherwise use raw engagement. The key is author-relative normalization.
-
-4. **Compute per-format lift:**
-   For each format bucket, compute mean of (post_engagement / account_baseline) across all
-   posts in that bucket. Require minimum 2 posts in a bucket before reporting a lift score.
-   Buckets with < 2 posts should show `None` lift with label "insufficient data (N post)".
-
-5. **Load niche format baselines for divergence:**
-   Do **not** query nonexistent `current_lift / status / momentum` columns from
-   `format_baselines`.
-   Preferred approach:
-   - load the latest scan's `scanned_tweets` for the org
-   - fetch 30d / 7d baselines via `sable/pulse/meta/baselines.py`
-   - reuse `sable/pulse/meta/trends.py::analyze_all_formats()` to obtain:
-     - `current_lift`
-     - `trend_status`
-     - `momentum`
-     - `confidence`
-   If no org is provided or no recent scan/baselines exist, skip divergence analysis cleanly.
-
-6. **Compute divergence signal per format:**
-   - If account_lift >= 1.5 AND niche_lift >= 1.5 → `DOUBLE DOWN`
-   - If account_lift <= 0.8 AND niche_lift >= 1.5 → `EXECUTION GAP`
-   - If account_lift >= 1.5 AND niche_lift <= 0.8 → `ACCOUNT DIFFERENTIATION`
-   - If both <= 0.8 → `AVOID`
-   - Otherwise → `NEUTRAL`
-
-**Output format (printed to console and optionally saved):**
-```
-@handle — Format Lift (last 30d, 47 posts, org: tig)
-
-  standalone_text  ████████████  2.4x  niche: 2.3x  → DOUBLE DOWN
-  short_clip       █████████     1.8x  niche: 1.7x  → DOUBLE DOWN
-  thread           ████          0.9x  niche: 1.7x  → EXECUTION GAP
-  single_image     ██            0.5x  niche: 1.1x  → AVOID
-  quote_tweet      [insufficient data: 1 post]
-
-  Top formats by account lift: standalone_text (2.4x), short_clip (1.8x)
-  Niche surging but unused by this account: long_clip
-```
-
-**Dataclass models:**
-```python
-@dataclass
-class FormatLiftEntry:
-    format_bucket: str
-    account_lift: float | None
-    niche_lift: float | None
-    niche_trend_status: str | None
-    niche_confidence: str | None
-    post_count: int
-    divergence_signal: str  # DOUBLE DOWN / EXECUTION GAP / AVOID / NEUTRAL / ACCOUNT DIFFERENTIATION
-
-@dataclass
-class AccountFormatReport:
-    handle: str
-    org: str
-    days: int
-    total_posts: int
-    entries: list[FormatLiftEntry]
-    missing_niche_formats: list[str]  # formats surging in niche but never used by account
-    generated_at: str
-```
-
-**Functions to implement:**
-```python
-def compute_account_format_lift(
-    handle: str,
-    org: str,
-    days: int,
-    pulse_db_path: Path,
-    meta_db_path: Path | None = None,
-) -> AccountFormatReport: ...
-
-def _classify_post(post: dict) -> str:
-    """Map pulse.db post row to format_bucket string."""
-
-def _compute_account_baseline(posts: list[dict]) -> float:
-    """Median engagement across posts. Returns 1.0 as floor to avoid division by zero."""
-
-def render_account_report(report: AccountFormatReport) -> str:
-    """Return formatted console string."""
-```
-
-**Tests (`tests/pulse/test_account_report.py`):**
-- Build in-memory pulse.db with 10 posts (3 standalone_text, 3 short_clip, 2 thread, 2 single_image)
-  and their snapshots. Assert `compute_account_format_lift()` returns correct lift per bucket.
-- Seed pulse rows using the real producer contract (`@handle`), not bare handles.
-- Test divergence: inject meta.db with thread at niche_lift=1.7x; account thread at 0.9x.
-  Assert `FormatLiftEntry.divergence_signal == "EXECUTION GAP"` for thread bucket.
-- Test minimum data guard: bucket with 1 post → `account_lift=None`, correct "insufficient data" label.
-- Test missing niche formats: if meta.db has `long_clip` surging but no pulse.db posts use it,
-  assert `long_clip` in `report.missing_niche_formats`.
-- Test empty pulse.db: `compute_account_format_lift()` returns report with `total_posts=0`,
-  no exception raised.
-- Test org fallback: when `--org` is omitted, the command uses `Account.org`; when both are
-  missing, it still renders account-only output without divergence fields.
-- Test `_classify_post` maps `sable_content_type='clip'` → `'short_clip'`, `'meme'` → `'single_image'`.
-- Test `render_account_report()` produces non-empty string with handle in output.
+Implementation: `sable/pulse/account_report.py`, tests: `tests/pulse/test_account_report.py`.
 
 ---
 

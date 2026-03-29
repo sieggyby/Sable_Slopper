@@ -4,6 +4,16 @@ Context, decisions, and plans that should survive a session restart.
 
 ---
 
+## Strategic Context
+
+Slopper is in a **6–12 month services phase** — delivering content for managed client accounts, not building a general-purpose product. CLI is sufficient; Phase 2 web UI is explicitly deferred until 5+ active accounts make CLI management impractical.
+
+**Active and incoming clients:** TIG Foundation (active), Multisynq (pseudo-client), PSY Protocol (best current lead), Flow L1 (next after PSY).
+
+**What not to build:** Multi-tenant, self-serve, or externally accessible features. Slopper stays internal operator tooling.
+
+---
+
 ## What This Is
 
 Sable Slopper is a CLI toolkit for high-volume crypto Twitter content production.
@@ -18,23 +28,7 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 
 ## Current Phase
 
-**Phase 1 (CLI) is complete.** All vault, pulse, clip, meme, face, character-explainer,
-wojak, calendar, write, score, diagnose, and advise commands are implemented.
-`sable pulse` now has 9 subcommands: `track`, `report`, `recommend`, `export`, `trends`,
-`account`, `attribution`, `link`, and the `meta` subgroup.
-
-**Platform layer (Round 1) is complete.** `sable.db` is live at `~/.sable/sable.db`.
-`sable/platform/` provides shared entity, tag, merge, job, cost, and error helpers.
-Five new CLI commands: `sable org`, `sable entity`, `sable job`, `sable db`, `sable resume`.
-
-**Cult Doctor (Round 2) is complete.** Cult Grader now writes to sable.db after every run (via `platform_sync.py` in Sable_Cult_Grader). New: DB migrations 002+003 extend `sync_runs` and `diagnostic_runs` schemas. Discord playbook generator (`playbook/`) and operator bot (`bot/`) are live in Sable_Cult_Grader. Schema version is now 3.
-
-**SableTracking (Round 3) is complete.** `app/platform_sync.py` in SableTracking bridges
-Google Sheets (contributors + content_log) → `sable.db` (entities, handles, tags, content_items).
-Async sync runner, `_apply_pending_migrations()`, `SABLE_CLIENT_ORG_MAP` env var config.
-36 tests passing. Schema version is now 6.
-
-**Discord Pulse (MIGRATION-006) is complete.** `discord_pulse_runs` table added to sable.db (schema version 6) for week-over-week Discord health metric tracking via `sable/platform/discord_pulse.py`.
+**Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, and more.
 
 **Phase 2 (local web UI) is planned but not started.**
 - Entry point: `sable serve` → FastAPI app in `sable/serve/`
@@ -53,6 +47,12 @@ Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
   Hand-written SQL + dataclasses throughout. `sable db migrate` runs
   all migrations (001–006) via `ensure_schema()`.
   See `docs/SCHEMA_INVENTORY.md` for full table and model inventory.
+
+- **`pulse.db` and `meta.db` schemas are embedded Python strings, not migration files.**
+  Each module (`sable/pulse/db.py`, `sable/pulse/meta/db.py`) holds a `_SCHEMA` string
+  applied via `CREATE TABLE IF NOT EXISTS` on every `migrate()` call. There are no versioned
+  migration files for these two databases — `sable db migrate` only covers `sable.db`.
+  Schema changes to pulse/meta require editing the `_SCHEMA` string directly.
 
 - **No shared DB connection factory for pulse/meta.** Each module (`sable/pulse/db.py`,
   `sable/pulse/meta/db.py`) opens its own `sqlite3` connection directly. `sable/platform/db.py`
@@ -80,31 +80,22 @@ Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
 
 ---
 
-## Clip Pipeline — Decisions and Known Lessons
+## Clip Pipeline — Settled Decisions
 
-The clip pipeline iterates a lot. Key settled decisions (from `CLIP_LESSONS.md`):
-
-- **Batch eval (Option B):** single Claude call for all clips. Gives cross-clip context
-  and is efficient. Per-clip calls (Option A) were too slow.
+Non-obvious decisions that reverse naive intuition — get these wrong and you reproduce known bugs:
 
 - **Pause threshold for `_candidate_endpoints`: 0.15s** (lowered from 0.3s). Fast-paced
   crypto interviews have real sentence boundaries at 0.15–0.29s. The old threshold
   caused clips to cluster in the 43–47s range.
 
-- **`kill` flag exists on batch eval.** Claude can now discard a clip entirely (no-landing
-  clips were forced through before this).
+- **`kill` flag exists on batch eval.** Claude can discard a clip entirely; no-landing
+  clips were forced through before this.
 
 - **`extend` flag exists.** When the long variant still cuts mid-argument, pipeline
   searches up to 20s beyond the endpoint for the next clean pause-backed boundary.
 
 - **Brainrot `pick()` prefers long sources.** `source_duration >= clip_duration / 2`
   to prevent visible looping. Falls back to any energy-matched source if nothing long enough.
-
-**Still open (next iteration):**
-- Leading filler trim ✓ done (2026-03-26)
-- Context backtrack for dangling references ✓ done (2026-03-26)
-- Per-clip score in CLI output ✓ done (2026-03-26)
-- Brainrot theme matching (not just energy)
 
 ---
 
@@ -124,6 +115,10 @@ The clip pipeline iterates a lot. Key settled decisions (from `CLIP_LESSONS.md`)
 | `CLIP_LESSONS.md` | Tracked failures and fixes in the clip pipeline |
 | `TODO.md` | Main development queue: audit remediation log, open hardening items, and completed feature history |
 | `AGENTS.md` | Instructions for Codex review role (QA layer) |
+| `docs/COMMANDS.md` | Full CLI command reference with flags and examples |
+| `docs/LOCAL_DEV.md` | Local dev setup, venv, test runner, env var patterns |
+| `docs/PROMPTS.md` | Claude prompt templates and prompt engineering notes |
+| `docs/IMPLEMENTATION_LOG.md` | Chronological record of shipped features and decisions |
 
 ---
 

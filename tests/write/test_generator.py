@@ -37,6 +37,35 @@ def _make_meta_conn(scanned_tweets_rows: list[dict]) -> sqlite3.Connection:
     return conn
 
 
+def _make_meta_conn_with_anatomy(
+    scanned_tweets_rows: list[dict],
+    anatomy_rows: list[dict] | None = None,
+) -> sqlite3.Connection:
+    """Build an in-memory meta.db with scanned_tweets and viral_anatomies."""
+    conn = _make_meta_conn(scanned_tweets_rows)
+    conn.execute("""CREATE TABLE viral_anatomies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org TEXT NOT NULL, tweet_id TEXT NOT NULL, author_handle TEXT NOT NULL,
+        total_lift REAL NOT NULL, format_bucket TEXT NOT NULL,
+        anatomy_json TEXT NOT NULL, analyzed_at TEXT NOT NULL,
+        UNIQUE(org, tweet_id)
+    )""")
+    if anatomy_rows:
+        for row in anatomy_rows:
+            conn.execute(
+                """INSERT INTO viral_anatomies
+                   (org, tweet_id, author_handle, total_lift, format_bucket,
+                    anatomy_json, analyzed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (
+                    row["org"], row["tweet_id"], row.get("author", "@anon"),
+                    row["lift"], row["bucket"], _json.dumps(row["anatomy"]),
+                ),
+            )
+    conn.commit()
+    return conn
+
+
 def test_select_best_format_returns_highest_lift():
     from sable.write.generator import _select_best_format
     conn = _make_meta_conn([
@@ -127,7 +156,7 @@ def test_generate_returns_list_of_variants(monkeypatch):
         lambda prompt, system="", **kwargs: _good_response(),
     )
 
-    results = generate_tweet_variants(
+    result = generate_tweet_variants(
         handle="@testwriter",
         org="testorg",
         format_bucket="standalone_text",
@@ -137,9 +166,9 @@ def test_generate_returns_list_of_variants(monkeypatch):
         meta_db_path=None,
         vault_root=None,
     )
-    assert len(results) == 1
-    assert results[0].text == "DeFi yields are compressing. Here's why."
-    assert results[0].format_fit_score == 8.5
+    assert len(result.variants) == 1
+    assert result.variants[0].text == "DeFi yields are compressing. Here's why."
+    assert result.variants[0].format_fit_score == 8.5
 
 
 def test_generate_uses_best_format_when_bucket_is_none(monkeypatch):
@@ -277,7 +306,7 @@ def test_generate_returns_empty_list_on_bad_json(monkeypatch):
         lambda prompt, system="", **kwargs: "not json",
     )
 
-    results = generate_tweet_variants(
+    result = generate_tweet_variants(
         handle="@testwriter",
         org="testorg",
         format_bucket="standalone_text",
@@ -287,7 +316,7 @@ def test_generate_returns_empty_list_on_bad_json(monkeypatch):
         meta_db_path=None,
         vault_root=None,
     )
-    assert results == []
+    assert result.variants == []
 
 
 def test_generate_returns_empty_list_when_variants_key_missing(monkeypatch):
@@ -300,7 +329,7 @@ def test_generate_returns_empty_list_when_variants_key_missing(monkeypatch):
         lambda prompt, system="", **kwargs: _json.dumps({"other": []}),
     )
 
-    results = generate_tweet_variants(
+    result = generate_tweet_variants(
         handle="@testwriter",
         org="testorg",
         format_bucket="standalone_text",
@@ -310,7 +339,7 @@ def test_generate_returns_empty_list_when_variants_key_missing(monkeypatch):
         meta_db_path=None,
         vault_root=None,
     )
-    assert results == []
+    assert result.variants == []
 
 
 def test_generate_passes_source_url_in_prompt(monkeypatch):
@@ -413,3 +442,298 @@ def test_write_variants_logs_cost_to_sable_db(monkeypatch):
     logged = log_cost_calls[0]
     assert logged["org_id"] == "testorg", f"org_id must be 'testorg', got {logged['org_id']!r}"
     assert logged["call_type"] == "write_variants", f"call_type must be 'write_variants', got {logged['call_type']!r}"
+
+
+# ---------------------------------------------------------------------------
+# Slice C — Viral anatomy injection
+# ---------------------------------------------------------------------------
+
+def _patch_format_context(monkeypatch):
+    """Monkeypatch format context helpers so anatomy tests don't need full scanned_tweets schema."""
+    monkeypatch.setattr(
+        "sable.write.generator._select_best_format",
+        lambda org, conn: "standalone_text",
+    )
+    monkeypatch.setattr(
+        "sable.write.generator._get_format_context",
+        lambda org, bucket, conn: ("standalone_text (no recent niche data)", []),
+    )
+
+
+def test_anatomy_patterns_injected_into_prompt_when_present(monkeypatch, tmp_path):
+    """Anatomy patterns with lift >= 2.5 must appear in the write prompt."""
+    from sable.write.generator import generate_tweet_variants
+
+    captured: dict = {}
+
+    monkeypatch.setattr("sable.write.generator.require_account", lambda h: _make_account())
+    monkeypatch.setattr("sable.write.generator.build_account_context", lambda acc: "ctx")
+    _patch_format_context(monkeypatch)
+    monkeypatch.setattr(
+        "sable.write.generator.call_claude_json",
+        lambda prompt, system="", **kwargs: (captured.update({"prompt": prompt}) or _good_response()),
+    )
+
+    # Build a meta.db temp file with viral_anatomies
+    import sqlite3 as _sqlite3
+    db_path = tmp_path / "meta.db"
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute("""CREATE TABLE scanned_tweets (tweet_id TEXT PRIMARY KEY)""")
+    conn.execute("""CREATE TABLE viral_anatomies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org TEXT NOT NULL, tweet_id TEXT NOT NULL, author_handle TEXT NOT NULL,
+        total_lift REAL NOT NULL, format_bucket TEXT NOT NULL,
+        anatomy_json TEXT NOT NULL, analyzed_at TEXT NOT NULL,
+        UNIQUE(org, tweet_id)
+    )""")
+    conn.execute(
+        """INSERT INTO viral_anatomies
+           (org, tweet_id, author_handle, total_lift, format_bucket, anatomy_json, analyzed_at)
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (
+            "testorg", "tweet-1", "@alpha", 3.8, "standalone_text",
+            _json.dumps({
+                "hook_type": "contrarian_stat",
+                "structural_move": "setup + reveal",
+                "payoff_mechanism": "counter-intuitive_resolution",
+            }),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    generate_tweet_variants(
+        handle="@testwriter",
+        org="testorg",
+        format_bucket="standalone_text",
+        topic="DePIN funding",
+        source_url=None,
+        num_variants=1,
+        meta_db_path=db_path,
+        vault_root=None,
+    )
+
+    assert "contrarian_stat" in captured["prompt"]
+    assert "Structural patterns" in captured["prompt"]
+
+
+def test_anatomy_fallback_when_table_empty(monkeypatch, tmp_path):
+    """generate_tweet_variants works normally when viral_anatomies has no rows."""
+    from sable.write.generator import generate_tweet_variants
+
+    monkeypatch.setattr("sable.write.generator.require_account", lambda h: _make_account())
+    monkeypatch.setattr("sable.write.generator.build_account_context", lambda acc: "ctx")
+    _patch_format_context(monkeypatch)
+    monkeypatch.setattr(
+        "sable.write.generator.call_claude_json",
+        lambda prompt, system="", **kwargs: _good_response(),
+    )
+
+    import sqlite3 as _sqlite3
+    db_path = tmp_path / "meta.db"
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute("""CREATE TABLE scanned_tweets (tweet_id TEXT PRIMARY KEY)""")
+    conn.execute("""CREATE TABLE viral_anatomies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org TEXT, tweet_id TEXT, author_handle TEXT, total_lift REAL,
+        format_bucket TEXT, anatomy_json TEXT, analyzed_at TEXT
+    )""")
+    conn.commit()
+    conn.close()
+
+    result = generate_tweet_variants(
+        handle="@testwriter",
+        org="testorg",
+        format_bucket="standalone_text",
+        topic="test",
+        source_url=None,
+        num_variants=1,
+        meta_db_path=db_path,
+        vault_root=None,
+    )
+
+    assert len(result.variants) == 1
+    assert result.anatomy_ref is None
+
+
+def test_anatomy_lift_threshold_filters_low_lift_rows(monkeypatch, tmp_path):
+    """Anatomy rows below min_lift=2.5 must not appear in the prompt."""
+    from sable.write.generator import generate_tweet_variants
+
+    captured: dict = {}
+
+    monkeypatch.setattr("sable.write.generator.require_account", lambda h: _make_account())
+    monkeypatch.setattr("sable.write.generator.build_account_context", lambda acc: "ctx")
+    _patch_format_context(monkeypatch)
+    monkeypatch.setattr(
+        "sable.write.generator.call_claude_json",
+        lambda prompt, system="", **kwargs: (captured.update({"prompt": prompt}) or _good_response()),
+    )
+
+    import sqlite3 as _sqlite3
+    db_path = tmp_path / "meta.db"
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute("""CREATE TABLE scanned_tweets (tweet_id TEXT PRIMARY KEY)""")
+    conn.execute("""CREATE TABLE viral_anatomies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org TEXT, tweet_id TEXT, author_handle TEXT, total_lift REAL,
+        format_bucket TEXT, anatomy_json TEXT, analyzed_at TEXT
+    )""")
+    # Only a low-lift row (1.8x — below threshold)
+    conn.execute(
+        """INSERT INTO viral_anatomies
+           (org, tweet_id, author_handle, total_lift, format_bucket, anatomy_json, analyzed_at)
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (
+            "testorg", "tweet-low", "@low", 1.8, "standalone_text",
+            _json.dumps({"hook_type": "low_quality_hook"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    generate_tweet_variants(
+        handle="@testwriter",
+        org="testorg",
+        format_bucket="standalone_text",
+        topic="test",
+        source_url=None,
+        num_variants=1,
+        meta_db_path=db_path,
+        vault_root=None,
+    )
+
+    assert "low_quality_hook" not in captured["prompt"]
+    assert "Structural patterns" not in captured["prompt"]
+
+
+def test_anatomy_ref_returned_in_write_result(monkeypatch, tmp_path):
+    """WriteResult.anatomy_ref must be populated when anatomy data is present."""
+    from sable.write.generator import generate_tweet_variants
+
+    monkeypatch.setattr("sable.write.generator.require_account", lambda h: _make_account())
+    monkeypatch.setattr("sable.write.generator.build_account_context", lambda acc: "ctx")
+    _patch_format_context(monkeypatch)
+    monkeypatch.setattr(
+        "sable.write.generator.call_claude_json",
+        lambda prompt, system="", **kwargs: _good_response(),
+    )
+
+    import sqlite3 as _sqlite3
+    db_path = tmp_path / "meta.db"
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute("""CREATE TABLE scanned_tweets (tweet_id TEXT PRIMARY KEY)""")
+    conn.execute("""CREATE TABLE viral_anatomies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org TEXT, tweet_id TEXT, author_handle TEXT, total_lift REAL,
+        format_bucket TEXT, anatomy_json TEXT, analyzed_at TEXT
+    )""")
+    conn.execute(
+        """INSERT INTO viral_anatomies
+           (org, tweet_id, author_handle, total_lift, format_bucket, anatomy_json, analyzed_at)
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (
+            "testorg", "tweet-1", "@alpha", 3.8, "standalone_text",
+            _json.dumps({
+                "hook_type": "contrarian_stat",
+                "payoff_mechanism": "counter-intuitive_resolution",
+            }),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    result = generate_tweet_variants(
+        handle="@testwriter",
+        org="testorg",
+        format_bucket="standalone_text",
+        topic="test",
+        source_url=None,
+        num_variants=1,
+        meta_db_path=db_path,
+        vault_root=None,
+    )
+
+    assert result.anatomy_ref is not None
+    assert "3.8x" in result.anatomy_ref
+
+
+def test_no_anatomy_flag_skips_anatomy_injection(monkeypatch, tmp_path):
+    """use_anatomy=False must skip anatomy even when table has high-lift rows."""
+    from sable.write.generator import generate_tweet_variants
+
+    captured: dict = {}
+
+    monkeypatch.setattr("sable.write.generator.require_account", lambda h: _make_account())
+    monkeypatch.setattr("sable.write.generator.build_account_context", lambda acc: "ctx")
+    _patch_format_context(monkeypatch)
+    monkeypatch.setattr(
+        "sable.write.generator.call_claude_json",
+        lambda prompt, system="", **kwargs: (captured.update({"prompt": prompt}) or _good_response()),
+    )
+
+    import sqlite3 as _sqlite3
+    db_path = tmp_path / "meta.db"
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute("""CREATE TABLE scanned_tweets (tweet_id TEXT PRIMARY KEY)""")
+    conn.execute("""CREATE TABLE viral_anatomies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org TEXT, tweet_id TEXT, author_handle TEXT, total_lift REAL,
+        format_bucket TEXT, anatomy_json TEXT, analyzed_at TEXT
+    )""")
+    conn.execute(
+        """INSERT INTO viral_anatomies
+           (org, tweet_id, author_handle, total_lift, format_bucket, anatomy_json, analyzed_at)
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (
+            "testorg", "tweet-1", "@alpha", 3.8, "standalone_text",
+            _json.dumps({"hook_type": "contrarian_stat"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    generate_tweet_variants(
+        handle="@testwriter",
+        org="testorg",
+        format_bucket="standalone_text",
+        topic="test",
+        source_url=None,
+        num_variants=1,
+        meta_db_path=db_path,
+        vault_root=None,
+        use_anatomy=False,
+    )
+
+    assert "Structural patterns" not in captured["prompt"]
+    assert "contrarian_stat" not in captured["prompt"]
+
+
+def test_vault_hint_populated_when_topic_and_vault_exist(monkeypatch, tmp_path):
+    """WriteResult.vault_hint must be set when topic and vault_root both exist."""
+    from sable.write.generator import generate_tweet_variants
+
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+
+    monkeypatch.setattr("sable.write.generator.require_account", lambda h: _make_account())
+    monkeypatch.setattr("sable.write.generator.build_account_context", lambda acc: "ctx")
+    monkeypatch.setattr(
+        "sable.write.generator.call_claude_json",
+        lambda prompt, system="", **kwargs: _good_response(),
+    )
+
+    result = generate_tweet_variants(
+        handle="@testwriter",
+        org="testorg",
+        format_bucket="standalone_text",
+        topic="depin funding",
+        source_url=None,
+        num_variants=1,
+        meta_db_path=None,
+        vault_root=vault_root,
+    )
+
+    assert result.vault_hint is not None
+    assert "depin funding" in result.vault_hint
+    assert "@testwriter" in result.vault_hint
