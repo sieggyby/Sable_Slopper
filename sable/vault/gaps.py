@@ -1,6 +1,7 @@
 """Coverage gap analysis per topic."""
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -38,7 +39,7 @@ def _recommend_type(term: str) -> str:
 def compute_signal_gaps(
     org: str,
     vault_path: Optional[Path] = None,
-    meta_db: Optional[object] = None,
+    meta_db: Optional[sqlite3.Connection] = None,
     top_n: int = 10,
     min_unique_authors: int = 2,
 ) -> list[VaultSignalGap]:

@@ -302,7 +302,8 @@ def test_corrupt_meta_db_logs_warning(tmp_path, caplog):
     conn = sqlite3.connect(str(db))
     _insert_post(conn, "s1", "@alice", "clip")
     _insert_snapshot(conn, "s1", likes=10)
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     bad_meta = tmp_path / "bad.db"
     bad_meta.write_bytes(b"not a sqlite database")
@@ -328,7 +329,8 @@ def test_format_table_thin_sample_shows_no_lift(tmp_path):
     _insert_snapshot(conn, "s1", likes=50)
     _insert_post(conn, "o1", "@alice", None)
     _insert_snapshot(conn, "o1", likes=5)
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     attr = compute_attribution("alice", days=30, pulse_db_path=db)
     report = render_attribution_report(attr)
@@ -348,7 +350,8 @@ def test_render_includes_comparison_caveat(tmp_path):
     _insert_snapshot(conn, "s1", likes=50)
     _insert_post(conn, "o1", "@alice", None)
     _insert_snapshot(conn, "o1", likes=10)
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     attr = compute_attribution("alice", days=30, pulse_db_path=db)
     report = render_attribution_report(attr)

@@ -213,7 +213,7 @@ def pulse_attribution(handle: str, days: int, output_format: str, org: Optional[
     try:
         attr = compute_attribution(handle, days=days, org=org)
     except Exception as e:
-        console.print(f"[red]Error:[/red] {e}", err=True)
+        console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1)
     if output_format == "json":
         import dataclasses

@@ -1,6 +1,7 @@
 """CLI for sable tracking commands (delegates to SableTracking)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import click
@@ -42,7 +43,7 @@ def tracking_sync(org_id):
     start_step(conn, step_id)
 
     try:
-        counts = sync_to_platform(org_id)
+        counts = asyncio.run(sync_to_platform(org_id))
         complete_step(conn, step_id, output=counts)
         conn.execute(
             "UPDATE jobs SET status='completed', completed_at=datetime('now'), result_json=? WHERE job_id=?",

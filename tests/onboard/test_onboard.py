@@ -370,7 +370,6 @@ def test_org_id_defaults_to_yaml_stem(conn, tmp_path):
 def test_prep_creates_profile_directory(tmp_path, monkeypatch):
     """--prep creates profile dir with tone/interests/context/notes stubs."""
     from click.testing import CliRunner
-    from unittest.mock import MagicMock, patch
 
     monkeypatch.setenv("SABLE_HOME", str(tmp_path))
 
@@ -381,7 +380,7 @@ def test_prep_creates_profile_directory(tmp_path, monkeypatch):
          patch("sable.platform.db.get_db", return_value=mock_conn):
         runner = CliRunner()
         from sable.commands.onboard import onboard_command
-        result = runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+        runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
 
     profiles_root = tmp_path / "profiles" / "@testhandle"
     assert profiles_root.exists(), f"Profile dir not found: {profiles_root}"
@@ -396,7 +395,6 @@ def test_prep_creates_profile_directory(tmp_path, monkeypatch):
 def test_prep_stub_content(tmp_path, monkeypatch):
     """Each stub file contains its section header and at least one comment line."""
     from click.testing import CliRunner
-    from unittest.mock import MagicMock, patch
 
     monkeypatch.setenv("SABLE_HOME", str(tmp_path))
 
@@ -407,7 +405,7 @@ def test_prep_stub_content(tmp_path, monkeypatch):
          patch("sable.platform.db.get_db", return_value=mock_conn):
         runner = CliRunner()
         from sable.commands.onboard import onboard_command
-        result = runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+        runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
 
     profiles_root = tmp_path / "profiles" / "@testhandle"
     expected_headers = {
@@ -429,7 +427,6 @@ def test_prep_stub_content(tmp_path, monkeypatch):
 def test_prep_idempotent_no_overwrite(tmp_path, monkeypatch):
     """Running --prep twice does not overwrite existing stub files."""
     from click.testing import CliRunner
-    from unittest.mock import MagicMock, patch
 
     monkeypatch.setenv("SABLE_HOME", str(tmp_path))
 
@@ -457,7 +454,6 @@ def test_prep_idempotent_no_overwrite(tmp_path, monkeypatch):
 def test_prep_prints_skip_message_on_second_run(tmp_path, monkeypatch):
     """When profile already exists, --prep prints a skip/already-exists message."""
     from click.testing import CliRunner
-    from unittest.mock import MagicMock, patch
     from io import StringIO
 
     monkeypatch.setenv("SABLE_HOME", str(tmp_path))
@@ -480,7 +476,7 @@ def test_prep_prints_skip_message_on_second_run(tmp_path, monkeypatch):
         mock_err_console.print.side_effect = mock_err_print
         runner = CliRunner()
         from sable.commands.onboard import onboard_command
-        result = runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+        runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
 
     all_messages = " ".join(captured_messages).lower()
     assert "already exists" in all_messages, (
@@ -495,7 +491,6 @@ def test_prep_prints_skip_message_on_second_run(tmp_path, monkeypatch):
 def test_prep_calls_migrate_before_create_org(tmp_path, monkeypatch):
     """pulse_migrate() is called before the org INSERT in --prep mode."""
     from click.testing import CliRunner
-    from unittest.mock import MagicMock, patch
 
     monkeypatch.setenv("SABLE_HOME", str(tmp_path))
 
@@ -519,7 +514,7 @@ def test_prep_calls_migrate_before_create_org(tmp_path, monkeypatch):
          patch("sable.platform.db.get_db", return_value=mock_conn):
         runner = CliRunner()
         from sable.commands.onboard import onboard_command
-        result = runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
+        runner.invoke(onboard_command, ["--prep", "--handle", "@testhandle", "--org-slug", "testorg"])
 
     assert "pulse_migrate" in call_order, f"pulse_migrate not called. Order: {call_order}"
     assert "db_insert" in call_order, f"db_insert not called. Order: {call_order}"

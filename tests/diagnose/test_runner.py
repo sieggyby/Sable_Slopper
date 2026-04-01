@@ -671,6 +671,6 @@ def test_render_diagnosis_quick_actions_block():
     assert "1. sable write @alice --watchlist-wire" in output
     # INFO finding's command should NOT appear in Quick Actions block
     lines = output.splitlines()
-    qa_start = next(i for i, l in enumerate(lines) if "Quick Actions:" in l)
+    qa_start = next(i for i, line in enumerate(lines) if "Quick Actions:" in line)
     qa_section = "\n".join(lines[qa_start:])
     assert "short_clip" not in qa_section
