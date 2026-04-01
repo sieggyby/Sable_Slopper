@@ -75,3 +75,33 @@ def test_transcribe_uses_cache_on_second_call(tmp_path, monkeypatch):
     result = transcribe(str(fake_video), model="base.en")
 
     assert result == cache_data
+
+
+def test_transcribe_passes_condition_on_previous_text_false(tmp_path, monkeypatch):
+    """Whisper transcribe call must include condition_on_previous_text=False."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    import sable.clip.transcribe as t_mod
+
+    fake_video = tmp_path / "video.mp4"
+    fake_video.write_bytes(b"fake video data")
+
+    captured_kwargs = {}
+    w1 = SimpleNamespace(word="hello", start=0.0, end=0.5)
+    seg = SimpleNamespace(text="hello", start=0.0, end=0.5, words=[w1])
+
+    mock_model = MagicMock()
+
+    def fake_transcribe(path, **kwargs):
+        captured_kwargs.update(kwargs)
+        return iter([seg]), SimpleNamespace(language="en")
+
+    mock_model.transcribe = fake_transcribe
+    monkeypatch.setattr(t_mod, "_get_model", lambda m: mock_model)
+
+    t_mod.transcribe(str(fake_video), model="base.en", force=True)
+
+    assert "condition_on_previous_text" in captured_kwargs, \
+        "condition_on_previous_text must be passed to wm.transcribe()"
+    assert captured_kwargs["condition_on_previous_text"] is False, \
+        "condition_on_previous_text must be False to prevent hallucination cascades"

@@ -16,7 +16,7 @@ def _file_hash(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
-_CACHE_VERSION = "v3"
+_CACHE_VERSION = "v4"
 
 
 def _cache_path(video_path: Path, model: str) -> Path:
@@ -66,6 +66,7 @@ def transcribe(
         str(video_path),
         word_timestamps=True,
         language="en" if model.endswith(".en") else None,
+        condition_on_previous_text=False,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500},
     )
