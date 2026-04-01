@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `567 passed`
+- `./.venv/bin/python -m pytest -q` → `569 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -33,29 +33,11 @@ comment exists at `sable/advise/stage1.py` (`_norm_handle`). Consolidation into
 
 ---
 
-## FEATURE-3 (`sable pulse account`) — Post-Audit Items
-
-All LOW severity. Account report is fully functional.
-
-- **`_load_niche_lifts` ignores `days` param** (`account_report.py:177`): always queries
-  last 30 days from meta.db regardless of the `days` argument. If called with `days=7`,
-  account data is 7 days but niche data is 30 days. Acceptable while default is 30d.
-
-- **`_load_follower_count` is dead code** (`account_report.py:149`): defined but never
-  called. Either wire in follower-relative normalization or delete it.
-
-- **Stale comments:** "Slice B — stubbed for Slice A" header at line 158; test docstring
-  at line 1 says "Slice A" but file now contains Slice B tests; thread/clip docstring
-  mismatch in `test_divergence_execution_gap_with_niche_data`.
-
-- **Coverage gaps:**
-  - No test for meta.db 30-day exclusion filter in `_load_niche_lifts`
-  - No test for `niche_confidence` value after Slice B wiring
-  - No test for empty scanned_tweets after org filter
+## FEATURE-3 (`sable pulse account`) — Remaining Items
 
 - **`_classify_post` thread-detection gap** (known V1 limitation): `sable_content_type='text'`
   always passes `is_thread=False` because pulse.db has no thread marker. Text threads
-  miscategorized as `standalone_text`.
+  miscategorized as `standalone_text`. Requires pulse.db schema change to fix.
 
 ---
 

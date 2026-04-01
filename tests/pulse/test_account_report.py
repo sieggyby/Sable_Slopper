@@ -591,7 +591,7 @@ def test_niche_lift_loaded_from_meta_db(tmp_path):
 
 
 def test_divergence_execution_gap_with_niche_data(tmp_path):
-    """Account clip (short_clip) with very low engagement + niche thread total_lift=1.7 → EXECUTION GAP."""
+    """Account clip (short_clip) with very low engagement + niche short_clip total_lift=1.7 → EXECUTION GAP."""
     pulse_db = _make_pulse_db(tmp_path)
     meta_db = _make_meta_db(tmp_path)
 
@@ -773,3 +773,59 @@ def test_niche_org_mismatch_returns_no_niche_data(tmp_path):
     report = compute_account_format_lift("alice", "testorg", 30, pulse_db, meta_db)
     for entry in report.entries:
         assert entry.niche_lift is None
+
+
+def test_niche_confidence_populated_with_niche_data(tmp_path):
+    """niche_confidence should be a non-None string when niche data exists."""
+    pulse_db = _make_pulse_db(tmp_path)
+    meta_db = _make_meta_db(tmp_path)
+
+    pconn = sqlite3.connect(str(pulse_db))
+    pconn.row_factory = sqlite3.Row
+    for i in range(3):
+        _insert_post(pconn, f"t{i}", "@alice", "text")
+        _insert_snapshot(pconn, f"t{i}", likes=10)
+    pconn.commit()
+    pconn.close()
+
+    mconn = sqlite3.connect(str(meta_db))
+    for i in range(4):
+        _insert_meta_tweet(mconn, f"m{i}", f"@nuser{i % 2}", "standalone_text",
+                           "testorg", total_lift=1.5)
+    mconn.commit()
+    mconn.close()
+
+    report = compute_account_format_lift("alice", "testorg", 30, pulse_db, meta_db)
+    buckets = {e.format_bucket: e for e in report.entries}
+    assert "standalone_text" in buckets
+    entry = buckets["standalone_text"]
+    assert entry.niche_confidence is not None, "niche_confidence should be set when niche data exists"
+
+
+def test_empty_scanned_tweets_after_org_filter(tmp_path):
+    """When meta.db has tweets but none match the org, niche data is empty."""
+    pulse_db = _make_pulse_db(tmp_path)
+    meta_db = _make_meta_db(tmp_path)
+
+    pconn = sqlite3.connect(str(pulse_db))
+    pconn.row_factory = sqlite3.Row
+    for i in range(3):
+        _insert_post(pconn, f"t{i}", "@alice", "clip")
+        _insert_snapshot(pconn, f"t{i}", likes=20)
+    pconn.commit()
+    pconn.close()
+
+    # Insert tweets for a completely different org
+    mconn = sqlite3.connect(str(meta_db))
+    for i in range(5):
+        _insert_meta_tweet(mconn, f"m{i}", f"@nuser{i % 2}", "short_clip",
+                           "wrong_org", total_lift=3.0)
+    mconn.commit()
+    mconn.close()
+
+    report = compute_account_format_lift("alice", "testorg", 30, pulse_db, meta_db)
+    buckets = {e.format_bucket: e for e in report.entries}
+    assert "short_clip" in buckets
+    entry = buckets["short_clip"]
+    assert entry.niche_lift is None, "niche_lift should be None when no tweets match the org"
+    assert entry.niche_confidence is None
