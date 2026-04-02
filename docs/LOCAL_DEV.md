@@ -92,16 +92,21 @@ The `ruff` config is in `pyproject.toml`. Mypy runs in strict mode for `sable/pu
 
 ## Database Migrations
 
-There are two SQLite databases:
+There are three SQLite databases:
 
 | File | Location | Contains |
 |------|---------|---------|
-| `pulse.db` | `$SABLE_HOME/pulse.db` | Tweet performance data, posting log, roster |
+| `sable.db` | `$SABLE_HOME/sable.db` | Entities, tags, jobs, artifacts, cost events, sync runs |
+| `pulse.db` | `$SABLE_HOME/pulse.db` | Tweet performance data, posting log |
 | `meta.db` | `$SABLE_HOME/meta.db` | Watchlist tweet cache, baselines, cursors |
 
-Schema is defined in `sable/db/` and applied via `db.init_db()` on first run. If you add a column, add a migration in `sable/db/migrations.py` — the migration runner checks the current schema version on startup.
+There are three databases. `sable.db` schema lives in `sable_platform` (separate repo);
+migrations are individual SQL files applied via `ensure_schema()`. `pulse.db` and `meta.db`
+schemas are embedded `_SCHEMA` strings in `sable/pulse/db.py` and `sable/pulse/meta/db.py`
+respectively — they use `CREATE TABLE IF NOT EXISTS` on every `migrate()` call and have
+no separate migration files.
 
-There is no Alembic or external migration tool; migrations are hand-written SQL in the `migrations` dict keyed by version number.
+There is no Alembic or external migration tool.
 
 ## File Layout
 
@@ -109,7 +114,8 @@ There is no Alembic or external migration tool; migrations are hand-written SQL 
 sable/
 ├── cli.py                  # Main entry point, registers all subcommands
 ├── config.py               # Config loading, defaults, env var overrides
-├── db/                     # SQLite connection + schema + migrations
+├── platform/               # sable.db access (re-exports from sable_platform)
+├── shared/                 # Shared utilities (api, ffmpeg, handles, paths, etc.)
 ├── pulse/
 │   ├── cli.py              # sable pulse group
 │   └── meta/               # pulse meta subsystem

@@ -164,7 +164,8 @@ Schema v5 → v6. Write path owned by Cult Grader's `platform_sync.py`.
 | 2026-03-26 (FEATURE-9 + FEATURE-7) | 388 | 0 | 0 |
 | 2026-03-26 (AR-6 QA + Simplify) | 401 | 3 E702 | 1 call-arg |
 | 2026-03-26 (FEATURE-PULSE-META-SKIP-FRESH) | 414 | 3 E702 | 1 call-arg |
-| 2026-03-29 (current) | 557 | 3 E702 | 1 call-arg |
+| 2026-03-29 | 557 | 3 E702 | 1 call-arg |
+| 2026-03-31 (current) | 578 | 0 | 0 |
 
 ---
 
