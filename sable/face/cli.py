@@ -8,6 +8,8 @@ import time
 import click
 from rich.console import Console
 from rich.table import Table
+
+from sable.shared.handles import strip_handle
 from rich import box
 
 console = Console()
@@ -44,7 +46,7 @@ def face_swap(target, account, reference, output, quality, max_cost, dry_run, sk
         console.print(f"[red]{e}[/red]")
         sys.exit(1)
 
-    ref_name = reference or acc.handle.lstrip("@")
+    ref_name = reference or strip_handle(acc.handle)
     try:
         ref = get_reference(ref_name)
     except ValueError as e:

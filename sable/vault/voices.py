@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sable.shared.handles import strip_handle
+
 
 def generate_voice_profiles(org: str, vault_path: Path) -> None:
     """Write voices/{handle_slug}.md for each account in org."""
@@ -33,7 +35,7 @@ def generate_voice_profiles(org: str, vault_path: Path) -> None:
     voices_dir.mkdir(parents=True, exist_ok=True)
 
     for acc in accounts:
-        slug = acc.handle.lstrip("@")
+        slug = strip_handle(acc.handle)
         profile_path = voices_dir / f"{slug}.md"
 
         content = tmpl.render(

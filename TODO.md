@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `569 passed`
+- `./.venv/bin/python -m pytest -q` → `578 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -24,12 +24,6 @@ for these flows. Org-scoped advise/meta paths are fully gated.
 
 Some tests still encode stale producer/consumer schemas that don't match the live
 contracts. Lint and mypy are clean; the issue is semantic correctness of test fixtures.
-
-### Handle normalization duplication
-
-Handle normalization (strip `@`, lowercase) is inline at 20+ sites. A tracked TODO
-comment exists at `sable/advise/stage1.py` (`_norm_handle`). Consolidation into
-`sable/shared/utils.py::normalize_handle()` deferred — low risk, cosmetic value only.
 
 ---
 

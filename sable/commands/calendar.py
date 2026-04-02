@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import click
 from rich.console import Console
 
+from sable.shared.handles import strip_handle
+
 console = Console()
 
 
@@ -59,7 +61,7 @@ def calendar_command(
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         playbooks_dir = sable_home() / "playbooks"
         playbooks_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"calendar_{account.handle.lstrip('@')}_{today}.md"
+        filename = f"calendar_{strip_handle(account.handle)}_{today}.md"
         save_path = playbooks_dir / filename
         save_path.write_text(output, encoding="utf-8")
         console.print(f"[green]Saved → {save_path}[/green]")

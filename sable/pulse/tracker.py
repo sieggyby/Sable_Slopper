@@ -9,6 +9,8 @@ from typing import Optional
 
 import httpx
 
+from sable.shared.handles import strip_handle
+
 from sable import config as cfg
 from sable.pulse import db
 from sable.shared.paths import sable_home
@@ -50,7 +52,7 @@ def _get_headers() -> dict:
 # ---------------------------------------------------------------------------
 
 def _mock_tweets(handle: str, count: int) -> list[dict]:
-    handle = handle.lstrip("@")
+    handle = strip_handle(handle)
     return [
         {
             "id_str": f"mock_{handle}_{i}",
@@ -73,7 +75,7 @@ def _mock_tweets(handle: str, count: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 async def _fetch_user_tweets_async(handle: str, count: int = 20) -> list[dict]:
-    handle = handle.lstrip("@")
+    handle = strip_handle(handle)
     cache_key = f"tweets_{handle}_{count}"
     cached = _load_cache(cache_key, max_age_seconds=600)
     if cached:

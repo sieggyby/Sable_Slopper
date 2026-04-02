@@ -13,6 +13,7 @@ from typing import Optional
 
 from sable.platform.db import get_db
 from sable.pulse.account_report import compute_account_format_lift
+from sable.shared.handles import ensure_handle_prefix as _norm_handle
 from sable.vault.notes import load_all_notes
 
 _FORMAT_OVERINDEX_RATIO = 0.50
@@ -51,9 +52,6 @@ class DiagnosisReport:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _norm_handle(handle: str) -> str:
-    return handle if handle.startswith("@") else f"@{handle}"
 
 
 def _age_days(ts: str | None) -> float:

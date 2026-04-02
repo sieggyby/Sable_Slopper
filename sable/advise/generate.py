@@ -14,14 +14,11 @@ from sable.platform.cost import log_cost, check_budget
 from sable.advise.stage1 import assemble_input, render_summary
 from sable.advise.stage2 import synthesize, build_system_prompt
 from sable.advise.template_fallback import render_fallback
+from sable.shared.handles import normalize_handle as _normalize_handle
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _normalize_handle(handle: str) -> str:
-    return handle.lstrip("@").lower()
 
 
 def _get_current_iso_week() -> str:

@@ -15,6 +15,7 @@ from typing import Optional
 import logging
 
 from sable.pulse.meta.fingerprint import classify_format
+from sable.shared.handles import ensure_handle_prefix as _norm_handle, strip_handle
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,6 @@ class AccountFormatReport:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _norm_handle(handle: str) -> str:
-    """Ensure handle has @ prefix (matches pulse.db contract)."""
-    return handle if handle.startswith("@") else f"@{handle}"
-
 
 def _engagement_score(row: dict) -> float:
     """Compute weighted engagement from a snapshot row (or zero if no snapshot)."""
@@ -336,7 +332,7 @@ def render_account_report(report: AccountFormatReport) -> str:
     """Return a formatted console string for the account report."""
     org_label = f", org: {report.org}" if report.org else ""
     header = (
-        f"@{report.handle.lstrip('@')} — Format Lift "
+        f"@{strip_handle(report.handle)} — Format Lift "
         f"(last {report.days}d, {report.total_posts} posts{org_label})\n"
     )
     lines: list[str] = [header]

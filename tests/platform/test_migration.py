@@ -6,7 +6,7 @@ from sable.platform.db import ensure_schema
 
 def test_schema_version_is_current(conn):
     row = conn.execute("SELECT version FROM schema_version").fetchone()
-    assert row["version"] == 13  # SablePlatform owns migrations; current version is 13
+    assert row["version"] == 14  # SablePlatform owns migrations; current version is 14
 
 
 def test_all_tables_exist(conn):
@@ -27,7 +27,7 @@ def test_ensure_schema_idempotent(conn):
     """Calling ensure_schema again on a migrated DB must not error or change version."""
     ensure_schema(conn)
     row = conn.execute("SELECT version FROM schema_version").fetchone()
-    assert row["version"] == 13  # SablePlatform owns migrations; current version is 13
+    assert row["version"] == 14  # SablePlatform owns migrations; current version is 14
 
 
 def test_ensure_schema_on_fresh_db():
@@ -36,7 +36,7 @@ def test_ensure_schema_on_fresh_db():
     c.row_factory = sqlite3.Row
     ensure_schema(c)
     row = c.execute("SELECT version FROM schema_version").fetchone()
-    assert row["version"] == 13  # SablePlatform owns migrations; current version is 13
+    assert row["version"] == 14  # SablePlatform owns migrations; current version is 14
     c.close()
 
 

@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 import os
 
+from sable.shared.handles import strip_handle
+
 _ORG_SLUG = re.compile(r'^[a-zA-Z0-9_-]+$')
 
 
@@ -27,10 +29,7 @@ def profiles_dir() -> Path:
 
 
 def profile_dir(handle: str) -> Path:
-    # TODO(codex): consolidate handle normalization into sable/shared/utils.py
-    # Pattern: strip leading @, lowercase. Currently duplicated 20+ sites inline.
-    # Implement as normalize_handle(h: str) -> str. Low risk, high cosmetic value.
-    handle = handle.lstrip("@")
+    handle = strip_handle(handle)
     d = profiles_dir() / f"@{handle}"
     return d
 
@@ -66,7 +65,7 @@ def workspace() -> Path:
 
 
 def account_output_dir(handle: str) -> Path:
-    handle = handle.lstrip("@")
+    handle = strip_handle(handle)
     d = workspace() / "output" / f"@{handle}"
     d.mkdir(parents=True, exist_ok=True)
     return d

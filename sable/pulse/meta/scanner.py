@@ -9,6 +9,7 @@ from typing import Optional
 import httpx
 
 from sable import config as cfg
+from sable.shared.handles import strip_handle, normalize_handle
 from sable.shared.retry import retry_with_backoff_async
 
 _BASE_URL = "https://api.socialdata.tools"
@@ -56,7 +57,7 @@ def _normalise_tweet(raw: dict, author_handle: str) -> dict:
     is_quote = bool(raw.get("is_quote_status", False))
     in_reply = bool(raw.get("in_reply_to_screen_name"))
     # Treat as thread if replying to same user
-    is_thread = in_reply and raw.get("in_reply_to_screen_name", "").lower() == author_handle.lstrip("@").lower()
+    is_thread = in_reply and raw.get("in_reply_to_screen_name", "").lower() == normalize_handle(author_handle)
 
     return {
         "tweet_id": tweet_id,
@@ -106,7 +107,7 @@ async def _fetch_author_tweets_async(
     lookback_hours: int = 48,
 ) -> list[dict]:
     """Fetch tweets for one author, optionally since a last tweet ID."""
-    handle_clean = handle.lstrip("@")
+    handle_clean = strip_handle(handle)
     params: dict = {"type": "tweets", "limit": min(limit, 100)}
 
     async with httpx.AsyncClient(headers=_get_headers(), timeout=30) as client:
@@ -315,7 +316,7 @@ class Scanner:
         if not aborted and self.deep:
             # Build query from top topics (placeholder: use common crypto terms)
             queries = ["crypto", "defi", "blockchain"]
-            watchlist_handles = {e.get("handle", "").lstrip("@").lower() for e in self.watchlist}
+            watchlist_handles = {normalize_handle(e.get("handle", "")) for e in self.watchlist}
 
             for query in queries[:3]:  # why: cap at 3 queries to limit deep-mode API spend
                 try:

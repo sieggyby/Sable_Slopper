@@ -16,6 +16,7 @@ from sable.platform.errors import (
     AMBIGUOUS_INPUT, AWAITING_OPERATOR_INPUT, redact_error,
 )
 from sable.platform.jobs import create_job, add_step, start_step, complete_step, fail_step
+from sable.shared.handles import strip_handle, normalize_handle
 
 
 def _now_iso() -> str:
@@ -126,7 +127,7 @@ def _step_seed_roster(
         return
 
     # Normalize
-    handle = twitter_handle.lstrip("@")
+    handle = strip_handle(twitter_handle)
 
     roster = load_roster()
     existing = roster.get(handle)
@@ -168,7 +169,7 @@ def _step_seed_watchlist(
 
     # Gather candidate handles from checkpoint
     candidates = []
-    team_handles = set(h.lstrip("@").lower() for h in (prospect.get("team_handles") or []))
+    team_handles = set(normalize_handle(h) for h in (prospect.get("team_handles") or []))
 
     if checkpoint_path:
         cp = Path(checkpoint_path)
@@ -188,13 +189,13 @@ def _step_seed_watchlist(
                                 for item in data:
                                     h = item.get("handle", "") if isinstance(item, dict) else str(item)
                                     if h:
-                                        candidates.append({"handle": h.lstrip("@"), "role": "subsquad"})
+                                        candidates.append({"handle": strip_handle(h), "role": "subsquad"})
                             elif fname == "diagnostic.json":
                                 for role, key in [("bridge_node", "bridge_nodes"), ("cultist_candidate", "cultist_candidates")]:
                                     for item in data.get(key, []):
                                         h = item.get("handle", "") if isinstance(item, dict) else str(item)
                                         if h:
-                                            candidates.append({"handle": h.lstrip("@"), "role": role})
+                                            candidates.append({"handle": strip_handle(h), "role": role})
                         except Exception:
                             pass
                         break
@@ -216,7 +217,7 @@ def _step_seed_watchlist(
                     for item in result.get(key, []):
                         h = item.get("handle", "") if isinstance(item, dict) else str(item)
                         if h:
-                            candidates.append({"handle": h.lstrip("@"), "role": role})
+                            candidates.append({"handle": strip_handle(h), "role": role})
             except Exception:
                 pass
 
@@ -240,12 +241,12 @@ def _step_seed_watchlist(
         if scope == "global":
             for entry in wl_data.get("global", []):
                 if isinstance(entry, dict):
-                    existing_handles.add(entry.get("handle", "").lstrip("@").lower())
+                    existing_handles.add(normalize_handle(entry.get("handle", "")))
         else:
             for org_entries in wl_data.get("orgs", {}).values():
                 for entry in (org_entries or []):
                     if isinstance(entry, dict):
-                        existing_handles.add(entry.get("handle", "").lstrip("@").lower())
+                        existing_handles.add(normalize_handle(entry.get("handle", "")))
 
     # Filter
     to_add = []

@@ -8,6 +8,8 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from sable.shared.handles import strip_handle
+
 console = Console()
 
 
@@ -135,7 +137,7 @@ def scene_generate(account, topic, dry_run):
         console.print("[yellow]--dry-run: skipping render[/yellow]")
         return
 
-    handle = account.lstrip("@")
+    handle = strip_handle(account)
     timestamp = int(time.time())
     out_path = scene_output_path(handle, f"wojak_scene_{timestamp}.png")
 
@@ -168,7 +170,7 @@ def scene_render(spec_file, account, output):
         console.print("[red]Invalid spec file: must contain 'layers' key.[/red]")
         raise SystemExit(1)
 
-    handle = account.lstrip("@")
+    handle = strip_handle(account)
     if output:
         out_path = Path(output)
     else:
