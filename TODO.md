@@ -27,6 +27,290 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 
 ---
 
+## Audit Remediation Queue (2026-04-01)
+
+Maintainer audit findings that are not yet fixed in code. These are written so a fresh
+agent can land the full hardening pass without re-auditing first.
+
+### AUDIT-1 · Secret handling + CLI error redaction hardening
+
+**Risk level:** Tier 1 — credential exposure.
+
+**Why this is a real bug:**
+- `sable config set` writes raw secret values into `~/.sable/config.yaml`
+- `sable config show` exposes the first 6 characters of any key/token value
+- several top-level CLI handlers print raw exception text, so upstream auth failures can
+  surface bearer tokens / API key assignments directly to the operator
+
+**Relevant files:**
+- `sable/cli.py`
+- `sable/config.py`
+- `sable/platform/errors.py`
+- `sable/commands/advise.py`
+- `sable/commands/write.py`
+- `sable/commands/score.py`
+- `sable/commands/playbook.py`
+- `sable/commands/tracking.py`
+- `sable/pulse/cli.py`
+- `sable/commands/calendar.py`
+- `sable/commands/diagnose.py`
+- `sable/face/cli.py`
+- any other top-level CLI command that still prints `Error: {e}` directly
+
+**Required behavior change:**
+- Treat API keys/tokens as env-only at the CLI layer. Do not encourage persistence of
+  raw secrets via `sable config set`.
+- `sable config show` must never reveal any secret substring. Show `(set)` / `(not set)`
+  or equivalent, not a prefix.
+- Generic exception output shown to users must pass through `redact_error(...)` before
+  printing.
+- Preserve the existing helpful `SableError(code, message)` path for user-facing errors.
+
+**Implementation notes:**
+- `config show` currently masks by prefix only; that is insufficient.
+- `require_key()` can still read env first and then config for backwards compatibility,
+  but the CLI should stop normalizing “store secrets in config.yaml” as the default path.
+- Keep the change small: harden output and secret-setting behavior without redesigning
+  the whole config system.
+
+**Acceptance criteria:**
+- No CLI command prints raw Anthropic / Replicate / SocialData / ElevenLabs secrets.
+- No CLI command prints raw bearer tokens.
+- `sable config show` does not reveal any secret prefix.
+- A failing upstream request with an auth-bearing message is safe to display.
+
+**Exact tests to add:**
+- `tests/test_cli_config.py`
+  - `config show` never reveals any substring of `anthropic_api_key`, `replicate_api_key`,
+    or `socialdata_api_key`
+  - secret-looking keys render as `(set)` or equivalent opaque marker
+- `tests/commands/test_error_redaction.py`
+  - a generic exception containing `ANTHROPIC_API_KEY=...` is redacted in CLI output
+  - a generic exception containing `Authorization: Bearer ...` is redacted in CLI output
+  - cover at least one rich-console command path and one click-echo command path
+
+### AUDIT-2 · SocialData response validation before persistence
+
+**Risk level:** Tier 1 — silent data corruption / misleading outputs.
+
+**Why this is a real bug:**
+- `sable/pulse/meta/scanner.py::_normalise_tweet()` currently trusts malformed
+  SocialData payloads and converts missing engagement fields into zero-valued tweets
+- those rows are then persisted normally by `sable/pulse/meta/db.py::upsert_tweet()`
+- a provider shape drift can silently poison baselines, trends, digest inputs, and
+  downstream Claude analysis
+
+**Relevant files:**
+- `sable/pulse/meta/scanner.py`
+- `sable/pulse/meta/db.py`
+- maybe `sable/pulse/meta/fingerprint.py` and `sable/pulse/meta/normalize.py` if a small
+  validation boundary type/helper is cleaner
+
+**Required behavior change:**
+- Validate required tweet fields before writing to `meta.db`
+- if a tweet is malformed, skip it or mark it explicitly as invalid/degraded; do not
+  silently coerce it into a normal zero-engagement record
+- preserve scan completion when only some tweets are malformed
+- surface the problem with a warning so operators can tell the upstream shape changed
+
+**Implementation notes:**
+- Keep this at the scanner boundary; do not spread field checks across downstream stages
+- minimum useful validation: non-empty tweet id, parseable/postable timestamp when
+  required for recency filtering, and sane numeric engagement fields
+- avoid broad schema frameworks or new dependencies; a local validator/helper is enough
+
+**Acceptance criteria:**
+- malformed API payloads do not enter `scanned_tweets` as normal rows
+- well-formed tweets in the same scan still process successfully
+- operator gets a warning or count of skipped malformed rows
+
+**Exact tests to add:**
+- `tests/pulse/meta/test_scanner_validation.py`
+  - malformed tweet missing id is skipped
+  - malformed engagement payload does not become a persisted zero-engagement row
+  - mixed batch with one bad tweet still saves the valid tweet(s)
+  - warning path is exercised
+
+### AUDIT-3 · Thin-sample trustworthiness gate for `sable pulse recommend`
+
+**Risk level:** Tier 1 — confident but misleading client-facing output.
+
+**Why this is a real bug:**
+- `sable/pulse/recommender.py::generate_recommendations()` will produce full Claude
+  recommendations from any non-empty scored sample, even a single post
+- there is no minimum-sample threshold or uncertainty disclosure
+- this violates the repo’s “do not present thin data as strong signal” guidance
+
+**Relevant files:**
+- `sable/pulse/recommender.py`
+- `sable/pulse/cli.py`
+- possibly `docs/COMMANDS.md` if CLI output semantics need documenting
+
+**Required behavior change:**
+- introduce a minimum-sample gate before Claude recommendations are generated
+- when sample size is too small, return a truthful insufficiency result instead of
+  pretending the tool has strong guidance
+- the insufficiency result should explain what to do next, e.g. track more posts first
+- if you still show any guidance on thin samples, it must be labeled as low-confidence
+
+**Implementation notes:**
+- keep the contract similar: return a dict with `summary`, `recommendations`,
+  `content_ideas`, and `avoid`, but make the message explicitly low-confidence or
+  insufficient-data
+- choose a simple threshold and encode it in tests
+
+**Acceptance criteria:**
+- one-post or very small samples do not produce normal-strength recommendation payloads
+- larger samples still use the current Claude flow
+- CLI output remains readable in both cases
+
+**Exact tests to add:**
+- extend `tests/pulse/test_recommender.py`
+  - one-post sample returns insufficiency / low-confidence summary
+  - thin-sample path does not call Claude
+  - sample above threshold still calls Claude once and preserves current behavior
+
+### AUDIT-4 · Small-vault search fallback parity
+
+**Risk level:** Tier 1 — avoidable operator-facing failure in a core workflow.
+
+**Why this is a real bug:**
+- `sable/vault/search.py::search_vault()` only falls back to keyword ranking when the
+  candidate set is `> 50`
+- for `<= 50` candidates it calls Claude directly and lets failures escape
+- `sable/vault/suggest.py` depends on `search_vault()`, so reply suggestions inherit the
+  same fragility on smaller vaults
+
+**Relevant files:**
+- `sable/vault/search.py`
+- `sable/vault/suggest.py`
+- existing tests in `tests/vault/test_search.py`
+- possibly `tests/vault/test_suggest.py`
+
+**Required behavior change:**
+- Claude ranking failure should degrade to deterministic keyword results regardless of
+  candidate count
+- preserve the current `> 50` prescore behavior, but give the `<= 50` branch the same
+  resilience contract
+- keep `vault suggest` functional when ranking fails
+
+**Implementation notes:**
+- do not rewrite search quality logic
+- the smallest safe patch is likely to route both branches through one common fallback path
+
+**Acceptance criteria:**
+- `search_vault()` never hard-fails just because Claude ranking is unavailable
+- fallback results are still bounded by `config.max_suggestions`
+- `vault suggest` returns zero or degraded suggestions cleanly rather than crashing
+
+**Exact tests to add:**
+- extend `tests/vault/test_search.py`
+  - `<= 50` candidates + Claude failure returns keyword `SearchResult`s instead of raising
+  - `> 50` branch still behaves as before
+- optionally extend `tests/vault/test_suggest.py`
+  - reply suggestion flow survives a ranking failure upstream
+
+### AUDIT-5 · Org-scoped Claude budget enforcement gaps
+
+**Risk level:** Tier 1/Tier 2 — burns money and breaks the platform contract.
+
+**Why this is a real bug:**
+- the shared Claude wrapper already enforces budget + cost logging when `org_id` is
+  passed
+- several org-aware features still call Claude without `org_id`, so weekly caps and
+  `cost_events` are bypassed
+- the most concrete bug is in watchlist digest: it tries to resolve orgs using
+  `SELECT id FROM orgs WHERE slug = ?`, but the actual schema stores `org_id` and has no
+  `id` or `slug` columns
+
+**Relevant files:**
+- `sable/shared/api.py`
+- `sable/pulse/meta/digest.py`
+- `sable/pulse/meta/cli.py`
+- `sable/pulse/recommender.py`
+- `sable/write/scorer.py`
+- `sable/vault/search.py`
+- `sable/vault/suggest.py`
+- schema reference: `sable/db/migrations/001_initial.sql`
+
+**Required behavior change:**
+- fix digest org lookup to the real schema (`org_id`)
+- ensure digest Claude calls are actually org-scoped when an org is known
+- cap or otherwise bound `sable pulse meta digest --top` so a user cannot fan out an
+  unbounded number of per-post Claude calls on anatomy cache misses
+- thread `org_id` through the remaining org-aware Claude callers where org context is
+  already available
+
+**Likely call sites to harden:**
+- `pulse/meta/digest.py::_analyze_post_for_digest()`
+- `pulse/recommender.py::generate_recommendations()` using `account.org`
+- `write/scorer.py::get_hook_patterns()` and `score_draft()` using resolved org
+- `vault/search.py::claude_rank()` and `vault/suggest.py::_draft_reply_texts()` using
+  the `org` argument that is already in the function signature
+
+**Implementation notes:**
+- do not change truly non-org generation flows that are intentionally annotated
+  `# budget-exempt`
+- the target is org-aware flows only
+- keep this centralized: prefer passing `org_id` into existing `call_claude_json(...)`
+  calls rather than building bespoke logging
+
+**Acceptance criteria:**
+- org-aware recommendation/search/scoring/digest flows log spend through the shared wrapper
+- digest no longer silently loses org context due to bad SQL
+- `meta digest --top` has a sane ceiling or other explicit bound
+
+**Exact tests to add:**
+- extend `tests/pulse/meta/test_digest.py`
+  - digest resolves org via real schema and passes non-`None` `org_id` to `call_claude_json`
+  - large `--top` input is capped/bounded
+- extend `tests/pulse/test_recommender.py`
+  - recommender passes `account.org` into `call_claude_json`
+- extend `tests/write/test_scorer.py`
+  - hook-pattern generation and draft scoring pass `org_id`
+- add/extend vault tests
+  - `search_vault()` passes `org_id`
+  - reply-draft generation passes `org_id`
+
+### AUDIT-6 · Follow-up maintainability cleanup after the fixes above
+
+**Risk level:** Tier 2 — hidden coupling.
+
+**Why this matters:**
+- budget enforcement currently depends on each call site remembering to pass `org_id`
+- this is the hidden coupling behind the repeated misses above
+
+**Goal:**
+- after landing AUDIT-5, do a light cleanup in touched files so the org-aware Claude
+  contract is obvious and hard to forget
+- avoid a rewrite; just reduce repetition and ambiguity where the patch already touches code
+
+**Acceptable scope:**
+- helper variables like `resolved_org_id`
+- comments explaining why a path is intentionally `budget-exempt`
+- small local helper functions in touched modules only
+
+**Do not do:**
+- broad abstraction work across untouched modules
+- large interface redesigns
+
+### Validation for the full audit-remediation batch
+
+Run after landing any of AUDIT-1 through AUDIT-5:
+
+```bash
+./.venv/bin/python -m pytest -q
+./.venv/bin/ruff check .
+./.venv/bin/mypy sable
+```
+
+Current known-good baseline before fixes:
+- `./.venv/bin/python -m pytest -q` → `578 passed`
+- `./.venv/bin/ruff check .` → 0
+- `./.venv/bin/mypy sable` → 0
+
+---
+
 ## FEATURE-3 (`sable pulse account`) — Remaining Items
 
 - **`_classify_post` thread-detection gap** (known V1 limitation): `sable_content_type='text'`
@@ -107,12 +391,384 @@ panel-width of pan room in each direction.
 
 ---
 
+## Community Intelligence Features
+
+Sourced from a multi-agent feature proposal competition (2026-04-01). 15 proposals from
+5 PM perspectives, adversarial QA review, 2 revision rounds. 13 proposals survived QA;
+consolidated below into 7 features by merging overlapping proposals. Ranked by weighted
+evaluation (client revenue 25%, operator leverage 20%, strategic differentiation 20%,
+feasibility 15%, community understanding 12%, cross-tool synergy 8%).
+
+### FEATURE-10 · Community Lexicon (`sable lexicon`)
+
+**Consolidates:** Client PM Lexicon Tracker + Operator PM `sable lexicon` + Community PM
+Vernacular Drift Detector. Three proposals solving the same problem — "what language does
+this community actually use?" — merged into the Operator PM's tightly-scoped design with
+the Client PM's LSR formula and minimum-data thresholds.
+
+**Problem:** `sable write` generates content with no awareness of community-specific
+language. Operators catch voice mismatches manually. `topics.py` detects trending terms
+but not community-exclusive vocabulary.
+
+**What it does:**
+
+1. `sable lexicon scan --org <org>` reads `meta.db.scanned_tweets` using existing
+   `extract_terms()` / `extract_repeated_ngrams()` from `topics.py`. Applies an
+   **exclusivity filter**: term must appear in ≥2 tweets AND ≤25% of watchlist authors
+   (filters generic crypto language).
+2. One optional batched Claude call (`call_type='lexicon_interpret'`) classifies top 25
+   terms as `insider_slang | project_term | topic_reference | noise` with one-line glosses.
+   `check_budget()` before the call. `--no-interpret` skips Claude entirely.
+3. Computes **Lexical Spread Rate** per term:
+   `LSR = (unique_authors / total_tracked_authors) * log2(1 + mention_count)`.
+   LSR is a sort key for surfacing candidates, not a client-facing health metric.
+4. Writes report to vault as `{vault_dir(org)}/lexicon_report.md`.
+
+**CLI surface:**
+```
+sable lexicon scan --org <org> [--days 14] [--top 20] [--no-interpret] [--dry-run]
+sable lexicon list --org <org>
+sable lexicon add --org <org> --term "<term>" --gloss "<gloss>"
+sable lexicon remove --org <org> <term>
+```
+
+`sable write` gains `--lexicon` flag (opt-in, v1). When set, loads lexicon report and
+injects community vocabulary into the generation prompt. Auto-injection deferred to v2.
+
+**Minimum-data thresholds (report refused below these):**
+- ≥10 unique authors in corpus
+- ≥50 tracked tweets in scan window
+- ≥3 appearances per term
+- ≥2 unique authors per term
+
+**Persistence:** `meta.db.lexicon_terms` table is the single source of truth. The vault
+report (`lexicon_report.md`) is a rendered snapshot — read-only output, not an input.
+`sable lexicon add/remove` writes to `meta.db`; `sable lexicon scan` regenerates the
+vault report from `meta.db` state. `sable write --lexicon` reads from `meta.db`, not from
+the vault file.
+
+**`--dry-run` behavior:** Prints corpus stats (unique authors, tweet count, whether
+minimum thresholds are met) and estimated Claude call count (0 or 1). Makes no API calls
+and writes nothing.
+
+**Where it lives:** `sable/lexicon/` — `scanner.py`, `cli.py`, `writer.py`. New
+`lexicon_terms` table in `meta.db` (`_SCHEMA` string). Tests in `tests/lexicon/`.
+
+**Cost:** One Claude call per scan (~$0.02 at Sonnet rates) or zero with `--no-interpret`.
+
+**What is deferred from v1:**
+- Dialect drift detection (requires subsquad identity data from CultGrader)
+- Reply-based vocabulary sampling (requires SocialData reply endpoint validation — build
+  gate: validate `GET /twitter/search?query=to:{handle}` before implementing)
+- Vernacular lint pass on `sable write` (`--lint-vernacular` flag, deferred to v2)
+
+**When to build:** After AUDIT remediation queue is clear. High value for new client
+onboarding — lexicon is the first thing a new operator needs to understand about a
+community.
+
+---
+
+### FEATURE-11 · Watchlist Amplifiers + Bridge Node Signals
+
+**Consolidates:** Operator PM `--amplifiers` (rank 1 overall) + Cross-repo PM Bridge Node
+Amplification + Academic PM Bridge Score (phased prerequisite). Three proposals answering
+"who matters in this community?" merged into a single feature with two deliverables and
+one deferred phase.
+
+#### Part A: `sable pulse watchlist --amplifiers`
+
+**Problem:** Watchlist accounts are a flat list. Operators have no ranked view of who is
+actually spreading content vs. passively consuming.
+
+**What it does:** Pure signal math on existing `meta.db.scanned_tweets`. No Claude calls,
+no new API calls.
+
+**Three signals (computed over configurable window, default 30 days):**
+
+1. **Retweet velocity (RT_v):** `sum(reposts) / days_active` where `days_active` = count
+   of distinct calendar days the author posted.
+2. **Reply-pull rate (RPR):** `sum(replies) / (likes + reposts + replies + quotes + bookmarks)`.
+   Measures conversation-triggering relative to reach.
+3. **Quote-tweet rate (QTR):** `sum(quotes) / total_tweets_in_window`. Highest-value
+   amplification signal.
+
+**Composite:** `amp_score = 0.40 * percentile(RT_v) + 0.35 * percentile(RPR) + 0.25 * percentile(QTR)`.
+Percentiles within the org's watchlist. Weights configurable in
+`~/.sable/config.yaml: pulse_meta.amplifier_weights`.
+
+**Output:** Rich terminal table + `--json` flag for machine consumption. Function
+`compute_amplifiers(org, window_days, conn)` in `sable/pulse/meta/amplifiers.py` is
+importable by `sable advise` stage1 assembly.
+
+**CLI:** `sable pulse watchlist --amplifiers --org <org> [--window-days 30] [--top 10] [--json]`
+
+**Where it lives:** New `sable/pulse/meta/amplifiers.py`. CLI flag in
+`sable/pulse/meta/cli.py`. No schema changes.
+
+#### Part B: Bridge Node Activity in `sable advise`
+
+**Problem:** CultGrader identifies bridge nodes and writes `bridge_node` tags to
+`sable.db` via `platform_sync.py`. Slopper's `sable advise` ignores this data after
+onboarding.
+
+**What it does:** When `--bridge-aware` flag is passed to `sable advise`, queries
+`sable.db` for `bridge_node` tagged entities, then queries `meta.db.scanned_tweets` for
+their recent tweet performance (application-level join — no cross-DB SQL). Injects a
+labeled prose section into the assembled input. Claude interprets the signal — no magic
+multiplier on baselines.
+
+**Key constraints:**
+- `baselines.py` is NOT modified. Bridge node data is a separate advise section.
+- Default off. Operator opts in per run with `--bridge-aware`.
+- If org has zero bridge node tags, section is skipped entirely.
+- Estimated token cost: ~56 tokens worst case (5 bridge nodes).
+
+**Where it lives:** Helper in `sable/advise/stage1.py`, flag in `sable/commands/advise.py`.
+
+#### Deferred: Bridge Score Graph (Phase 0 + Phase 1)
+
+**Prerequisite for future graph analysis.** Not built until amplifiers + bridge node
+section prove value with operators.
+
+- **Phase 0:** Add `quoted_author_handle TEXT` column to `scanned_tweets` in `meta.db`
+  `_SCHEMA` string. Update scanner to extract from SocialData `quoted_status.user.screen_name`.
+  Schema version bump. Ships as standalone PR.
+- **Phase 1:** Build directed quote-tweet graph, compute in-degree + betweenness centrality.
+  `sable bridge-score --org <org>` ranked table. Requires networkx (justify before adding).
+  Minimum edge threshold: <20 edges → empty result with `insufficient_data` flag.
+- **Phase 2 (separate proposal):** Topic clustering overlay on the graph. Out of scope.
+
+**When to build Part A:** First feature to build after AUDIT queue — smallest scope,
+highest impact, zero new dependencies.
+
+---
+
+### FEATURE-12 · Voice Check (`sable write --voice-check`)
+
+**Problem:** `sable write` generates variants but the existing `voice_fit` score in
+`score_draft()` uses only 200 characters of `tone.md`. Operators catch voice drift
+manually. The vault contains every post ever written for an account — an untapped voice
+corpus.
+
+**What it does:** Enhances the existing `score_draft()` function in `sable/write/scorer.py`
+with an optional `voice_corpus: str | None` parameter. When `--voice-check` is active,
+assembles a richer corpus from `tone.md` (full) + `notes.md` (full) + recent vault notes
+filtered by `posted_by`, then passes it into the existing scorer. No parallel scoring path.
+
+**Voice corpus caps (bound prompt cost):**
+- Max 10 vault notes
+- Max 500 tokens per note
+- Max 4,000 tokens total corpus
+- All configurable in `~/.sable/config.yaml: write.voice_check.*`
+
+**Cost:** ~$0.07/run (3 variants) or ~$0.12 (5 variants) at Sonnet rates. `check_budget()`
+called before scoring loop. `--voice-check` implies `--score`.
+
+**Dependency:** Requires AUDIT-5 (org-scoped budget enforcement) to be landed first so
+`check_budget()` actually gates spend when `org_id` is passed through the write path.
+
+**Where it lives:** Modified `sable/write/scorer.py` (add `voice_corpus` param),
+`sable/write/generator.py` (corpus assembly helper), `sable/commands/write.py` (flag).
+
+**When to build:** After AUDIT-5 and FEATURE-10. Small scope, immediate daily value.
+
+---
+
+### FEATURE-13 · Community Language Injection (`sable advise --community-voice`)
+
+**Problem:** CultGrader produces `emergent_cultural_terms`, `mantra_candidates`, and
+`language_arc_phase` per community. These fields are NOT currently in `sable.db` — they
+live in CultGrader's `DiagnosticAnalysis` and are written to checkpoint JSON files. Slopper
+has no access to them.
+
+**Prerequisite (cross-repo):**
+
+1. **SablePlatform migration (next sequential number after current):** Add
+   `language_arc_phase TEXT`, `emergent_cultural_terms_json TEXT`,
+   `mantra_candidates_json TEXT` to `diagnostic_runs`. Migration number depends on
+   SablePlatform's current schema version at implementation time — check
+   `sable_platform/db/migrations/` for the latest file and increment.
+2. **CultGrader `platform_sync.py`:** Extend `_upsert_diagnostic_run()` INSERT/UPDATE
+   to populate the three new columns from `DiagnosticAnalysis`.
+
+**What it does (Slopper side):** `stage1.py::assemble_input()` queries `diagnostic_runs`
+for the latest completed run with non-null language fields. Injects a `## Community
+Language Signal` section into the advise assembled input.
+
+**Key constraints:**
+- 14-day freshness gate: if diagnostic data > 14 days old, log warning, inject nothing.
+- Null guard at every layer: empty fields → skip injection entirely. No empty structured
+  blocks reach Claude.
+- Token cost: ~34-60 tokens worst case. Well under 500-token threshold.
+- Scoped to `sable advise` only. Not wired into `sable write` in v1.
+
+**Where it lives:** `sable/advise/stage1.py` (read + render). Cross-repo changes in
+SablePlatform and CultGrader.
+
+**When to build:** After a CultGrader diagnostic has run for at least one active client
+(TIG Foundation). Prerequisite migration must land in SablePlatform first.
+
+---
+
+### FEATURE-14 · Narrative Velocity (`sable narrative`)
+
+**Problem:** `sable calendar` plans what to post. `sable pulse meta` measures what formats
+work. Neither answers: "is our narrative arc actually landing with the community?"
+
+**What it does:** Operator defines narrative beats as keyword lists in YAML. The tool
+scores how fast those keywords spread through watchlist tweets. Zero Claude calls. Pure
+deterministic scoring on existing `meta.db` data.
+
+**Beat definition:** `~/.sable/{org}/narrative_beats.yaml`:
+```yaml
+beats:
+  - id: zk_mainnet
+    label: "zkEVM mainnet launch"
+    keywords: ["zk mainnet", "zkEVM", "mainnet live"]
+    start_date: "2026-03-01"
+    target_days: 14
+```
+
+**Uptake Score per beat:**
+- `uptake_score = unique_authors_mentioning / total_tracked_authors`
+- `uptake_velocity = unique_authors_mentioning / days_since_start`
+
+Keywords matched case-insensitively as substrings. Same minimum-data thresholds as
+FEATURE-10 (10 authors, 50 tweets).
+
+**CLI:**
+```
+sable narrative score --org <org> [--beats <path>] [--days 14] [--output <path>]
+sable narrative beats edit --org <org>   # opens in $EDITOR
+```
+
+**Where it lives:** `sable/narrative/` — `tracker.py`, `cli.py`, `models.py`. Imports
+`extract_terms()` from `topics.py`. Tests in `tests/narrative/`.
+
+**Cost:** Zero. No Claude calls, no API calls.
+
+**When to build:** After FEATURE-10 (shares minimum-data threshold patterns). Good
+candidate for a new client onboarding where the operator has a clear narrative strategy.
+
+---
+
+### FEATURE-15 · Style Delta (`sable style-delta`)
+
+**Problem:** Operators know what formats perform well (from pulse meta) but not how their
+managed account's structural posting style differs from top performers in the niche. No
+quantitative gap analysis exists.
+
+**What it does:** Computes a linguistic fingerprint for the managed account (from
+`pulse.db.posts`) and the top-quintile watchlist accounts (from `meta.db.scanned_tweets`).
+Surfaces the gap as a structured report.
+
+**Fingerprint features:**
+- Format distribution (coarse type → share of post count)
+- Median thread length
+- Media rate (share of posts with images/video)
+- Link rate
+- Sample size
+
+**Schema note:** `pulse.db.posts` uses `sable_content_type` (coarse: clip/meme/faceswap/
+text/unknown), not `format_bucket`. `meta.db.scanned_tweets` uses the finer-grained
+`format_bucket` from `normalize.py`. To make the comparison meaningful, **both sides must
+use the same taxonomy.** Use `sable_content_type`-level coarse types for both: map
+`scanned_tweets.format_bucket` values back to coarse categories via an explicit mapping
+function (e.g. `standalone_text|thread|quote_commentary → text`, `short_clip|long_video →
+clip`). The delta is only useful when comparing equivalent categories.
+
+**Top-quintile definition:** Rank all `scanned_tweets` for the org by `total_lift` DESC,
+take top 20% via `NTILE(5)`. Compute distributions across that filtered set. This is a
+**filtered mean**, not a cluster centroid.
+
+**Delta computation:** `format_gap[bucket] = watchlist_share - managed_share` per format
+bucket. Positive gap = watchlist over-indexes on that bucket relative to managed account.
+
+**Minimum sample guard:** If either side has <10 posts, refuse to render report.
+
+**CLI:** `sable style-delta --handle <handle> --org <org> [--output <path>]`
+
+**Where it lives:** `sable/style/` — `fingerprint.py`, `delta.py`, `cli.py`, `report.py`.
+Tests in `tests/style/`.
+
+**Cost:** Zero. No Claude calls, no API calls. Recomputed on every invocation (no cache
+in v1).
+
+**When to build:** After FEATURE-11 (both read from same meta.db data; style-delta
+benefits from amplifier context). Useful as a cold-start diagnostic when onboarding a new
+account.
+
+---
+
+### FEATURE-16 · Silence Gradient (`sable silence-gradient`)
+
+**Problem:** Community decay is currently only detectable after it happens. CHURN-1/CHURN-2
+(below) depend on Platform shipping a decay alerting pipeline. Silence Gradient detects
+pre-decay signals from data already in `meta.db`, unblocking churn intervention without
+waiting for Platform.
+
+**What it does:** Per-watchlist-author rolling 30-day cadence analysis. Three signals:
+
+1. **Volume drop (0.4 weight):**
+   `vol_drop = 1.0 - (posts_recent_half / max(posts_prior_half, 1))`, clamped [0, 1].
+2. **Engagement drop (0.35 weight):**
+   `eng_drop = 1.0 - (median_lift_recent / max(median_lift_prior, 0.001))`, clamped [0, 1].
+   Requires ≥5 rows per window half.
+3. **Format regression (0.25 weight):**
+   Shannon entropy of `format_bucket` distribution, normalized to [0, 1], inverted.
+   `fmt_reg = 1.0 - (entropy / log2(len(FORMAT_BUCKETS)))`. Requires ≥5 posts.
+
+**Combination:** Weighted sum with proportional redistribution when a signal is
+`insufficient_data`. All weights are module-level constants.
+
+**Minimum sample thresholds (non-negotiable for Tier 1 compliance):**
+- Author has <5 posts total → excluded entirely
+- Per-signal thresholds: <5 rows in either window half → signal marked `insufficient_data`
+- All three signals insufficient → author excluded from ranked output
+
+**Window semantics:** `--window 30` means "look back 30 days total." The algorithm splits
+this into two equal halves: last 15 days vs prior 15 days. Custom windows follow the same
+split: `--window 14` = 7d vs 7d. Odd values are floored: `--window 29` = 14d vs 14d
+(the oldest day is excluded). Minimum accepted window: 4 (2d vs 2d).
+
+**New table in `meta.db`:** `author_cadence` — one row per `(author_handle, org, computed_at)`.
+Columns: `posts_recent_half`, `posts_prior_half`, `median_lift_recent`, `median_lift_prior`,
+`format_entropy`, `vol_drop`, `eng_drop`, `fmt_reg`, `silence_gradient`, `insufficient_data`,
+`window_days` (records the actual window used so column names stay generic).
+
+**Retention:** Only the latest `computed_at` per `(author_handle, org)` is kept. Each
+write uses `INSERT OR REPLACE` on the unique index `(author_handle, org)` — no historical
+accumulation. If historical trends are needed later, add a separate time-series table.
+
+**CLI:**
+```
+sable silence-gradient --org <org> [--top 20] [--window 30] [--output <path>]
+sable silence-gradient --org <org> --include-insufficient  # show suppressed rows
+```
+
+**Relationship to CHURN:** Silence Gradient produces a `silence_gradient` score (not a
+"decay score"). It is derived entirely from `meta.db` watchlist data, not Platform's
+member engagement model. It can serve as an **alternative upstream data source** for
+CHURN-1 when Platform's decay alerting pipeline is not yet available.
+
+**Where it lives:** `sable/cadence/` — `signals.py`, `combine.py`, `store.py`, `cli.py`.
+Tests in `tests/cadence/`.
+
+**Cost:** Zero. No Claude calls, no API calls.
+
+**When to build:** After FEATURE-11 (uses same meta.db data patterns). Unblocks CHURN-1
+work without cross-repo dependency.
+
+---
+
 ## Churn Prediction Intervention Engine (Slopper Side)
 
-**Dependency:** Requires Cult Grader decay scoring (computes who is at risk) and Platform
-decay alerting (stores scores, triggers alerts) to be built first. Slopper does NOT
-compute or store decay scores — it receives at-risk member lists from Platform and
-generates actionable re-engagement strategies.
+**Dependency (updated):** Primary input path: Platform decay alerting pipeline (computes
+who is at risk). Alternative input path: FEATURE-16 Silence Gradient (`sable silence-gradient
+--org <org> --output at-risk.json`) can produce a compatible at-risk list from `meta.db`
+data, unblocking CHURN-1 before Platform ships decay alerting. Slopper still does not own
+decay scoring as a platform concept — Silence Gradient is a Slopper-internal early warning
+signal that happens to produce a compatible input format.
 
 ### CHURN-1 · Intervention playbook generation
 
@@ -195,8 +851,9 @@ Intervention context injected into the calendar prompt as a structured section.
   recent decay data
 - Org has no profile set up → warn and skip tone injection, proceed with generic output
 
-**When to build:** After Platform ships decay alerting and defines the at-risk member
-export format. CHURN-1 first, then CHURN-2 (CHURN-2 consumes CHURN-1's playbook output).
+**When to build:** After CHURN-1 ships. CHURN-2 consumes CHURN-1's playbook output.
+CHURN-1 can be fed by either Platform's decay alerting export or FEATURE-16 Silence
+Gradient output — CHURN-2 inherits whichever input path CHURN-1 uses.
 
 ---
 
