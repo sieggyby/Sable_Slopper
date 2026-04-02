@@ -51,10 +51,14 @@ agent can land the full hardening pass without re-auditing first.
 - `sable/commands/score.py`
 - `sable/commands/playbook.py`
 - `sable/commands/tracking.py`
+- `sable/commands/onboard.py`
 - `sable/pulse/cli.py`
 - `sable/commands/calendar.py`
 - `sable/commands/diagnose.py`
 - `sable/face/cli.py`
+- `sable/roster/cli.py`
+- `sable/wojak/cli.py`
+- `sable/character_explainer/cli.py`
 - any other top-level CLI command that still prints `Error: {e}` directly
 
 **Required behavior change:**
@@ -70,6 +74,9 @@ agent can land the full hardening pass without re-auditing first.
 - `config show` currently masks by prefix only; that is insufficient.
 - `require_key()` can still read env first and then config for backwards compatibility,
   but the CLI should stop normalizing “store secrets in config.yaml” as the default path.
+- Do not assume the explicit file list above is exhaustive. Before closing this item,
+  grep the repo for raw-exception CLI output patterns like `Error: {e}` and `[red]{e}[/red]`
+  in `sable/**/cli.py` and `sable/commands/*.py`.
 - Keep the change small: harden output and secret-setting behavior without redesigning
   the whole config system.
 
@@ -254,11 +261,15 @@ agent can land the full hardening pass without re-auditing first.
 - the target is org-aware flows only
 - keep this centralized: prefer passing `org_id` into existing `call_claude_json(...)`
   calls rather than building bespoke logging
+- `sable/shared/api.py` currently swallows `log_cost(...)` failures silently. That should
+  become a visible warning in logs; otherwise cost observability can still fail without
+  operators or maintainers noticing.
 
 **Acceptance criteria:**
 - org-aware recommendation/search/scoring/digest flows log spend through the shared wrapper
 - digest no longer silently loses org context due to bad SQL
 - `meta digest --top` has a sane ceiling or other explicit bound
+- a failed `log_cost(...)` attempt emits a warning rather than disappearing silently
 
 **Exact tests to add:**
 - extend `tests/pulse/meta/test_digest.py`
@@ -271,6 +282,9 @@ agent can land the full hardening pass without re-auditing first.
 - add/extend vault tests
   - `search_vault()` passes `org_id`
   - reply-draft generation passes `org_id`
+- add `tests/shared/test_api.py`
+  - if `log_cost(...)` raises inside the shared wrapper, the Claude call still succeeds
+    but a warning is logged
 
 ### AUDIT-6 · Follow-up maintainability cleanup after the fixes above
 
@@ -293,6 +307,52 @@ agent can land the full hardening pass without re-auditing first.
 **Do not do:**
 - broad abstraction work across untouched modules
 - large interface redesigns
+
+### AUDIT-7 · Remove silent degradation in operator-facing audit flows
+
+**Risk level:** Tier 2, with Tier 1 spillover when failures hide stale or untrustworthy output.
+
+**Why this is missing from the queue:**
+- several of the exact paths touched by AUDIT-4 and AUDIT-5 still use broad
+  `except Exception: pass` / silent fallback patterns
+- the repo convention already says broad exception handlers should log warnings, but the
+  current queue did not make that an explicit acceptance target
+- if these swallows remain, the repo can still “look healthy” while quietly skipping
+  reply drafts, cost logging, digest org resolution, or other degraded behavior
+
+**Relevant files:**
+- `sable/shared/api.py`
+- `sable/vault/suggest.py`
+- `sable/pulse/meta/digest.py`
+- any touched file in AUDIT-1 through AUDIT-5 that currently degrades silently instead of
+  logging a warning
+
+**Required behavior change:**
+- when an operator-facing path degrades but continues, emit `logger.warning(...)`
+  with enough context to debug the issue
+- keep the current resilient behavior where appropriate; this item is about visibility,
+  not turning every degradation into a hard crash
+- do not add noisy stack traces to normal user-facing terminal output; log the warning
+  and keep CLI output clean
+
+**Implementation notes:**
+- this is intentionally scoped to files already being touched by the audit-remediation
+  batch; do not go repo-wide and churn unrelated modules
+- especially important cases:
+  - `vault/suggest.py` account-context fallback and reply-draft generation failure
+  - `pulse/meta/digest.py` org lookup failure and per-post Claude analysis failure
+  - `shared/api.py` cost-log failure after a successful Claude call
+
+**Acceptance criteria:**
+- degraded reply suggestion / digest / cost-log paths are observable in logs
+- the CLI still returns usable output where graceful degradation is intended
+- no new silent `pass` blocks are introduced in touched files
+
+**Exact tests to add:**
+- extend or add tests covering warning emission for:
+  - reply-draft generation fallback in `vault/suggest.py`
+  - digest org-resolution or per-post analysis fallback in `pulse/meta/digest.py`
+  - shared wrapper `log_cost(...)` failure in `sable/shared/api.py`
 
 ### Validation for the full audit-remediation batch
 
@@ -393,18 +453,37 @@ panel-width of pan room in each direction.
 
 ## Community Intelligence Features
 
-Sourced from a multi-agent feature proposal competition (2026-04-01). 15 proposals from
-5 PM perspectives, adversarial QA review, 2 revision rounds. 13 proposals survived QA;
-consolidated below into 7 features by merging overlapping proposals. Ranked by weighted
-evaluation (client revenue 25%, operator leverage 20%, strategic differentiation 20%,
-feasibility 15%, community understanding 12%, cross-tool synergy 8%).
+Sourced from a multi-agent feature proposal competition (2026-04-01). See
+`docs/AUDIT_HISTORY.md` § "Community Intelligence Feature Competition" for full
+provenance (15 proposals, 5 agents, evaluation criteria, ranking, consolidation rationale).
+
+### Build order
+
+1. FEATURE-11 Part A (`--amplifiers`) — smallest scope, zero deps, highest impact
+2. FEATURE-10 (`sable lexicon`) — high onboarding value, unblocks FEATURE-14
+3. FEATURE-12 (`--voice-check`) — requires AUDIT-5 landed first
+4. FEATURE-14 (`sable narrative`) — shares threshold patterns with FEATURE-10
+5. FEATURE-15 (`sable style-delta`) — benefits from FEATURE-11 context
+6. FEATURE-16 (`sable silence-gradient`) — unblocks CHURN-1
+7. FEATURE-11 Part B (`--bridge-aware`) — requires CultGrader diagnostic data
+8. FEATURE-13 (`--community-voice`) — requires cross-repo migration
+
+### Documentation update checklist (per feature shipped)
+
+After each feature lands, update these docs before merging:
+
+- [ ] `docs/COMMANDS.md` — add new CLI commands/flags with examples
+- [ ] `docs/ARCHITECTURE.md` — add new module to tree + subsystem diagram
+- [ ] `docs/SCHEMA_INVENTORY.md` — add new tables/models/config keys
+- [ ] `README.md` — add to Modules table
+- [ ] `docs/CONFIG_REFERENCE.md` — add new config keys
+- [ ] `docs/IMPLEMENTATION_LOG.md` — append dated implementation record
+- [ ] `docs/AUDIT_HISTORY.md` — update validation history row
+- [ ] `CLAUDE.md` — update if feature adds new DB tables, architectural patterns, or cross-module dependencies
+
+---
 
 ### FEATURE-10 · Community Lexicon (`sable lexicon`)
-
-**Consolidates:** Client PM Lexicon Tracker + Operator PM `sable lexicon` + Community PM
-Vernacular Drift Detector. Three proposals solving the same problem — "what language does
-this community actually use?" — merged into the Operator PM's tightly-scoped design with
-the Client PM's LSR formula and minimum-data thresholds.
 
 **Problem:** `sable write` generates content with no awareness of community-specific
 language. Operators catch voice mismatches manually. `topics.py` detects trending terms
@@ -436,10 +515,13 @@ sable lexicon remove --org <org> <term>
 injects community vocabulary into the generation prompt. Auto-injection deferred to v2.
 
 **Minimum-data thresholds (report refused below these):**
-- ≥10 unique authors in corpus
-- ≥50 tracked tweets in scan window
+- ≥10 unique authors in corpus (`MIN_AUTHORS = 10`)
+- ≥50 tracked tweets in scan window (`MIN_TWEETS = 50`)
 - ≥3 appearances per term
 - ≥2 unique authors per term
+
+These constants are exported from `sable/lexicon/scanner.py` for reuse by FEATURE-14
+(Narrative Velocity).
 
 **Persistence:** `meta.db.lexicon_terms` table is the single source of truth. The vault
 report (`lexicon_report.md`) is a rendered snapshot — read-only output, not an input.
@@ -465,6 +547,53 @@ and writes nothing.
 **When to build:** After AUDIT remediation queue is clear. High value for new client
 onboarding — lexicon is the first thing a new operator needs to understand about a
 community.
+
+#### Implementation plan
+
+**Slice A — Data layer + scanner (no Claude):**
+- New file `sable/lexicon/__init__.py`
+- New file `sable/lexicon/scanner.py`:
+  - `scan_lexicon(org, days, top_n, conn)` → reads `meta.db.scanned_tweets`, calls
+    `extract_terms()` / `extract_repeated_ngrams()`, applies exclusivity filter
+  - `compute_lsr(term_stats)` → Lexical Spread Rate computation
+  - Minimum-data threshold checks (10 authors, 50 tweets, 3 appearances, 2 authors/term)
+- Add `lexicon_terms` table to `meta.db` `_SCHEMA` string in `sable/pulse/meta/db.py`:
+  `(org TEXT, term TEXT, category TEXT, gloss TEXT, lsr REAL, updated_at TEXT,
+  UNIQUE(org, term))`
+- New file `sable/lexicon/store.py`: `upsert_term()`, `list_terms()`, `remove_term()`,
+  `add_manual_term()` — all operate on `meta.db.lexicon_terms`
+- Tests: `tests/lexicon/test_scanner.py` — exclusivity filter, LSR math, threshold
+  refusal, empty corpus
+
+**Slice B — Claude interpretation + vault report:**
+- New file `sable/lexicon/writer.py`:
+  - `interpret_terms(terms, org_id, conn)` → single batched `call_claude_json()` with
+    `call_type='lexicon_interpret'`, `check_budget()` before call
+  - `render_report(terms, org, vault_path)` → write `lexicon_report.md` to vault via
+    `atomic_write()`
+- Tests: `tests/lexicon/test_writer.py` — mock Claude response parsed correctly,
+  `--no-interpret` skips Claude call, report renders expected markdown, `--dry-run`
+  makes no writes and no API calls
+
+**Slice C — CLI + write integration:**
+- New file `sable/lexicon/cli.py`: `scan`, `list`, `add`, `remove` subcommands
+- Register `lexicon` group in `sable/cli.py`
+- Modify `sable/commands/write.py`: add `--lexicon` flag, load from `meta.db` via
+  `store.list_terms()`, inject into generation prompt
+- Tests: `tests/lexicon/test_cli.py` — CLI smoke tests for each subcommand,
+  `tests/write/test_write_lexicon.py` — `--lexicon` flag injects terms into prompt
+
+**File change summary:**
+| Action | File |
+|--------|------|
+| Create | `sable/lexicon/__init__.py`, `scanner.py`, `store.py`, `writer.py`, `cli.py` |
+| Modify | `sable/pulse/meta/db.py` (`_SCHEMA` string — add `lexicon_terms` table) |
+| Modify | `sable/cli.py` (register `lexicon` group) |
+| Modify | `sable/commands/write.py` (add `--lexicon` flag) |
+| Create | `tests/lexicon/test_scanner.py`, `test_writer.py`, `test_cli.py` |
+| Create | `tests/write/test_write_lexicon.py` |
+
+**Estimated tests:** 18–22
 
 ---
 
@@ -541,6 +670,43 @@ section prove value with operators.
 **When to build Part A:** First feature to build after AUDIT queue — smallest scope,
 highest impact, zero new dependencies.
 
+#### Implementation plan
+
+**Slice A — Amplifier computation + output:**
+- New file `sable/pulse/meta/amplifiers.py`:
+  - `compute_amplifiers(org, window_days, conn)` → queries `scanned_tweets`, computes
+    RT_v, RPR, QTR per author, percentile ranks, composite `amp_score`
+  - Returns list of `AmplifierRow` dataclasses (author, rt_v, rpr, qtr, amp_score, rank)
+- Tests: `tests/pulse/meta/test_amplifiers.py` — percentile math, zero-division guards,
+  single-author edge case, window filtering, composite weight sum = 1.0
+
+**Slice B — CLI integration:**
+- Modify `sable/pulse/meta/cli.py`: add `--amplifiers` flag to `watchlist` command group
+  with `--window-days`, `--top`, `--json` options
+- Rich table output (rank, handle, amp_score, RT_v, RPR, QTR)
+- Tests: `tests/pulse/meta/test_amplifiers_cli.py` — CLI smoke test, `--json` output
+  format, `--top` truncation
+
+**Slice C — Bridge node section in advise (Part B):**
+- Modify `sable/advise/stage1.py`: add `_assemble_bridge_section(org, sable_db_conn,
+  meta_db_conn)` — queries `sable.db` for `bridge_node` tagged entities, queries
+  `meta.db.scanned_tweets` for their recent tweets, renders prose section
+- Modify `sable/commands/advise.py`: add `--bridge-aware` flag, pass to `assemble_input()`
+- Tests: `tests/advise/test_bridge_section.py` — section rendered when bridge nodes
+  exist, section skipped when zero bridge nodes, section skipped when flag not passed
+
+**File change summary:**
+| Action | File |
+|--------|------|
+| Create | `sable/pulse/meta/amplifiers.py` |
+| Modify | `sable/pulse/meta/cli.py` (add `--amplifiers` flag) |
+| Modify | `sable/advise/stage1.py` (bridge section assembly) |
+| Modify | `sable/commands/advise.py` (add `--bridge-aware` flag) |
+| Create | `tests/pulse/meta/test_amplifiers.py`, `test_amplifiers_cli.py` |
+| Create | `tests/advise/test_bridge_section.py` |
+
+**Estimated tests:** 14–18
+
 ---
 
 ### FEATURE-12 · Voice Check (`sable write --voice-check`)
@@ -571,6 +737,41 @@ called before scoring loop. `--voice-check` implies `--score`.
 `sable/write/generator.py` (corpus assembly helper), `sable/commands/write.py` (flag).
 
 **When to build:** After AUDIT-5 and FEATURE-10. Small scope, immediate daily value.
+
+#### Implementation plan
+
+**Slice A — Voice corpus assembly:**
+- Modify `sable/write/generator.py`: add `assemble_voice_corpus(handle, org, vault_path,
+  config)` — loads `tone.md` (full), `notes.md` (full), recent vault notes filtered by
+  `posted_by` (up to 10, 500 tokens each, 4000 total cap)
+- Configurable caps read from `config.get('write.voice_check.*')`
+- Tests: `tests/write/test_voice_corpus.py` — corpus caps enforced, empty vault returns
+  empty string, `posted_by` filter works, token truncation
+
+**Slice B — Scorer integration:**
+- Modify `sable/write/scorer.py`: add `voice_corpus: str | None = None` parameter to
+  `score_draft()`, inject corpus into existing Claude scoring prompt when provided
+- `check_budget()` called once before the variant scoring loop in `write.py` (not
+  inside `score_draft()` itself) when `voice_corpus` is set
+- Tests: `tests/write/test_scorer_voice.py` — voice corpus injected into prompt,
+  `None` corpus uses existing behavior, budget check called
+
+**Slice C — CLI flag:**
+- Modify `sable/commands/write.py`: add `--voice-check` flag, implies `--score`,
+  calls `assemble_voice_corpus()` and passes result to `score_draft()`
+- Tests: `tests/commands/test_write_voice_flag.py` — flag wiring, `--voice-check`
+  without `--score` still triggers scoring
+
+**File change summary:**
+| Action | File |
+|--------|------|
+| Modify | `sable/write/generator.py` (add `assemble_voice_corpus()`) |
+| Modify | `sable/write/scorer.py` (add `voice_corpus` param) |
+| Modify | `sable/commands/write.py` (add `--voice-check` flag) |
+| Create | `tests/write/test_voice_corpus.py`, `test_scorer_voice.py` |
+| Create | `tests/commands/test_write_voice_flag.py` |
+
+**Estimated tests:** 10–14
 
 ---
 
@@ -607,6 +808,34 @@ SablePlatform and CultGrader.
 
 **When to build:** After a CultGrader diagnostic has run for at least one active client
 (TIG Foundation). Prerequisite migration must land in SablePlatform first.
+
+#### Implementation plan
+
+**Slice A — Cross-repo prerequisites (SablePlatform + CultGrader):**
+- SablePlatform: new migration file (next sequential number) adding three columns to
+  `diagnostic_runs`: `language_arc_phase TEXT`, `emergent_cultural_terms_json TEXT`,
+  `mantra_candidates_json TEXT`
+- CultGrader: modify `platform_sync.py::_upsert_diagnostic_run()` to populate the three
+  new columns from `DiagnosticAnalysis`
+- Tests: migration test in SablePlatform, sync test in CultGrader
+
+**Slice B — Slopper advise integration:**
+- Modify `sable/advise/stage1.py`: add `_assemble_community_language(org_id, conn)` —
+  queries `diagnostic_runs` for latest completed run with non-null language fields,
+  applies 14-day freshness gate, renders `## Community Language Signal` section
+- Null guard at every layer: empty fields → skip injection entirely
+- Modify `sable/commands/advise.py`: add `--community-voice` flag
+- Tests: `tests/advise/test_community_language.py` — fresh data injected, stale data
+  (>14d) skipped with warning, null fields skipped, flag wiring
+
+**File change summary (Slopper only):**
+| Action | File |
+|--------|------|
+| Modify | `sable/advise/stage1.py` (add community language assembly) |
+| Modify | `sable/commands/advise.py` (add `--community-voice` flag) |
+| Create | `tests/advise/test_community_language.py` |
+
+**Estimated tests (Slopper):** 6–8
 
 ---
 
@@ -650,6 +879,37 @@ sable narrative beats edit --org <org>   # opens in $EDITOR
 **When to build:** After FEATURE-10 (shares minimum-data threshold patterns). Good
 candidate for a new client onboarding where the operator has a clear narrative strategy.
 
+#### Implementation plan
+
+**Slice A — Beat parser + uptake scoring:**
+- New file `sable/narrative/__init__.py`
+- New file `sable/narrative/models.py`: `NarrativeBeat` and `UptakeResult` dataclasses
+- New file `sable/narrative/tracker.py`:
+  - `load_beats(org)` → parse `~/.sable/{org}/narrative_beats.yaml`, validate schema
+  - `score_uptake(beat, org, days, conn)` → query `meta.db.scanned_tweets`, case-insensitive
+    substring match on keywords, compute `uptake_score` and `uptake_velocity`
+  - Imports minimum-data threshold constants from `sable/lexicon/scanner.py`
+    (`MIN_AUTHORS`, `MIN_TWEETS`) — FEATURE-10 must export these
+- Tests: `tests/narrative/test_tracker.py` — uptake math, keyword matching, threshold
+  refusal, empty beats file, malformed YAML
+
+**Slice B — CLI + report:**
+- New file `sable/narrative/cli.py`: `score` and `beats edit` subcommands
+- Register `narrative` group in `sable/cli.py`
+- `--output <path>` writes JSON report
+- `beats edit` opens `$EDITOR` on the beats YAML file
+- Tests: `tests/narrative/test_cli.py` — CLI smoke tests, output file written, missing
+  beats file error
+
+**File change summary:**
+| Action | File |
+|--------|------|
+| Create | `sable/narrative/__init__.py`, `models.py`, `tracker.py`, `cli.py` |
+| Modify | `sable/cli.py` (register `narrative` group) |
+| Create | `tests/narrative/test_tracker.py`, `test_cli.py` |
+
+**Estimated tests:** 10–14
+
 ---
 
 ### FEATURE-15 · Style Delta (`sable style-delta`)
@@ -662,8 +922,18 @@ quantitative gap analysis exists.
 `pulse.db.posts`) and the top-quintile watchlist accounts (from `meta.db.scanned_tweets`).
 Surfaces the gap as a structured report.
 
-**Fingerprint features:**
-- Format distribution (coarse type → share of post count)
+**Fingerprint features (managed side, from `pulse.db.posts`):**
+- Format distribution (by `sable_content_type` → share of post count)
+- Sample size
+
+`pulse.db.posts` does not store thread length, media presence, or link presence. These
+fields exist only in `meta.db.scanned_tweets`. If the managed account is also on its own
+watchlist (common for active clients), the watchlist-side fingerprint includes the richer
+feature set below. If not, the delta report is limited to format distribution only and
+must state this limitation explicitly.
+
+**Fingerprint features (watchlist side, from `meta.db.scanned_tweets`):**
+- Format distribution (coarse-mapped from `format_bucket`)
 - Median thread length
 - Media rate (share of posts with images/video)
 - Link rate
@@ -698,6 +968,48 @@ in v1).
 benefits from amplifier context). Useful as a cold-start diagnostic when onboarding a new
 account.
 
+#### Implementation plan
+
+**Slice A — Fingerprint computation:**
+- New file `sable/style/__init__.py`
+- New file `sable/style/fingerprint.py`:
+  - `fingerprint_managed(handle, pulse_conn, meta_conn=None)` → query `pulse.db.posts`
+    for format distribution (by `sable_content_type`) + sample size. If `meta_conn` is
+    provided and handle exists in `meta.db.scanned_tweets`, also compute thread length,
+    media rate, link rate from watchlist data (richer fingerprint).
+  - `fingerprint_watchlist(org, meta_conn)` → query `meta.db.scanned_tweets`, filter top
+    quintile by `total_lift` DESC via `NTILE(5)`, compute full feature set
+  - `_coarse_bucket(format_bucket)` → mapping function from fine-grained `format_bucket`
+    to coarse `sable_content_type`-level categories
+  - When managed account is not in watchlist, delta report limited to format distribution
+    only — report states this limitation explicitly
+- Tests: `tests/style/test_fingerprint.py` — coarse mapping correctness, top-quintile
+  filtering, minimum sample guard (<10 → refuse), managed-only-in-pulse degrades to
+  format-distribution-only, managed-in-both-dbs gets full fingerprint
+
+**Slice B — Delta computation + report:**
+- New file `sable/style/delta.py`:
+  - `compute_delta(managed_fp, watchlist_fp)` → per-bucket `format_gap` computation
+- New file `sable/style/report.py`:
+  - `render_delta_report(delta, managed_fp, watchlist_fp)` → Rich table or markdown
+- Tests: `tests/style/test_delta.py` — gap math, symmetric edge cases (identical
+  distributions → zero gap)
+
+**Slice C — CLI:**
+- New file `sable/style/cli.py`: `style-delta` command with `--handle`, `--org`,
+  `--output` options
+- Register in `sable/cli.py`
+- Tests: `tests/style/test_cli.py` — CLI smoke test, `--output` writes file
+
+**File change summary:**
+| Action | File |
+|--------|------|
+| Create | `sable/style/__init__.py`, `fingerprint.py`, `delta.py`, `report.py`, `cli.py` |
+| Modify | `sable/cli.py` (register `style-delta` command) |
+| Create | `tests/style/test_fingerprint.py`, `test_delta.py`, `test_cli.py` |
+
+**Estimated tests:** 12–16
+
 ---
 
 ### FEATURE-16 · Silence Gradient (`sable silence-gradient`)
@@ -728,8 +1040,9 @@ waiting for Platform.
 
 **Window semantics:** `--window 30` means "look back 30 days total." The algorithm splits
 this into two equal halves: last 15 days vs prior 15 days. Custom windows follow the same
-split: `--window 14` = 7d vs 7d. Odd values are floored: `--window 29` = 14d vs 14d
-(the oldest day is excluded). Minimum accepted window: 4 (2d vs 2d).
+split: `--window 14` = 7d vs 7d. Odd values are rejected with a clear error message
+("window must be even"). Minimum accepted window: 6 (3d vs 3d) to keep the per-half
+sample useful.
 
 **New table in `meta.db`:** `author_cadence` — one row per `(author_handle, org, computed_at)`.
 Columns: `posts_recent_half`, `posts_prior_half`, `median_lift_recent`, `median_lift_prior`,
@@ -758,6 +1071,49 @@ Tests in `tests/cadence/`.
 
 **When to build:** After FEATURE-11 (uses same meta.db data patterns). Unblocks CHURN-1
 work without cross-repo dependency.
+
+#### Implementation plan
+
+**Slice A — Signal computation:**
+- New file `sable/cadence/__init__.py`
+- New file `sable/cadence/signals.py`:
+  - `compute_volume_drop(posts_recent, posts_prior)` → clamped [0, 1]
+  - `compute_engagement_drop(median_lift_recent, median_lift_prior)` → clamped [0, 1],
+    requires ≥5 rows per half
+  - `compute_format_regression(format_counts)` → Shannon entropy, normalized, inverted
+  - Each function returns `(score, insufficient_data: bool)`
+- Tests: `tests/cadence/test_signals.py` — math correctness, clamping bounds, insufficient
+  data thresholds, zero-division guards
+
+**Slice B — Combination + storage:**
+- New file `sable/cadence/combine.py`:
+  - `combine_signals(vol_drop, eng_drop, fmt_reg)` → weighted sum with proportional
+    redistribution when a signal is `insufficient_data`
+  - `compute_silence_gradient(org, window_days, conn)` → orchestrator querying
+    `meta.db.scanned_tweets`, splitting window, computing per-author signals, combining
+- New file `sable/cadence/store.py`:
+  - `upsert_cadence(rows, conn)` → `INSERT OR REPLACE` into `author_cadence`
+  - Add `author_cadence` table to `meta.db` `_SCHEMA` string in `sable/pulse/meta/db.py`
+- Tests: `tests/cadence/test_combine.py` — weight redistribution, all-insufficient
+  exclusion, window split math (even/odd/minimum), per-author orchestration
+- Tests: `tests/cadence/test_store.py` — INSERT OR REPLACE retention policy
+
+**Slice C — CLI:**
+- New file `sable/cadence/cli.py`: `silence-gradient` command with `--org`, `--top`,
+  `--window`, `--output`, `--include-insufficient` options
+- Register in `sable/cli.py`
+- Tests: `tests/cadence/test_cli.py` — CLI smoke test, `--include-insufficient` shows
+  suppressed rows, `--output` writes file
+
+**File change summary:**
+| Action | File |
+|--------|------|
+| Create | `sable/cadence/__init__.py`, `signals.py`, `combine.py`, `store.py`, `cli.py` |
+| Modify | `sable/pulse/meta/db.py` (`_SCHEMA` string — add `author_cadence` table) |
+| Modify | `sable/cli.py` (register `silence-gradient` command) |
+| Create | `tests/cadence/test_signals.py`, `test_combine.py`, `test_store.py`, `test_cli.py` |
+
+**Estimated tests:** 16–20
 
 ---
 
@@ -911,7 +1267,9 @@ Gradient output — CHURN-2 inherits whichever input path CHURN-1 uses.
 - File writes via `atomic_write()` from `sable/shared/files.py`
 - All `except Exception` blocks must `logger.warning(...)` — no silent swallows
 - New modules follow: `__init__.py`, main logic file, CLI command, tests in `tests/{module}/`
-- `pulse/meta` DB changes go in `_SCHEMA` string (not migration files)
+- `meta.db` table definitions go in `sable/pulse/meta/db.py`'s `_SCHEMA` string (not
+  migration files), even when a different module owns the read/write logic. The owning
+  module imports `meta_db_path()` and connects directly.
 
 ### Validation checklist
 

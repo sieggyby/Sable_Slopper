@@ -169,6 +169,120 @@ Schema v5 → v6. Write path owned by Cult Grader's `platform_sync.py`.
 
 ---
 
+## Community Intelligence Feature Competition (2026-04-01)
+
+Multi-agent feature proposal competition to source the next batch of community
+intelligence features for Slopper. 5 proposer agents, 3 QA reviewer agents, 5
+revision rounds, final evaluation and ranking.
+
+### Evaluation criteria
+
+| Criterion | Weight |
+|-----------|--------|
+| Client Revenue Impact | 25% |
+| Operator Leverage | 20% |
+| Strategic Differentiation | 20% |
+| Feasibility | 15% |
+| Community Understanding Depth | 12% |
+| Cross-Tool Synergy | 8% |
+
+### 15 original proposals
+
+| # | Proposal | Agent | Disposition |
+|---|----------|-------|-------------|
+| 1 | Lexicon Tracker (`sable lexicon`) | Client PM | Merged → FEATURE-10 |
+| 2 | Subsquad Radar (`sable squads`) | Client PM | Rejected (wrong repo) |
+| 3 | Narrative Velocity (`sable narrative`) | Client PM | Retained → FEATURE-14 |
+| 4 | Moment Finder | Community PM | Deferred (below median) |
+| 5 | Vernacular Drift Detector | Community PM | Merged → FEATURE-10 |
+| 6 | Community Echo | Community PM | Deferred (insufficient standalone value) |
+| 7 | `sable lexicon` (operator variant) | Operator PM | Merged → FEATURE-10 |
+| 8 | `sable pulse watchlist --leaders` (renamed → `--amplifiers`) | Operator PM | Merged → FEATURE-11 |
+| 9 | `sable write --voice-check` | Operator PM | Retained → FEATURE-12 |
+| 10 | Community Language Injection | Cross-repo PM | Retained → FEATURE-13 |
+| 11 | Score Export to Lead Identifier | Cross-repo PM | Rejected (wrong integration pattern) |
+| 12 | Bridge Node Content Amplification | Cross-repo PM | Merged → FEATURE-11 |
+| 13 | Style Delta | Academic PM | Retained → FEATURE-15 |
+| 14 | Bridge Score | Academic PM | Merged → FEATURE-11 (deferred phase) |
+| 15 | Silence Gradient | Academic PM | Retained → FEATURE-16 |
+
+### QA review summary
+
+3 QA agents reviewed all proposals against `AGENTS.md` tier system:
+- **ACCEPT:** 1 (Operator PM `--leaders`, later renamed `--amplifiers`)
+- **REVISE:** 11 (most proposals required spec tightening)
+- **REJECT:** 3 (Subsquad Radar, Score Export, Narrative Velocity initial version)
+
+Narrative Velocity was restructured after rejection and re-entered successfully.
+Subsquad Radar and Score Export were permanently withdrawn, leaving 13 proposals
+in final evaluation.
+
+### Final ranking
+
+| Rank | Proposal | Agent | Score |
+|------|----------|-------|-------|
+| 1 | `--amplifiers` | Operator PM | 7.76 |
+| 2 | Silence Gradient | Academic PM | 7.60 |
+| 3 | Narrative Velocity | Client PM | 7.52 |
+| 4 | Lexicon Tracker | Client PM | 7.47 |
+| 5 | Style Delta | Academic PM | 7.40 |
+| 6 | `--voice-check` | Operator PM | 7.22 |
+| 7 | `sable lexicon` (operator) | Operator PM | 7.16 |
+| — | *50th percentile line* | | |
+| 8 | Bridge Score (phased) | Academic PM | 6.88 |
+| 9 | Community Echo | Community PM | 6.72 |
+| 10 | Community Language Injection | Cross-repo PM | 6.52 |
+| 11 | Vernacular Drift Detector | Community PM | 6.36 |
+| 12 | Moment Finder | Community PM | 5.88 |
+| 13 | Bridge Node Amplification | Cross-repo PM | 5.76 |
+
+Scores are weighted composites (0–10 scale) of the 6 criteria above. Per-criterion
+breakdowns were not preserved — only composite scores were recorded.
+
+### Agent leaderboard
+
+| Agent | Points |
+|-------|--------|
+| Operator PM | +7 (winner — tiebreaker: highest single proposal) |
+| Client PM | +7 |
+| Academic/Tech PM | +6 |
+| Cross-repo PM | −9 |
+| Community Member PM | −11 |
+
+### Consolidation rationale
+
+Three overlap clusters identified and merged:
+
+1. **Lexicon × 3 → FEATURE-10:** Client PM Lexicon Tracker (rank 4) + Operator PM
+   `sable lexicon` (rank 7) + Community PM Vernacular Drift Detector (rank 11).
+   Operator PM's design chosen as base (tighter scope, existing infrastructure).
+
+2. **"Who matters" × 3 → FEATURE-11:** Operator PM `--amplifiers` (rank 1) +
+   Academic PM Bridge Score (rank 8) + Cross-repo PM Bridge Node Amplification
+   (rank 13). Graph work deferred; amplifiers + bridge-node advise section retained.
+
+3. **Silence Gradient + CHURN → FEATURE-16:** Academic PM Silence Gradient (rank 2)
+   produces compatible upstream data for CHURN-1, removing Platform dependency.
+
+Top-6 pattern: all build on data already in meta.db/pulse.db, minimize or eliminate
+Claude calls, deliver signal the operator can act on immediately.
+
+### Consolidated feature set
+
+| Feature | Merged From | Est. Tests |
+|---------|------------|------------|
+| FEATURE-10 Community Lexicon | 3 lexicon proposals | 18–22 |
+| FEATURE-11 Amplifiers + Bridge Nodes | 3 "who matters" proposals | 14–18 |
+| FEATURE-12 Voice Check | Standalone | 10–14 |
+| FEATURE-13 Language Injection | Standalone (cross-repo) | 6–8 |
+| FEATURE-14 Narrative Velocity | Standalone | 10–14 |
+| FEATURE-15 Style Delta | Standalone | 12–16 |
+| FEATURE-16 Silence Gradient | Standalone (feeds CHURN) | 16–20 |
+
+Full specs and implementation plans in `TODO.md` § "Community Intelligence Features."
+
+---
+
 ## External Audit Triage (Invalid For This Repo)
 
 An external audit referencing `diagnostician.py`, `classifier.py`, `runner.py`,
