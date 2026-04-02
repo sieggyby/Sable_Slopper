@@ -107,6 +107,99 @@ panel-width of pan room in each direction.
 
 ---
 
+## Churn Prediction Intervention Engine (Slopper Side)
+
+**Dependency:** Requires Cult Grader decay scoring (computes who is at risk) and Platform
+decay alerting (stores scores, triggers alerts) to be built first. Slopper does NOT
+compute or store decay scores — it receives at-risk member lists from Platform and
+generates actionable re-engagement strategies.
+
+### CHURN-1 · Intervention playbook generation
+
+Given a list of at-risk members (delivered from Platform's decay alert pipeline), generate
+a targeted re-engagement playbook per member or per cohort. Each playbook entry maps a
+member to concrete actions the community manager can take immediately.
+
+**Output per at-risk member:**
+- Interest-matched content tags: "Tag @member in upcoming thread about [topic]" derived
+  from the member's historical engagement topics (passed in from Platform/Cult Grader data)
+- Role assignment recommendations: "Assign @member the [role] role" when participation
+  history suggests they respond to ownership/status signals
+- Contribution spotlight: "Create content featuring @member's contributions" when the
+  member has notable past activity worth amplifying
+- Direct engagement prompts: specific reply/quote-tweet suggestions referencing the
+  member's past interactions
+
+**Where it lives:** New module `sable/churn/` with `__init__.py`, `interventions.py`
+(core logic), `cli.py` (command registration), tests in `tests/churn/`. Claude prompt
+templates in `sable/churn/prompts.py` following existing `call_claude_json()` patterns.
+
+**CLI surface:**
+- `sable churn intervene --org <org> --input <at-risk-members.json>` — generate
+  intervention playbook from Platform's at-risk export
+- `sable churn intervene --org <org> --input <at-risk-members.json> --format calendar` —
+  output as calendar-ready items instead of standalone playbook
+- `sable churn intervene --org <org> --input <at-risk-members.json> --dry-run` —
+  estimate Claude call count and cost without generating (matches `advise` and
+  `playbook discord` convention)
+- Input format: JSON array of `{handle, decay_score, topics, last_active, role, notes}`
+  as defined by Platform's export contract
+
+**Why `--org` instead of a handle argument:** Churn intervention operates on community
+members across the org, not on a specific managed Twitter handle. There is no single
+account to scope to — the at-risk list spans the org's community.
+
+**Generation cost model:** One Claude call per at-risk member (each member gets a
+personalized playbook entry with their topics and history injected). Not batched — each
+call needs full member context for quality. Soft cap: if the at-risk list exceeds 50
+members, emit a warning with estimated cost and require `--force` to proceed. `--dry-run`
+prints the member count, estimated calls, and approximate spend without making any calls.
+
+**Integration with existing commands:**
+- `sable advise` gains `--churn-input <path>` flag to fold at-risk member re-engagement
+  into its existing multi-stage recommendation flow
+- `sable playbook discord` gains `--churn-input <path>` flag to include churn intervention
+  tactics in Discord engagement playbooks (delegates scoring context to Cult Grader,
+  actions to Slopper)
+
+**Claude call pattern:** Org-scoped (`org_id` + `call_type='churn_intervention'`) so
+spend is observable and budget-gated. Profile markdown for the org's account is injected
+for tone/voice consistency.
+
+### CHURN-2 · Calendar integration for at-risk re-engagement
+
+Extend `sable calendar` to accept churn intervention data and prioritize content that
+re-engages at-risk members within the generated posting schedule.
+
+**Approach:** When `--churn-input` is passed to `sable calendar`, the calendar planner
+receives the intervention playbook (from CHURN-1) alongside normal pulse/format data.
+Calendar slots are annotated with re-engagement intent: which at-risk members each post
+aims to pull back, and what engagement action accompanies the post (tag, reply,
+spotlight).
+
+**Where it lives:** Changes to existing `sable/calendar/` module. No new module needed.
+Intervention context injected into the calendar prompt as a structured section.
+
+**Constraints:**
+- Re-engagement content should not dominate the calendar — cap at ~30% of slots unless
+  the operator passes `--prioritize-churn` to remove the cap
+- Calendar output includes a `churn_targets` field per slot (list of handles) so the
+  operator knows which posts serve retention goals
+- Falls back gracefully to normal calendar generation when no churn input is provided
+
+**Edge cases:**
+- Empty at-risk list → no churn annotations, calendar unchanged
+- At-risk member has no identifiable interest topics → generic engagement recommendation
+  (role offer, DM prompt) rather than content-specific tag
+- Overlapping members across multiple churn runs → deduplicate by handle, use most
+  recent decay data
+- Org has no profile set up → warn and skip tone injection, proceed with generic output
+
+**When to build:** After Platform ships decay alerting and defines the at-risk member
+export format. CHURN-1 first, then CHURN-2 (CHURN-2 consumes CHURN-1's playbook output).
+
+---
+
 ## Phase 2+ (Deferred)
 
 ### Phase 2 — Web UI (`sable serve`)
