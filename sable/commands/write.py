@@ -31,7 +31,8 @@ def write_command(handle, format_bucket, topic, source_url, variants, org, run_s
     try:
         acc = require_account(handle)
     except (ValueError, SableError) as e:
-        click.echo(f"Error: {e}", err=True)
+        from sable.platform.errors import redact_error
+        click.echo(f"Error: {redact_error(str(e))}", err=True)
         sys.exit(1)
 
     resolved_org = org or acc.org
@@ -54,7 +55,8 @@ def write_command(handle, format_bucket, topic, source_url, variants, org, run_s
         click.echo(f"Error [{e.code}]: {e.message}", err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        from sable.platform.errors import redact_error
+        click.echo(f"Error: {redact_error(str(e))}", err=True)
         sys.exit(1)
 
     if result.anatomy_ref:
@@ -80,7 +82,8 @@ def write_command(handle, format_bucket, topic, source_url, variants, org, run_s
             except SableError as e:
                 hook_str = f"  ·  hook: [error: {e.code}]"
             except Exception as e:
-                hook_str = f"  ·  hook: [error: {e}]"
+                from sable.platform.errors import redact_error
+                hook_str = f"  ·  hook: [error: {redact_error(str(e))}]"
 
         click.echo(f"\n{'='*60}")
         click.echo(f"Variant {i}  ·  fit: {v.format_fit_score}/10{hook_str}  ·  {v.structural_move}")

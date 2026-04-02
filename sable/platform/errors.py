@@ -32,6 +32,8 @@ from sable_platform.errors import (  # noqa: F401
 _SECRET_PATTERNS: list[tuple[re.Pattern, str]] = [
     # Real Anthropic API key prefix (sk-ant-api03-...)
     (re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "[REDACTED]"),
+    # Bare Replicate API token (r8_...)
+    (re.compile(r"r8_[A-Za-z0-9]{20,}"), "[REDACTED]"),
     # Known env var assignments with sensitive values
     (
         re.compile(

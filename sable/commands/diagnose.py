@@ -26,7 +26,8 @@ def diagnose_command(handle: str, org: str | None, days: int, save_artifact: boo
     try:
         account = require_account(handle)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     resolved_org = org or account.org

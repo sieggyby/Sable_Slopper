@@ -53,7 +53,8 @@ def clip_process(
     try:
         video = str(maybe_download(video))
     except (FileNotFoundError, RuntimeError) as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
     from sable.clip.transcribe import transcribe
     from sable.clip.selector import select_clips
@@ -63,7 +64,8 @@ def clip_process(
     try:
         acc = require_account(account)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     energy = brainrot_energy or acc.content.brainrot_energy

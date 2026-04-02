@@ -113,7 +113,8 @@ def generate_cmd(
         )
         console.print(f"[green]✓ Done:[/green] {result}")
     except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]Error:[/red] {redact_error(str(e))}")
         raise SystemExit(1)
 
 
@@ -160,7 +161,8 @@ def setup_voice_cmd(
     try:
         video_path = maybe_download(source)
     except Exception as e:
-        console.print(f"[red]Download failed:[/red] {e}")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]Download failed:[/red] {redact_error(str(e))}")
         raise SystemExit(1)
     console.print(f"  Source     : {video_path}")
 
@@ -246,6 +248,7 @@ def list_characters_cmd() -> None:
                 profile.elevenlabs_voice_id or "—",
             )
         except Exception as e:
-            table.add_row(cid, f"[red]Error: {e}[/red]", "", "")
+            from sable.platform.errors import redact_error
+            table.add_row(cid, f"[red]Error: {redact_error(str(e))}[/red]", "", "")
 
     console.print(table)

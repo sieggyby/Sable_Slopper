@@ -74,7 +74,8 @@ def wojak_add(url, wojak_id, name, emotion, tags, description):
             if not entry.get("transparent"):
                 console.print("[yellow]⚠ Image may not be transparent — check before compositing[/yellow]")
         except Exception as e:
-            console.print(f"[red]✗ Error: {e}[/red]")
+            from sable.platform.errors import redact_error
+            console.print(f"[red]✗ Error: {redact_error(str(e))}[/red]")
             raise SystemExit(1)
 
 
@@ -127,7 +128,8 @@ def scene_generate(account, topic, dry_run):
         try:
             spec = generate_scene(acct, topic=topic, dry_run=dry_run)
         except Exception as e:
-            console.print(f"[red]Generation failed: {e}[/red]")
+            from sable.platform.errors import redact_error
+            console.print(f"[red]Generation failed: {redact_error(str(e))}[/red]")
             raise SystemExit(1)
 
     console.print("\n[bold]Scene spec:[/bold]")
@@ -150,7 +152,8 @@ def scene_generate(account, topic, dry_run):
             )
             console.print(f"\n[green]✓ Scene saved → {result}[/green]")
         except Exception as e:
-            console.print(f"[red]Render failed: {e}[/red]")
+            from sable.platform.errors import redact_error
+            console.print(f"[red]Render failed: {redact_error(str(e))}[/red]")
             raise SystemExit(1)
 
 
@@ -186,5 +189,6 @@ def scene_render(spec_file, account, output):
             )
             console.print(f"[green]✓ Scene saved → {result}[/green]")
         except Exception as e:
-            console.print(f"[red]Render failed: {e}[/red]")
+            from sable.platform.errors import redact_error
+            console.print(f"[red]Render failed: {redact_error(str(e))}[/red]")
             raise SystemExit(1)

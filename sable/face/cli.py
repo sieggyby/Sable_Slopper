@@ -43,21 +43,24 @@ def face_swap(target, account, reference, output, quality, max_cost, dry_run, sk
     try:
         acc = require_account(account)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     ref_name = reference or strip_handle(acc.handle)
     try:
         ref = get_reference(ref_name)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     if not skip_consent_check:
         try:
             require_consent(ref_name)
         except RuntimeError as e:
-            console.print(f"[red]{e}[/red]")
+            from sable.platform.errors import redact_error
+            console.print(f"[red]{redact_error(str(e))}[/red]")
             sys.exit(1)
 
     target_path = Path(target)
@@ -78,7 +81,8 @@ def face_swap(target, account, reference, output, quality, max_cost, dry_run, sk
     try:
         check_budget(estimate["cost_usd"], max_cost)
     except RuntimeError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     if dry_run:

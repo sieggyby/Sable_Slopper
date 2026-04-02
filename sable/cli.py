@@ -24,13 +24,27 @@ def config_group():
 
 @config_group.command("show")
 def config_show():
-    """Print current config (keys masked)."""
+    """Print current config (secrets masked)."""
     from sable import config as cfg
     data = cfg.load_config()
     for k, v in data.items():
-        if "key" in k.lower() or "token" in k.lower():
-            v = v[:6] + "…" if v else "(not set)"
+        if k in _SECRET_CONFIG_KEYS:
+            v = "(set)" if v else "(not set)"
+        elif isinstance(v, dict):
+            # Nested dicts (pulse_meta, platform): summarize instead of dumping raw
+            console.print(f"  [cyan]{k}[/cyan]: ({len(v)} keys)")
+            continue
         console.print(f"  [cyan]{k}[/cyan]: {v}")
+
+
+_SECRET_CONFIG_KEYS = {"anthropic_api_key", "replicate_api_key", "socialdata_api_key", "elevenlabs_api_key"}
+
+_ENV_VAR_NAMES = {
+    "anthropic_api_key": "ANTHROPIC_API_KEY",
+    "replicate_api_key": "REPLICATE_API_TOKEN",
+    "socialdata_api_key": "SOCIALDATA_API_KEY",
+    "elevenlabs_api_key": "ELEVENLABS_API_KEY",
+}
 
 
 @config_group.command("set")
@@ -39,6 +53,12 @@ def config_show():
 def config_set(key, value):
     """Set a config value."""
     from sable import config as cfg
+    if key in _SECRET_CONFIG_KEYS:
+        env_name = _ENV_VAR_NAMES.get(key, key.upper())
+        console.print(
+            f"[yellow]⚠ Prefer setting secrets via environment variable "
+            f"(export {env_name}=...) rather than persisting in config.yaml[/yellow]"
+        )
     cfg.set_key(key, value)
     console.print(f"[green]✓ Set {key}[/green]")
 

@@ -113,7 +113,8 @@ def org_status(org_id):
                 pulse_last_track = row[0] if row else None
                 pconn.close()
         except Exception as e:
-            logger.warning("Could not read pulse freshness: %s", e, exc_info=True)
+            from sable.platform.errors import redact_error
+            logger.warning("Could not read pulse freshness: %s", redact_error(str(e)))
 
         # Meta freshness (read-only, best-effort)
         meta_last_scan = None
@@ -129,7 +130,8 @@ def org_status(org_id):
                 meta_last_scan = row[0] if row else None
                 mconn.close()
         except Exception as e:
-            logger.warning("Could not read meta freshness: %s", e, exc_info=True)
+            from sable.platform.errors import redact_error
+            logger.warning("Could not read meta freshness: %s", redact_error(str(e)))
 
         click.echo(f"Org: {org['org_id']} — {org['display_name']}")
         click.echo(f"  Status:               {org['status']}")

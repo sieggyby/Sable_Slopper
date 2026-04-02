@@ -63,7 +63,8 @@ def meme_generate(account, template, topic, vibe, output, style, dry_run, save_b
     try:
         acc = require_account(account)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     if template is None:
@@ -132,7 +133,8 @@ def meme_batch(account, count, topics, do_render, approve):
     try:
         acc = require_account(account)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     topic_list = [t.strip() for t in topics.split(",") if t.strip()] if topics else None

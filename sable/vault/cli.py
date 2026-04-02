@@ -89,7 +89,8 @@ def vault_sync(org_id, org, workspace_override, vault, dry_run):
                 f"{stats.get('diagnostics_written', 0)} diagnostics"
             )
         except SableError as e:
-            err_console.print(f"[red]{e}[/red]")
+            from sable.platform.errors import redact_error
+            err_console.print(f"[red]{redact_error(str(e))}[/red]")
             sys.exit(1)
         return
 
@@ -117,8 +118,9 @@ def vault_sync(org_id, org, workspace_override, vault, dry_run):
         console.print(f"[green]✓ Synced:[/green] new={report.new}, updated={report.updated}", end="")
         if report.errors:
             console.print(f", [red]errors={len(report.errors)}[/red]")
+            from sable.platform.errors import redact_error
             for err in report.errors[:5]:
-                console.print(f"  [red]{err}[/red]")
+                console.print(f"  [red]{redact_error(str(err))}[/red]")
         else:
             console.print()
 
@@ -319,7 +321,8 @@ def vault_suggest(org, vault, tweet_text, tweet_url, account):
             try:
                 tweet_text = fetch_tweet_text(tweet_url)
             except Exception as e:
-                console.print(f"[red]Failed to fetch tweet: {e}[/red]")
+                from sable.platform.errors import redact_error
+                console.print(f"[red]Failed to fetch tweet: {redact_error(str(e))}[/red]")
                 sys.exit(1)
 
     console.print(f"[dim]Tweet:[/dim] {tweet_text[:120]}")

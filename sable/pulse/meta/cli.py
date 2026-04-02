@@ -237,7 +237,8 @@ def meta_scan(org, deep, full, cheap, dry_run, skip_if_fresh=None):
                 tweets_new=scanner._tweets_new,
                 estimated_cost=scanner._estimated_cost,
             )
-            console.print(f"[red]Scan failed: {e}[/red]")
+            from sable.platform.errors import redact_error
+            console.print(f"[red]Scan failed: {redact_error(str(e))}[/red]")
             sys.exit(1)
 
     if result.get("aborted"):
@@ -460,7 +461,8 @@ def _run_analysis(org: str, deep: bool, cheap: bool, trends_only: bool, dry_run:
                         "[yellow]Claude analysis failed — showing quantitative trends.[/yellow]"
                     )
             except Exception as e:
-                console.print(f"[yellow]Claude unavailable: {e} — showing quantitative trends.[/yellow]")
+                from sable.platform.errors import redact_error
+                console.print(f"[yellow]Claude unavailable: {redact_error(str(e))} — showing quantitative trends.[/yellow]")
                 analysis = fallback_analysis(trends)
                 _claude_degraded = True
 

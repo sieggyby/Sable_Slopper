@@ -40,5 +40,6 @@ def playbook_discord(org_id, force, cheap, dry_run):
         click.echo(f"Error [{e.code}]: {e.message}", err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        from sable.platform.errors import redact_error
+        click.echo(f"Error: {redact_error(str(e))}", err=True)
         sys.exit(1)

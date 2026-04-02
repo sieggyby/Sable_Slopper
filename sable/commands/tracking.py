@@ -65,7 +65,7 @@ def tracking_sync(org_id):
             (_err, job_id)
         )
         conn.commit()
-        click.echo(f"Error [{e.code}]: {e.message}", err=True)
+        click.echo(f"Error [{e.code}]: {redact_error(e.message)}", err=True)
         sys.exit(1)
     except Exception as e:
         from sable.platform.errors import redact_error
@@ -76,5 +76,5 @@ def tracking_sync(org_id):
             (_err, job_id)
         )
         conn.commit()
-        click.echo(f"Error: {e}", err=True)
+        click.echo(f"Error: {redact_error(str(e))}", err=True)
         sys.exit(1)

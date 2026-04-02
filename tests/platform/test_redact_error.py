@@ -109,6 +109,17 @@ def test_redact_error_strips_socialdata_key_assignment():
     assert "[REDACTED]" in redacted
 
 
+def test_redact_error_strips_bare_replicate_token():
+    """Bare r8_ Replicate tokens (without VAR= prefix) are redacted."""
+    from sable.platform.errors import redact_error
+
+    raw = "Auth error: token r8_AbcDef1234567890XYZW12345 is invalid"
+    redacted = redact_error(raw)
+
+    assert "r8_AbcDef1234567890XYZW12345" not in redacted
+    assert "[REDACTED]" in redacted
+
+
 def test_redact_error_strips_elevenlabs_key_assignment():
     """ELEVENLABS_API_KEY=<value> is redacted; key name is preserved."""
     from sable.platform.errors import redact_error

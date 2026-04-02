@@ -39,7 +39,8 @@ def pulse_track(account, mock):
             tweets = snapshot_account(handle, mock=mock)
         console.print(f"[green]✓[/green] Tracked {len(tweets)} tweets for {handle}")
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]Error: {redact_error(str(e))}[/red]")
         sys.exit(1)
 
 
@@ -76,7 +77,8 @@ def pulse_recommend(account, followers, json_out, update_roster):
     try:
         acc = require_account(account)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     with console.status("Generating recommendations with Claude..."):
@@ -146,7 +148,8 @@ def pulse_trends(account, query, count, mock):
     try:
         acc = require_account(account)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     search_query = query or " OR ".join(acc.persona.topics[:3]) or "crypto"
@@ -184,7 +187,8 @@ def pulse_account(account, days, org):
     try:
         acc = require_account(account)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     effective_org = org or acc.org
@@ -213,7 +217,8 @@ def pulse_attribution(handle: str, days: int, output_format: str, org: Optional[
     try:
         attr = compute_attribution(handle, days=days, org=org)
     except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]Error:[/red] {redact_error(str(e))}")
         raise SystemExit(1)
     if output_format == "json":
         import dataclasses

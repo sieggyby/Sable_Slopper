@@ -84,7 +84,8 @@ def roster_add(handle, display_name, org, archetype, voice, topics, init_profile
             d = prof_mod.scaffold_profile(account.handle)
             console.print(f"[dim]  Profile files created at {d}[/dim]")
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]Error: {redact_error(str(e))}[/red]")
         sys.exit(1)
 
 
@@ -100,7 +101,8 @@ def roster_show(handle, profile_preview):
     try:
         account = manager.require_account(handle)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     console.rule(f"[bold cyan]{account.handle}[/bold cyan]")
@@ -162,7 +164,8 @@ def roster_update(handle, display_name, org, archetype, voice, active):
     try:
         account = manager.require_account(handle)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        from sable.platform.errors import redact_error
+        console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
     if display_name is not None:

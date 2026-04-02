@@ -28,5 +28,6 @@ def advise_command(handle, cheap, force, dry_run, export):
         err_console.print(f"[red]Error [{e.code}]: {e.message}[/red]")
         sys.exit(1)
     except Exception as e:
-        err_console.print(f"[red]Error: {e}[/red]")
+        from sable.platform.errors import redact_error
+        err_console.print(f"[red]Error: {redact_error(str(e))}[/red]")
         sys.exit(1)
