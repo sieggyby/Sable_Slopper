@@ -9,6 +9,8 @@ from sable.shared.api import build_account_context, call_claude_json
 from sable.pulse.db import get_posts_for_account, get_latest_snapshot, save_recommendation
 from sable.pulse.scorer import score_post, rank_posts
 
+MIN_SAMPLE = 5
+
 
 def generate_recommendations(
     account: Account,
@@ -34,8 +36,18 @@ def generate_recommendations(
 
     if not scored:
         return {
-            "recommendations": [],
             "summary": "No performance data available. Track posts first with: sable pulse track",
+            "recommendations": [],
+            "content_ideas": [],
+            "avoid": [],
+        }
+
+    if len(scored) < MIN_SAMPLE:
+        return {
+            "summary": f"Only {len(scored)} post(s) with snapshots — need at least {MIN_SAMPLE} for reliable recommendations. Track more posts first with: sable pulse track",
+            "recommendations": [],
+            "content_ideas": [],
+            "avoid": [],
         }
 
     ranked = rank_posts(scored)
@@ -84,7 +96,7 @@ Return JSON:
 }}
 """
 
-    raw = call_claude_json(prompt, max_tokens=2048)  # budget-exempt: recommender called from pulse pipeline without sable.db connection
+    raw = call_claude_json(prompt, max_tokens=2048, org_id=account.org if account.org else None)
     try:
         raw = raw.strip()
         if raw.startswith("```"):

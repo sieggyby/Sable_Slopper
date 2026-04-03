@@ -559,6 +559,8 @@ def meta_digest(org: str, period_days: int, top_n: int, save_to_vault: bool) -> 
     from sable.pulse.meta import db as meta_db
     from sable.shared.paths import vault_dir
 
+    top_n = min(top_n, 25)
+
     meta_db.migrate()
     report = generate_digest(
         org=org,

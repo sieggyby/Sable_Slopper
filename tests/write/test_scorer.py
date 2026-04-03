@@ -258,3 +258,48 @@ def test_score_draft_propagates_sable_error(monkeypatch, tmp_path):
         scorer.score_draft("@testuser", "draft", "standalone_text", "testorg")
 
     assert exc_info.value.code == "NO_SCAN_DATA"
+
+
+# ---------------------------------------------------------------------------
+# org_id threading tests (AUDIT-5)
+# ---------------------------------------------------------------------------
+
+def test_get_hook_patterns_passes_org_id_to_claude(monkeypatch):
+    """get_hook_patterns passes org_id to call_claude_json."""
+    from sable.write import scorer
+
+    monkeypatch.setattr(scorer, "get_hook_patterns_cache", lambda org, fmt: None)
+    tweets = [{"text": f"t{i}", "total_lift": 3.0} for i in range(10)]
+    monkeypatch.setattr(scorer, "get_high_lift_tweets", lambda *a, **kw: tweets)
+    monkeypatch.setattr(scorer, "upsert_hook_patterns", lambda *a, **kw: None)
+
+    captured_kwargs = {}
+
+    def fake_claude(*a, **kw):
+        captured_kwargs.update(kw)
+        return json.dumps({"patterns": [{"name": "P", "description": "d", "example": "e"}]})
+
+    monkeypatch.setattr(scorer, "call_claude_json", fake_claude)
+    scorer.get_hook_patterns("myorg", "standalone_text")
+    assert captured_kwargs.get("org_id") == "myorg"
+
+
+def test_score_draft_passes_org_id_to_claude(monkeypatch, tmp_path):
+    """score_draft passes resolved_org to call_claude_json."""
+    from sable.write import scorer
+
+    monkeypatch.setattr(scorer, "profile_dir", lambda handle: tmp_path)
+    monkeypatch.setattr(scorer, "require_account", lambda handle: _FakeAccount(org="testorg"))
+
+    patterns = [scorer.HookPattern(name="P", description="d", example="e")]
+    monkeypatch.setattr(scorer, "get_hook_patterns", lambda org, fmt: patterns)
+
+    captured_kwargs = {}
+
+    def fake_claude(*a, **kw):
+        captured_kwargs.update(kw)
+        return json.dumps({"grade": "B", "score": 7.0, "matched_pattern": None, "voice_fit": 7, "flags": []})
+
+    monkeypatch.setattr(scorer, "call_claude_json", fake_claude)
+    scorer.score_draft("@testuser", "draft", "standalone_text", org="testorg")
+    assert captured_kwargs.get("org_id") == "testorg"

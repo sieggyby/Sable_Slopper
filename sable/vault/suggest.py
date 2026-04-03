@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from sable.vault.config import VaultConfig
 from sable.vault.search import SearchFilters, search_vault
@@ -99,8 +102,8 @@ def _draft_reply_texts(
             from sable.shared.api import build_account_context
             acc = require_account(account)
             acc_context = build_account_context(acc)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Could not load account context for %s: %s", account, e)
 
     items = [
         {
@@ -131,7 +134,7 @@ Return a JSON array of objects with:
 No extra text."""
 
     try:
-        raw = call_claude_json(prompt)  # budget-exempt: suggest called without platform org
+        raw = call_claude_json(prompt, org_id=org if org else None)
         drafts_data = json.loads(raw) if isinstance(raw, str) else raw
 
         if isinstance(drafts_data, dict) and "drafts" in drafts_data:
@@ -141,8 +144,8 @@ No extra text."""
 
         for s in suggestions:
             s.reply_draft = draft_map.get(s.content_id, "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Reply draft generation failed: %s", e)
 
     return suggestions
 

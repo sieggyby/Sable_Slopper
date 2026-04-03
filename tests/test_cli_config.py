@@ -93,15 +93,18 @@ def test_config_show_non_secret_values_visible():
     assert "claude-sonnet-4-6" in result.output
 
 
-def test_config_set_secret_warns_about_env_var(tmp_path):
-    """Setting a secret key warns the operator to prefer env vars."""
+def test_config_set_secret_key_rejects(tmp_path):
+    """Setting a secret key is rejected — not persisted to YAML."""
     runner = CliRunner()
 
-    with patch("sable.config.config_path", return_value=tmp_path / "config.yaml"):
+    config_file = tmp_path / "config.yaml"
+    with patch("sable.config.config_path", return_value=config_file):
         result = runner.invoke(main, ["config", "set", "anthropic_api_key", "sk-test"])
 
-    assert "Prefer setting secrets via environment variable" in result.output
+    assert result.exit_code != 0
+    assert "environment variable" in result.output
     assert "ANTHROPIC_API_KEY" in result.output
+    assert not config_file.exists()
 
 
 def test_config_set_non_secret_no_warning(tmp_path):
@@ -111,5 +114,23 @@ def test_config_set_non_secret_no_warning(tmp_path):
     with patch("sable.config.config_path", return_value=tmp_path / "config.yaml"):
         result = runner.invoke(main, ["config", "set", "default_model", "claude-haiku-4-5-20251001"])
 
-    assert "Prefer setting secrets" not in result.output
+    assert "environment variable" not in result.output
     assert "✓ Set default_model" in result.output
+
+
+def test_require_key_error_references_env_var():
+    """require_key() missing-key error says env var name, not 'config set'."""
+    import os
+    from sable.config import require_key
+
+    with patch.dict(os.environ, {}, clear=False):
+        # Ensure neither env nor config has the key
+        with patch("sable.config.get", return_value=""):
+            try:
+                require_key("anthropic_api_key")
+                assert False, "Should have raised"
+            except RuntimeError as e:
+                msg = str(e)
+                assert "ANTHROPIC_API_KEY" in msg
+                assert "config set" not in msg
+                assert "environment variable" in msg

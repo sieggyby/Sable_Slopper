@@ -129,11 +129,14 @@ def generate_digest(
     try:
         from sable.platform.db import get_db
         platform_conn = get_db()
-        row = platform_conn.execute("SELECT id FROM orgs WHERE slug = ?", (org,)).fetchone()
-        if row:
-            org_id = str(row[0])
-    except Exception:
-        pass
+        try:
+            row = platform_conn.execute("SELECT org_id FROM orgs WHERE org_id = ?", (org,)).fetchone()
+            if row:
+                org_id = str(row["org_id"])
+        finally:
+            platform_conn.close()
+    except Exception as e:
+        logger.warning("Could not resolve org_id for '%s': %s", org, e)
 
     generated_at = datetime.now(timezone.utc).isoformat()
     report = DigestReport(org=org, period_days=period_days, generated_at=generated_at)

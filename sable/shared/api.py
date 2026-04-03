@@ -1,9 +1,12 @@
 """Shared Anthropic client and account context builder."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 import anthropic
+
+logger = logging.getLogger(__name__)
 
 from sable import config as cfg
 from sable.roster.models import Account
@@ -150,8 +153,8 @@ def call_claude_with_usage(
                          model=model,
                          input_tokens=input_tokens,
                          output_tokens=output_tokens)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to log cost for org %s: %s", budget_org_id, e)
         text = response.content[0].text if response.content else ""
         return ClaudeCallResult(
             text=text,

@@ -23,16 +23,23 @@ def _get_headers() -> dict:
     }
 
 
-def _normalise_tweet(raw: dict, author_handle: str) -> dict:
-    """Normalise a raw SocialData tweet into our internal format."""
-    # TODO(codex): no field-level validation on API response shape — malformed tweets silently become zero-engagement records
+def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
+    """Normalise a raw SocialData tweet into our internal format.
+
+    Returns None if the tweet is malformed (missing id or unparseable date).
+    """
     user = raw.get("user", {})
     tweet_id = str(raw.get("id_str") or raw.get("id") or "")
+    if not tweet_id:
+        return None
+
     text = raw.get("full_text") or raw.get("text") or ""
 
     # Parse created_at
     created_at = raw.get("created_at", "")
     posted_at = _parse_twitter_date(created_at)
+    if posted_at is None:
+        return None
 
     # Media detection
     extended = raw.get("extended_entities") or raw.get("entities") or {}
@@ -254,7 +261,11 @@ class Scanner:
                 continue
 
             # Normalise + classify
-            normalised = [_normalise_tweet(t, handle) for t in raw_tweets]
+            normalised_raw = [_normalise_tweet(t, handle) for t in raw_tweets]
+            normalised = [t for t in normalised_raw if t is not None]
+            skipped = len(normalised_raw) - len(normalised)
+            if skipped:
+                console_warn(f"Skipped {skipped} malformed tweet(s) for {handle}")
 
             # Build author history from DB for normalization
             author_history = self.db.get_author_tweets(handle, self.org, limit=100)
@@ -336,7 +347,10 @@ class Scanner:
                     for raw_tweet in outsiders:
                         user = raw_tweet.get("user", {})
                         handle = f"@{user.get('screen_name', 'unknown')}"
-                        tweet = _normalise_tweet(raw_tweet, handle)
+                        maybe_tweet = _normalise_tweet(raw_tweet, handle)
+                        if maybe_tweet is None:
+                            continue
+                        tweet = maybe_tweet
                         bucket, attrs = ct(tweet)
                         tweet["format_bucket"] = bucket
                         tweet["attributes"] = attrs

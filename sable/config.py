@@ -11,6 +11,7 @@ _DEFAULTS: dict = {
     "anthropic_api_key": "",
     "replicate_api_key": "",
     "socialdata_api_key": "",
+    "elevenlabs_api_key": "",
     "default_model": "claude-sonnet-4-6",
     "workspace": str(Path.home() / "sable-workspace"),
     "pulse_meta": {
@@ -57,6 +58,13 @@ _DEFAULTS: dict = {
     },
 }
 
+SECRET_ENV_MAP: dict[str, str] = {
+    "anthropic_api_key": "ANTHROPIC_API_KEY",
+    "replicate_api_key": "REPLICATE_API_TOKEN",
+    "socialdata_api_key": "SOCIALDATA_API_KEY",
+    "elevenlabs_api_key": "ELEVENLABS_API_KEY",
+}
+
 
 def _deep_merge(base: dict, override: dict) -> dict:
     result = base.copy()
@@ -98,18 +106,16 @@ def set_key(key: str, value: str) -> None:
 def require_key(key: str) -> str:
     """Return config value or raise with helpful message."""
     import os
-    # Check env first
-    env_map = {
-        "anthropic_api_key": "ANTHROPIC_API_KEY",
-        "replicate_api_key": "REPLICATE_API_TOKEN",
-        "socialdata_api_key": "SOCIALDATA_API_KEY",
-    }
-    if key in env_map:
-        val = os.environ.get(env_map[key]) or get(key)
+    if key in SECRET_ENV_MAP:
+        val = os.environ.get(SECRET_ENV_MAP[key]) or get(key)
     else:
         val = get(key)
     if not val:
+        if key in SECRET_ENV_MAP:
+            raise RuntimeError(
+                f"Missing config key '{key}'. Set it via environment variable: export {SECRET_ENV_MAP[key]}=<value>"
+            )
         raise RuntimeError(
-            f"Missing config key '{key}'. Set it with: sable config set {key} <value>"
+            f"Missing config key '{key}'."
         )
     return val

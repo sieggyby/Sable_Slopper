@@ -37,14 +37,9 @@ def config_show():
         console.print(f"  [cyan]{k}[/cyan]: {v}")
 
 
-_SECRET_CONFIG_KEYS = {"anthropic_api_key", "replicate_api_key", "socialdata_api_key", "elevenlabs_api_key"}
+from sable.config import SECRET_ENV_MAP
 
-_ENV_VAR_NAMES = {
-    "anthropic_api_key": "ANTHROPIC_API_KEY",
-    "replicate_api_key": "REPLICATE_API_TOKEN",
-    "socialdata_api_key": "SOCIALDATA_API_KEY",
-    "elevenlabs_api_key": "ELEVENLABS_API_KEY",
-}
+_SECRET_CONFIG_KEYS = set(SECRET_ENV_MAP.keys())
 
 
 @config_group.command("set")
@@ -52,13 +47,13 @@ _ENV_VAR_NAMES = {
 @click.argument("value")
 def config_set(key, value):
     """Set a config value."""
+    import sys
     from sable import config as cfg
     if key in _SECRET_CONFIG_KEYS:
-        env_name = _ENV_VAR_NAMES.get(key, key.upper())
-        console.print(
-            f"[yellow]⚠ Prefer setting secrets via environment variable "
-            f"(export {env_name}=...) rather than persisting in config.yaml[/yellow]"
-        )
+        env_name = SECRET_ENV_MAP.get(key, key.upper())
+        console.print(f"[red]Error: {key} is a secret — set it via environment variable:[/red]")
+        console.print(f"  export {env_name}=<value>")
+        sys.exit(1)
     cfg.set_key(key, value)
     console.print(f"[green]✓ Set {key}[/green]")
 

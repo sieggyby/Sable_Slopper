@@ -109,7 +109,7 @@ def get_hook_patterns(org: str, format_bucket: str) -> list[HookPattern]:
         "Be concise and specific."
     )
 
-    raw = call_claude_json(prompt, system=system, call_type="score_patterns")
+    raw = call_claude_json(prompt, system=system, call_type="score_patterns", org_id=org if org else None)
     parsed = json.loads(raw)
     patterns_list = parsed["patterns"]
     patterns_json = json.dumps(patterns_list)
@@ -155,7 +155,7 @@ def score_draft(
         'Only include "suggested_rewrite" if score < 7; omit the key otherwise.'
     )
 
-    raw = call_claude_json(prompt, call_type="score_draft")
+    raw = call_claude_json(prompt, call_type="score_draft", org_id=resolved_org if resolved_org else None)
     data: dict = json.loads(raw)
 
     return HookScore(

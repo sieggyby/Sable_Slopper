@@ -54,12 +54,20 @@ def search_vault(
         return []
 
     if len(candidates) <= 50:
-        return claude_rank(query, candidates, filters, config)
+        try:
+            return claude_rank(query, candidates, filters, config, org=org)
+        except Exception as e:
+            logger.warning("Claude ranking failed, using keyword fallback: %s", e, exc_info=True)
+            prescored = keyword_prescore(query, candidates)
+            return [
+                SearchResult(id=n.get("id", "?"), score=s, reason="keyword match", note=n)
+                for n, s in prescored[:config.max_suggestions]
+            ]
     else:
         prescored = keyword_prescore(query, candidates)
         top50_notes = [note for note, _score in prescored[:50]]  # unwrap tuples
         try:
-            return claude_rank(query, top50_notes, filters, config)
+            return claude_rank(query, top50_notes, filters, config, org=org)
         except Exception as e:
             logger.warning("Claude ranking failed, using keyword fallback: %s", e, exc_info=True)
             # Fallback: return keyword-scored results
@@ -106,6 +114,7 @@ def claude_rank(
     candidates: list[dict],
     filters: SearchFilters,
     config: VaultConfig,
+    org: str = "",
 ) -> list[SearchResult]:
     """Send top candidates to Claude for ranking."""
     from sable.shared.api import call_claude_json
@@ -143,7 +152,7 @@ For each relevant item (score >= 40), return:
 
 Return a JSON array sorted by score descending. Only include items with score >= 40. No extra text."""
 
-    raw = call_claude_json(prompt)  # budget-exempt: no org_id at search call site
+    raw = call_claude_json(prompt, org_id=org if org else None)
     ranked = json.loads(raw) if isinstance(raw, str) else raw
 
     if isinstance(ranked, dict) and "results" in ranked:

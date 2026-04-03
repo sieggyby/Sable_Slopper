@@ -49,6 +49,24 @@ def test_search_vault_large_result_uses_claude_rank(tmp_path):
     )
 
 
+def test_search_vault_small_result_fallback_on_claude_failure(tmp_path):
+    """With <=50 candidates and claude_rank raising, fallback returns list[SearchResult] — no crash."""
+    from sable.vault.search import search_vault, SearchResult, SearchFilters
+    from sable.vault.config import VaultConfig
+
+    notes = _make_fake_notes(30)
+    config = VaultConfig()
+
+    with patch("sable.vault.search.load_candidates", return_value=notes), \
+         patch("sable.vault.search.claude_rank", side_effect=RuntimeError("API down")):
+        result = search_vault("defi crypto", tmp_path, "testorg", config=config)
+
+    assert isinstance(result, list)
+    for r in result:
+        assert isinstance(r, SearchResult)
+    assert len(result) <= config.max_suggestions
+
+
 def test_search_vault_large_result_fallback_on_claude_failure(tmp_path):
     """With >50 candidates and claude_rank raising, fallback returns list[SearchResult] — no crash."""
     from sable.vault.search import search_vault, SearchResult, SearchFilters
