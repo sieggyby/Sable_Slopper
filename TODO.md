@@ -354,327 +354,53 @@ Each step is independently deployable. SableWeb can start consuming pulse data w
 
 ## Audit Remediation Queue (2026-04-01)
 
-**Status: COMPLETE (2026-04-02).** All AUDIT items landed with adversarial QA sign-off.
-634 tests passing, ruff clean, mypy clean.
+**Status: COMPLETE (2026-04-02).** All 8 AUDIT items landed across 5 commits with adversarial QA sign-off per phase. 634 tests passing, ruff clean, mypy clean.
 
-### AUDIT-1 · Secret handling + CLI error redaction hardening
+### AUDIT-1 · Secret handling + CLI error redaction — ✅ Complete
 
-**Risk level:** Tier 1 — credential exposure.
+- `config set` refuses secret keys; `require_key()` points to env vars
+- `SECRET_ENV_MAP` canonical mapping in `config.py`; `elevenlabs_api_key` added
+- All 40+ CLI exception handlers redact via `redact_error()`
+- Tests: 9 config, 8 CLI redaction, 11 redact_error unit
 
-**Status:** ✅ Complete (2026-04-02).
+### AUDIT-2 · SocialData response validation — ✅ Complete
 
-**What shipped:**
-- ✅ `config show` masks secrets with `(set)` / `(not set)` via `_SECRET_CONFIG_KEYS`
-- ✅ `config set` refuses secret keys entirely; directs operators to env vars
-- ✅ `require_key()` error message points to env var, not `config set`
-- ✅ `SECRET_ENV_MAP` canonical mapping in `sable/config.py`, imported by `cli.py`
-- ✅ `elevenlabs_api_key` added to `_DEFAULTS` and `SECRET_ENV_MAP`
-- ✅ All 40+ CLI exception handlers redact via `redact_error()` (18 files)
-- ✅ `redact_error` patterns cover: `sk-ant-*`, `r8_*` (bare), env var assignments,
-  Bearer tokens, `xi-api-key` headers
-- ✅ Tests: 9 config show/set, 8 CLI error redaction, 11 redact_error unit
+- `_normalise_tweet()` rejects: missing id, unparseable date, missing all core engagement fields, non-coercible core engagement values
+- `_safe_int()` coerces non-core fields; `_CORE_ENGAGEMENT_KEYS` presence + type check
+- Callers filter None results, emit `console_warn()` with skip count
+- Tests: 12 in `test_scanner_validation.py`
 
-### AUDIT-2 · SocialData response validation before persistence
+### AUDIT-3 · Thin-sample gate for recommendations — ✅ Complete
 
-**Risk level:** Tier 1 — silent data corruption / misleading outputs.
-**Status:** ✅ Complete (2026-04-02).
+- `MIN_SAMPLE = 5` in `recommender.py`; returns insufficiency result below threshold
+- No Claude call on thin samples; all 4 return keys present in both paths
+- Tests: 6 in `test_recommender.py`
 
-**Why this is a real bug:**
-- `sable/pulse/meta/scanner.py::_normalise_tweet()` currently trusts malformed
-  SocialData payloads and converts missing engagement fields into zero-valued tweets
-- those rows are then persisted normally by `sable/pulse/meta/db.py::upsert_tweet()`
-- a provider shape drift can silently poison baselines, trends, digest inputs, and
-  downstream Claude analysis
+### AUDIT-4 · Small-vault search fallback — ✅ Complete
 
-**Relevant files (with Codex line refs):**
-- `sable/pulse/meta/scanner.py` — `:26,:68,:81` (`_normalise_tweet` trusts malformed payloads)
-- `sable/pulse/meta/db.py` — `:216` (`upsert_tweet` persists without validation)
-- maybe `sable/pulse/meta/fingerprint.py` and `sable/pulse/meta/normalize.py` if a small
-  validation boundary type/helper is cleaner
+- `search_vault()` ≤50 branch wrapped in try/except with keyword_prescore fallback
+- Tests: 5 in `test_search.py`
 
-**Required behavior change:**
-- Validate required tweet fields before writing to `meta.db`
-- if a tweet is malformed, skip it or mark it explicitly as invalid/degraded; do not
-  silently coerce it into a normal zero-engagement record
-- preserve scan completion when only some tweets are malformed
-- surface the problem with a warning so operators can tell the upstream shape changed
+### AUDIT-5 · Org-scoped Claude budget enforcement — ✅ Complete
 
-**Implementation notes:**
-- Keep this at the scanner boundary; do not spread field checks across downstream stages
-- minimum useful validation: non-empty tweet id, parseable/postable timestamp when
-  required for recency filtering, and sane numeric engagement fields
-- avoid broad schema frameworks or new dependencies; a local validator/helper is enough
+- `org_id` threaded through: digest, recommender, scorer, vault search, vault suggest, vault enrich
+- Digest SQL fixed: `SELECT org_id FROM orgs WHERE org_id = ?`
+- `MAX_DIGEST_POSTS = 25` cap; `top_n = min(top_n, 25)` in CLI
+- `log_cost` failure → `logger.warning()` instead of silent swallow
+- Tests: across 6 test files
 
-**Acceptance criteria:**
-- malformed API payloads do not enter `scanned_tweets` as normal rows
-- well-formed tweets in the same scan still process successfully
-- operator gets a warning or count of skipped malformed rows
+### AUDIT-6 · Maintainability cleanup — ✅ Complete
 
-**Exact tests to add:**
-- `tests/pulse/meta/test_scanner_validation.py`
-  - malformed tweet missing id is skipped
-  - malformed engagement payload does not become a persisted zero-engagement row
-  - mixed batch with one bad tweet still saves the valid tweet(s)
-  - warning path is exercised
+- `SECRET_ENV_MAP` deduplication; org_id threading made explicit
 
-### AUDIT-3 · Thin-sample trustworthiness gate for `sable pulse recommend`
+### AUDIT-7 · Remove silent degradation — ✅ Complete
 
-**Risk level:** Tier 1 — confident but misleading client-facing output.
-**Status:** ✅ Complete (2026-04-02).
+- Silent `except: pass` → `logger.warning()` in: `api.py`, `suggest.py`, `digest.py`, `enrich.py`
+- Tests: warning emission verified in suggest, digest, api, enrich tests
 
-**Why this is a real bug:**
-- `sable/pulse/recommender.py::generate_recommendations()` will produce full Claude
-  recommendations from any non-empty scored sample, even a single post
-- there is no minimum-sample threshold or uncertainty disclosure
-- this violates the repo’s “do not present thin data as strong signal” guidance
+### AUDIT-8 · Migration test version — ✅ Complete
 
-**Relevant files (with Codex line refs):**
-- `sable/pulse/recommender.py` — `:35,:41,:87` (`generate_recommendations` has no sample-size
-  gate; `:87` also bypasses `org_id` — overlaps AUDIT-5)
-- `sable/pulse/cli.py`
-- possibly `docs/COMMANDS.md` if CLI output semantics need documenting
-
-**Required behavior change:**
-- introduce a minimum-sample gate before Claude recommendations are generated
-- when sample size is too small, return a truthful insufficiency result instead of
-  pretending the tool has strong guidance
-- the insufficiency result should explain what to do next, e.g. track more posts first
-- if you still show any guidance on thin samples, it must be labeled as low-confidence
-
-**Implementation notes:**
-- keep the contract similar: return a dict with `summary`, `recommendations`,
-  `content_ideas`, and `avoid`, but make the message explicitly low-confidence or
-  insufficient-data
-- choose a simple threshold and encode it in tests
-
-**Acceptance criteria:**
-- one-post or very small samples do not produce normal-strength recommendation payloads
-- larger samples still use the current Claude flow
-- CLI output remains readable in both cases
-
-**Exact tests to add:**
-- extend `tests/pulse/test_recommender.py`
-  - one-post sample returns insufficiency / low-confidence summary
-  - thin-sample path does not call Claude
-  - sample above threshold still calls Claude once and preserves current behavior
-
-### AUDIT-4 · Small-vault search fallback parity
-
-**Risk level:** Tier 1 — avoidable operator-facing failure in a core workflow.
-**Status:** ✅ Complete (2026-04-02).
-
-**Why this is a real bug:**
-- `sable/vault/search.py::search_vault()` only falls back to keyword ranking when the
-  candidate set is `> 50`
-- for `<= 50` candidates it calls Claude directly and lets failures escape
-- `sable/vault/suggest.py` depends on `search_vault()`, so reply suggestions inherit the
-  same fragility on smaller vaults
-
-**Relevant files (with Codex line refs):**
-- `sable/vault/search.py` — `:56,:61` (`search_vault` small-candidate branch has no fallback)
-- `sable/vault/suggest.py` — `:102,:133,:144` (depends on `search_vault`, inherits fragility)
-- existing tests in `tests/vault/test_search.py`
-- possibly `tests/vault/test_suggest.py`
-
-**Required behavior change:**
-- Claude ranking failure should degrade to deterministic keyword results regardless of
-  candidate count
-- preserve the current `> 50` prescore behavior, but give the `<= 50` branch the same
-  resilience contract
-- keep `vault suggest` functional when ranking fails
-
-**Implementation notes:**
-- do not rewrite search quality logic
-- the smallest safe patch is likely to route both branches through one common fallback path
-
-**Acceptance criteria:**
-- `search_vault()` never hard-fails just because Claude ranking is unavailable
-- fallback results are still bounded by `config.max_suggestions`
-- `vault suggest` returns zero or degraded suggestions cleanly rather than crashing
-
-**Exact tests to add:**
-- extend `tests/vault/test_search.py`
-  - `<= 50` candidates + Claude failure returns keyword `SearchResult`s instead of raising
-  - `> 50` branch still behaves as before
-- optionally extend `tests/vault/test_suggest.py`
-  - reply suggestion flow survives a ranking failure upstream
-
-### AUDIT-5 · Org-scoped Claude budget enforcement gaps
-
-**Risk level:** Tier 1/Tier 2 — burns money and breaks the platform contract.
-**Status:** ✅ Complete (2026-04-02).
-
-**Why this is a real bug:**
-- the shared Claude wrapper already enforces budget + cost logging when `org_id` is
-  passed
-- several org-aware features still call Claude without `org_id`, so weekly caps and
-  `cost_events` are bypassed
-- the most concrete bug is in watchlist digest: it tries to resolve orgs using
-  `SELECT id FROM orgs WHERE slug = ?`, but the actual schema stores `org_id` and has no
-  `id` or `slug` columns
-
-**Relevant files (with Codex line refs):**
-- `sable/shared/api.py` — `:147,:153` (swallows `log_cost` failure silently)
-- `sable/pulse/meta/digest.py` — `:128,:132,:135,:143` (org lookup uses wrong column names
-  `id`/`slug` instead of `org_id`; Claude calls not org-scoped)
-- `sable/pulse/meta/cli.py` — `:552` (digest subcommand does not thread org context)
-- `sable/pulse/recommender.py` — `:87` (calls Claude without `org_id` despite having `account.org`)
-- `sable/write/scorer.py` — `:112,:158` (`get_hook_patterns` and `score_draft` bypass org budget)
-- `sable/vault/search.py` — `:146` (`claude_rank` not org-scoped)
-- `sable/vault/suggest.py` — `:133` (`_draft_reply_texts` not org-scoped)
-- schema reference: `sable/db/migrations/001_initial.sql`
-
-**Required behavior change:**
-- fix digest org lookup to the real schema (`org_id`)
-- ensure digest Claude calls are actually org-scoped when an org is known
-- cap or otherwise bound `sable pulse meta digest --top` so a user cannot fan out an
-  unbounded number of per-post Claude calls on anatomy cache misses
-- thread `org_id` through the remaining org-aware Claude callers where org context is
-  already available
-
-**Likely call sites to harden:**
-- `pulse/meta/digest.py::_analyze_post_for_digest()`
-- `pulse/recommender.py::generate_recommendations()` using `account.org`
-- `write/scorer.py::get_hook_patterns()` and `score_draft()` using resolved org
-- `vault/search.py::claude_rank()` and `vault/suggest.py::_draft_reply_texts()` using
-  the `org` argument that is already in the function signature
-
-**Implementation notes:**
-- do not change truly non-org generation flows that are intentionally annotated
-  `# budget-exempt`
-- the target is org-aware flows only
-- keep this centralized: prefer passing `org_id` into existing `call_claude_json(...)`
-  calls rather than building bespoke logging
-- `sable/shared/api.py` currently swallows `log_cost(...)` failures silently. That should
-  become a visible warning in logs; otherwise cost observability can still fail without
-  operators or maintainers noticing.
-
-**Acceptance criteria:**
-- org-aware recommendation/search/scoring/digest flows log spend through the shared wrapper
-- digest no longer silently loses org context due to bad SQL
-- `meta digest --top` has a sane ceiling or other explicit bound
-- a failed `log_cost(...)` attempt emits a warning rather than disappearing silently
-
-**Exact tests to add:**
-- extend `tests/pulse/meta/test_digest.py`
-  - digest resolves org via real schema and passes non-`None` `org_id` to `call_claude_json`
-  - large `--top` input is capped/bounded
-- extend `tests/pulse/test_recommender.py`
-  - recommender passes `account.org` into `call_claude_json`
-- extend `tests/write/test_scorer.py`
-  - hook-pattern generation and draft scoring pass `org_id`
-- add/extend vault tests
-  - `search_vault()` passes `org_id`
-  - reply-draft generation passes `org_id`
-- add `tests/shared/test_api.py`
-  - if `log_cost(...)` raises inside the shared wrapper, the Claude call still succeeds
-    but a warning is logged
-
-### AUDIT-6 · Follow-up maintainability cleanup after the fixes above
-
-**Risk level:** Tier 2 — hidden coupling.
-**Status:** ✅ Complete (2026-04-02). Addressed via `SECRET_ENV_MAP` deduplication and org_id threading.
-
-**Why this matters:**
-- budget enforcement currently depends on each call site remembering to pass `org_id`
-- this is the hidden coupling behind the repeated misses above
-
-**Goal:**
-- after landing AUDIT-5, do a light cleanup in touched files so the org-aware Claude
-  contract is obvious and hard to forget
-- avoid a rewrite; just reduce repetition and ambiguity where the patch already touches code
-
-**Acceptable scope:**
-- helper variables like `resolved_org_id`
-- comments explaining why a path is intentionally `budget-exempt`
-- small local helper functions in touched modules only
-
-**Do not do:**
-- broad abstraction work across untouched modules
-- large interface redesigns
-
-### AUDIT-7 · Remove silent degradation in operator-facing audit flows
-
-**Risk level:** Tier 2, with Tier 1 spillover when failures hide stale or untrustworthy output.
-**Status:** ✅ Complete (2026-04-02).
-
-**Why this is missing from the queue:**
-- several of the exact paths touched by AUDIT-4 and AUDIT-5 still use broad
-  `except Exception: pass` / silent fallback patterns
-- the repo convention already says broad exception handlers should log warnings, but the
-  current queue did not make that an explicit acceptance target
-- if these swallows remain, the repo can still “look healthy” while quietly skipping
-  reply drafts, cost logging, digest org resolution, or other degraded behavior
-
-**Relevant files:**
-- `sable/shared/api.py`
-- `sable/vault/suggest.py`
-- `sable/pulse/meta/digest.py`
-- any touched file in AUDIT-1 through AUDIT-5 that currently degrades silently instead of
-  logging a warning
-
-**Required behavior change:**
-- when an operator-facing path degrades but continues, emit `logger.warning(...)`
-  with enough context to debug the issue
-- keep the current resilient behavior where appropriate; this item is about visibility,
-  not turning every degradation into a hard crash
-- do not add noisy stack traces to normal user-facing terminal output; log the warning
-  and keep CLI output clean
-
-**Implementation notes:**
-- this is intentionally scoped to files already being touched by the audit-remediation
-  batch; do not go repo-wide and churn unrelated modules
-- especially important cases:
-  - `vault/suggest.py` account-context fallback and reply-draft generation failure
-  - `pulse/meta/digest.py` org lookup failure and per-post Claude analysis failure
-  - `shared/api.py` cost-log failure after a successful Claude call
-
-**Acceptance criteria:**
-- degraded reply suggestion / digest / cost-log paths are observable in logs
-- the CLI still returns usable output where graceful degradation is intended
-- no new silent `pass` blocks are introduced in touched files
-
-**Exact tests to add:**
-- extend or add tests covering warning emission for:
-  - reply-draft generation fallback in `vault/suggest.py`
-  - digest org-resolution or per-post analysis fallback in `pulse/meta/digest.py`
-  - shared wrapper `log_cost(...)` failure in `sable/shared/api.py`
-
-### AUDIT-8 · Migration test version assertions are stale
-
-**Risk level:** Tier 3 — test maintenance.
-**Status:** ✅ Complete (2026-04-02). Version derived from `_MIGRATIONS` source of truth.
-
-**Why this fails:**
-- `tests/platform/test_migration.py` hardcodes schema version `14` in three places
-  (`:9,:30,:39`) but the live schema is at version `15`
-- this causes 3 test failures that are unrelated to any code change
-
-**Relevant files:**
-- `tests/platform/test_migration.py` — lines 9, 30, 39
-
-**Fix:** Update the hardcoded version from `14` to `15` in all three assertions.
-
-**Acceptance criteria:**
-- `pytest tests/platform/test_migration.py` passes
-- validation snapshot returns to `0 failed`
-
----
-
-### Validation for the full audit-remediation batch
-
-Run after landing any of AUDIT-1 through AUDIT-5:
-
-```bash
-./.venv/bin/python -m pytest -q
-./.venv/bin/ruff check .
-./.venv/bin/mypy sable
-```
-
-Current baseline (post full audit remediation + Codex hardening + SocialData hardening, 2026-04-02):
-- `./.venv/bin/python -m pytest -q` → `634 passed`
-- `./.venv/bin/ruff check .` → 0
-- `./.venv/bin/mypy sable` → 0
+- Derived from `_MIGRATIONS` source of truth instead of hardcoded version number
 
 ---
 
@@ -873,9 +599,8 @@ and writes nothing.
   gate: validate `GET /twitter/search?query=to:{handle}` before implementing)
 - Vernacular lint pass on `sable write` (`--lint-vernacular` flag, deferred to v2)
 
-**When to build:** After AUDIT remediation queue is clear. High value for new client
-onboarding — lexicon is the first thing a new operator needs to understand about a
-community.
+**When to build:** Audit queue is clear. High value for new client onboarding — lexicon
+is the first thing a new operator needs to understand about a community.
 
 #### Implementation plan
 
@@ -996,8 +721,8 @@ section prove value with operators.
   Minimum edge threshold: <20 edges → empty result with `insufficient_data` flag.
 - **Phase 2 (separate proposal):** Topic clustering overlay on the graph. Out of scope.
 
-**When to build Part A:** First feature to build after AUDIT queue — smallest scope,
-highest impact, zero new dependencies.
+**When to build Part A:** Audit queue is clear. Smallest scope, highest impact, zero
+new dependencies.
 
 #### Implementation plan
 

@@ -97,6 +97,31 @@ All items below resolved with tests and validation:
 - **SIMPLIFY-DEAD-ATOMIC-WRITE** — removed dead `_atomic_write()` from platform_sync
 - **SIMPLIFY-HANDLE-NORM-TODO** — tracked TODO comment added for future consolidation
 
+### AUDIT-1–8 Full Remediation (2026-04-01 to 2026-04-02)
+
+8 AUDIT items identified by maintainer review + Codex line-level analysis. Implemented
+across 6 phases with adversarial QA subagent gating every commit. 5 QA rounds total.
+
+- **AUDIT-1** (Tier 1): Secret handling — `config set` refuses secrets, `require_key()` points to env vars, `SECRET_ENV_MAP`, `redact_error()` in all CLI handlers
+- **AUDIT-2** (Tier 1): Scanner validation — `_normalise_tweet()` rejects malformed payloads, `_safe_int()` coercion, core engagement type check
+- **AUDIT-3** (Tier 1): Thin-sample gate — `MIN_SAMPLE = 5` in recommender, insufficiency return
+- **AUDIT-4** (Tier 1): Small-vault search fallback — keyword_prescore fallback on Claude failure
+- **AUDIT-5** (Tier 1/2): Org budget — `org_id` threaded through 7 Claude call sites, digest SQL fixed, `MAX_DIGEST_POSTS = 25`
+- **AUDIT-6** (Tier 2): Maintainability — `SECRET_ENV_MAP` dedup, org_id patterns explicit
+- **AUDIT-7** (Tier 2): Silent degradation — `logger.warning()` replaces silent `except: pass` in 4 modules
+- **AUDIT-8** (Tier 3): Migration test — version derived from `_MIGRATIONS` source of truth
+
+Two Codex hardening rounds followed (scanner core-field validation, vault enrich org threading).
+
+### SocialData API Hardening (2026-04-02)
+
+Audited all SocialData call sites against `SablePlatform/docs/SOCIALDATA_BEST_PRACTICES.md`.
+
+- New `sable/shared/socialdata.py` centralized HTTP client (402 fatal, 429 exp backoff + jitter, 5xx retry, network error retry)
+- Removed duplicate `_get_headers()` / `_BASE_URL` / direct `httpx` from 4 modules
+- Fixed `suggest.py` endpoint path (`/twitter/tweet/` → `/twitter/tweets/`)
+- 9 tests in `tests/shared/test_socialdata.py`
+
 ---
 
 ## Feature Delivery Timeline
@@ -165,7 +190,11 @@ Schema v5 → v6. Write path owned by Cult Grader's `platform_sync.py`.
 | 2026-03-26 (AR-6 QA + Simplify) | 401 | 3 E702 | 1 call-arg |
 | 2026-03-26 (FEATURE-PULSE-META-SKIP-FRESH) | 414 | 3 E702 | 1 call-arg |
 | 2026-03-29 | 557 | 3 E702 | 1 call-arg |
-| 2026-03-31 (current) | 578 | 0 | 0 |
+| 2026-03-31 | 578 | 0 | 0 |
+| 2026-04-01 (AUDIT-1 partial) | 592 | 0 | 0 |
+| 2026-04-02 (AUDIT-1–8 complete) | 620 | 0 | 0 |
+| 2026-04-02 (Codex hardening) | 625 | 0 | 0 |
+| 2026-04-02 (SocialData hardening) | 634 | 0 | 0 |
 
 ---
 

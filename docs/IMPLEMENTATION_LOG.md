@@ -98,3 +98,86 @@ Added 7 tests to `tests/diagnose/test_runner.py` (tests 13–19):
 - `test_render_diagnosis_quick_actions_block`
 
 All 12 existing tests still pass unchanged.
+
+---
+
+# Audit Remediation (2026-04-01 to 2026-04-02)
+
+Full remediation of 8 AUDIT items identified by maintainer review + Codex line-level
+analysis. Each phase gated by adversarial QA subagent (trained on AGENTS.md +
+docs/QA_WORKFLOW.md + docs/THREAT_MODEL.md). 5 QA rounds total.
+
+## Phase 1 — AUDIT-8: Migration test version (35ec0be)
+
+Changed `tests/platform/test_migration.py` to derive expected version from
+`_MIGRATIONS[-1][1]` instead of hardcoded `14`.
+
+## Phase 2 — AUDIT-1: Secret handling + CLI error redaction (35ec0be)
+
+- `SECRET_ENV_MAP` in `config.py` as single source of truth for secret→env var mapping
+- `config set` hard refusal for secret keys (was: warning only)
+- `require_key()` error message points to env var, not `sable config set`
+- `elevenlabs_api_key` added to `_DEFAULTS` and `SECRET_ENV_MAP`
+- Tests: `tests/test_cli_config.py` (9 tests)
+
+## Phase 3 — AUDIT-2: Scanner tweet validation (6ba93e7)
+
+- `_normalise_tweet()` returns `Optional[dict]`; rejects missing id, unparseable date
+- `_CORE_ENGAGEMENT_KEYS` presence check; `_safe_int()` coercion for non-core fields
+- Callers filter None results, emit `console_warn()` with skip count
+- Tests: `tests/pulse/meta/test_scanner_validation.py` (11 tests)
+
+## Phase 4 — AUDIT-3/4/5/6/7 (6ba93e7)
+
+- AUDIT-3: `MIN_SAMPLE = 5` gate in `recommender.py`
+- AUDIT-4: Small-vault search fallback parity (try/except + keyword_prescore)
+- AUDIT-5: `org_id` threaded through digest, recommender, scorer, vault search/suggest;
+  digest SQL fixed (`org_id` not `id`/`slug`); `MAX_DIGEST_POSTS = 25`
+- AUDIT-6: `SECRET_ENV_MAP` dedup, org_id patterns explicit
+- AUDIT-7: Silent `except: pass` → `logger.warning()` in api.py, suggest.py, digest.py
+- Tests: across `test_recommender.py`, `test_search.py`, `test_suggest.py`,
+  `test_scorer.py`, `test_api.py`, `test_digest.py`
+
+## Codex hardening round 1 (872fe19)
+
+- Non-numeric core engagement values (`"not_a_number"`) now reject the tweet (was: coerced to 0)
+- Non-core fields still coerce via `_safe_int()`
+- Tests: updated `test_scanner_validation.py` (split into core/non-core tests)
+
+## Codex hardening round 2 (9d4f24b)
+
+- `enrich_batch()` + `_enrich_chunk()` accept `org` param; pass `org_id` to Claude
+- Silent `except Exception` in enrich → `logger.warning("Enrichment chunk failed ...")`
+- Both callers (`sync.py`, `cli.py`) updated to pass `org=org`
+- TODO.md banner fixed (607→625→634)
+- Tests: 4 new in `test_enrich.py`
+
+Validation: 592→620→625→634 passed. ruff clean, mypy clean.
+
+---
+
+# SocialData API Hardening (2026-04-02)
+
+Audited all SocialData call sites against `SablePlatform/docs/SOCIALDATA_BEST_PRACTICES.md`.
+
+## Centralized HTTP client (e722e94)
+
+New `sable/shared/socialdata.py`:
+- `socialdata_get_async()` / `socialdata_get()` — single entry point for all SocialData calls
+- 402: `BalanceExhaustedError` raised immediately, no retry
+- 429: exponential backoff with jitter (1s→4s→16s→64s), 4 retries
+- 5xx: same retry schedule as 429
+- Network errors (timeout/DNS/connection): retried with same schedule
+- Other 4xx: raised immediately
+
+Refactored 4 modules to use shared client:
+- `scanner.py`: removed `_get_headers()`, inline 429 handling, `retry_with_backoff_async`
+  wrapper; added `BalanceExhaustedError` propagation past per-author exception handlers
+- `tracker.py`: removed `_get_headers()`, direct httpx calls
+- `trends.py`: removed `_get_headers()`, direct httpx calls, unused imports
+- `suggest.py`: removed direct httpx call; fixed endpoint `/twitter/tweet/` → `/twitter/tweets/`
+
+Tests: 9 new in `tests/shared/test_socialdata.py` (402, 429 retry+exhaust, 5xx, 200,
+404, network error retry+exhaust, backoff schedule). 2 suggest tests simplified.
+
+Validation: 625→634 passed. ruff clean, mypy clean.
