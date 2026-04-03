@@ -153,9 +153,7 @@ No extra text."""
 def fetch_tweet_text(tweet_url: str) -> str:
     """Fetch tweet text from a URL using SocialData API."""
     import re
-    from sable import config as cfg
-
-    api_key = cfg.require_key("socialdata_api_key")
+    from sable.shared.socialdata import socialdata_get
 
     # Extract tweet ID from URL
     match = re.search(r"/status/(\d+)", tweet_url)
@@ -163,12 +161,5 @@ def fetch_tweet_text(tweet_url: str) -> str:
         raise ValueError(f"Cannot extract tweet ID from URL: {tweet_url}")
     tweet_id = match.group(1)
 
-    import httpx
-    resp = httpx.get(
-        f"https://api.socialdata.tools/twitter/tweet/{tweet_id}",
-        headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    data = socialdata_get(f"/twitter/tweets/{tweet_id}", timeout=15)
     return data.get("full_text") or data.get("text") or ""

@@ -2,32 +2,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Optional
 
-import httpx
-
-from sable import config as cfg
-from sable.shared.paths import sable_home
-
-_BASE_URL = "https://api.socialdata.tools"
-
-
-def _get_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {cfg.require_key('socialdata_api_key')}",
-        "Content-Type": "application/json",
-    }
+from sable.shared.socialdata import socialdata_get_async
 
 
 async def _search_tweets_async(query: str, count: int = 20) -> list[dict]:
-    async with httpx.AsyncClient(headers=_get_headers(), timeout=30) as client:
-        resp = await client.get(
-            f"{_BASE_URL}/twitter/search",
-            params={"query": query, "type": "Latest", "count": count},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    data = await socialdata_get_async(
+        "/twitter/search",
+        params={"query": query, "type": "Latest", "count": count},
+    )
     return data.get("tweets", data.get("data", []))
 
 

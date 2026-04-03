@@ -53,15 +53,13 @@ def test_note_title_unknown_type_missing_keys_does_not_crash():
 # fetch_tweet_text — URL validation path (no HTTP call)
 # ─────────────────────────────────────────────────────────────────────
 
-def test_fetch_tweet_text_raises_on_non_url(monkeypatch):
-    # Patch require_key so we don't need a real config
-    monkeypatch.setattr("sable.config.require_key", lambda k: "fake-api-key")
+def test_fetch_tweet_text_raises_on_non_url():
+    # ValueError raised before any API call — no config needed
     with pytest.raises(ValueError, match="Cannot extract tweet ID"):
         fetch_tweet_text("not-a-url-at-all")
 
 
-def test_fetch_tweet_text_raises_on_url_without_status(monkeypatch):
-    monkeypatch.setattr("sable.config.require_key", lambda k: "fake-api-key")
+def test_fetch_tweet_text_raises_on_url_without_status():
     with pytest.raises(ValueError, match="Cannot extract tweet ID"):
         fetch_tweet_text("https://twitter.com/user/no-status-here")
 

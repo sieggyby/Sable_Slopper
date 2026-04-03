@@ -7,16 +7,13 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import httpx
-
 from sable.shared.handles import strip_handle
 
-from sable import config as cfg
 from sable.pulse import db
 from sable.shared.paths import sable_home
+from sable.shared.socialdata import socialdata_get_async
 
 _CACHE_DIR = sable_home() / "pulse_cache"
-_BASE_URL = "https://api.socialdata.tools"
 
 
 def _cache_path(key: str) -> Path:
@@ -38,13 +35,6 @@ def _load_cache(key: str, max_age_seconds: int = 300) -> Optional[dict]:
 def _save_cache(key: str, data: dict) -> None:
     with open(_cache_path(key), "w") as f:
         json.dump(data, f)
-
-
-def _get_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {cfg.require_key('socialdata_api_key')}",
-        "Content-Type": "application/json",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -81,13 +71,10 @@ async def _fetch_user_tweets_async(handle: str, count: int = 20) -> list[dict]:
     if cached:
         return cached.get("tweets", [])
 
-    async with httpx.AsyncClient(headers=_get_headers(), timeout=30) as client:
-        resp = await client.get(
-            f"{_BASE_URL}/twitter/user/{handle}/tweets",
-            params={"type": "tweets", "limit": count},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    data = await socialdata_get_async(
+        f"/twitter/user/{handle}/tweets",
+        params={"type": "tweets", "limit": count},
+    )
 
     tweets = data.get("tweets", data.get("data", []))
     _save_cache(cache_key, {"tweets": tweets})
@@ -100,10 +87,7 @@ async def _fetch_tweet_metrics_async(tweet_id: str) -> dict:
     if cached:
         return cached
 
-    async with httpx.AsyncClient(headers=_get_headers(), timeout=30) as client:
-        resp = await client.get(f"{_BASE_URL}/twitter/tweets/{tweet_id}")
-        resp.raise_for_status()
-        data = resp.json()
+    data = await socialdata_get_async(f"/twitter/tweets/{tweet_id}")
 
     _save_cache(cache_key, data)
     return data

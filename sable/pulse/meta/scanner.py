@@ -2,17 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-import httpx
-
-from sable import config as cfg
 from sable.shared.handles import strip_handle, normalize_handle
-from sable.shared.retry import retry_with_backoff_async
+from sable.shared.socialdata import socialdata_get_async, BalanceExhaustedError
 
-_BASE_URL = "https://api.socialdata.tools"
 _COST_PER_REQUEST = 0.002  # rough estimate per API call
 
 _CORE_ENGAGEMENT_KEYS = ("favorite_count", "retweet_count", "reply_count")
@@ -26,11 +21,6 @@ def _safe_int(val, default: int = 0) -> int:
         return default
 
 
-def _get_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {cfg.require_key('socialdata_api_key')}",
-        "Content-Type": "application/json",
-    }
 
 
 def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
@@ -140,19 +130,9 @@ async def _fetch_author_tweets_async(
     handle_clean = strip_handle(handle)
     params: dict = {"type": "tweets", "limit": min(limit, 100)}
 
-    async with httpx.AsyncClient(headers=_get_headers(), timeout=30) as client:
-        resp = await client.get(
-            f"{_BASE_URL}/twitter/user/{handle_clean}/tweets",
-            params=params,
-        )
-        if resp.status_code == 429:
-            await asyncio.sleep(5)  # why: 5s back-off on rate-limit; SocialData resets quickly
-            resp = await client.get(
-                f"{_BASE_URL}/twitter/user/{handle_clean}/tweets",
-                params=params,
-            )
-        resp.raise_for_status()
-        data = resp.json()
+    data = await socialdata_get_async(
+        f"/twitter/user/{handle_clean}/tweets", params=params,
+    )
 
     raw_tweets = data.get("tweets", data.get("data", []))
 
@@ -176,20 +156,10 @@ async def _fetch_author_tweets_async(
 
 async def _search_tweets_async(query: str, limit: int = 50) -> list[dict]:
     """Search tweets by keyword (deep mode)."""
-    async with httpx.AsyncClient(headers=_get_headers(), timeout=30) as client:
-        resp = await client.get(
-            f"{_BASE_URL}/twitter/search",
-            params={"query": query, "type": "Latest", "limit": limit},
-        )
-        if resp.status_code == 429:
-            await asyncio.sleep(5)  # why: 5s back-off on rate-limit; SocialData resets quickly
-            resp = await client.get(
-                f"{_BASE_URL}/twitter/search",
-                params={"query": query, "type": "Latest", "limit": limit},
-            )
-        resp.raise_for_status()
-        data = resp.json()
-
+    data = await socialdata_get_async(
+        "/twitter/search",
+        params={"query": query, "type": "Latest", "limit": limit},
+    )
     return data.get("tweets", data.get("data", []))
 
 
@@ -262,15 +232,15 @@ class Scanner:
                     since_id = profile.get("last_tweet_id")
 
             try:
-                async def _do_fetch():
-                    return await _fetch_author_tweets_async(
-                        handle,
-                        since_id=since_id,
-                        lookback_hours=self.lookback_hours,
-                    )
-                raw_tweets = await retry_with_backoff_async(_do_fetch)
+                raw_tweets = await _fetch_author_tweets_async(
+                    handle,
+                    since_id=since_id,
+                    lookback_hours=self.lookback_hours,
+                )
                 estimated_cost += _COST_PER_REQUEST
                 self._estimated_cost += _COST_PER_REQUEST
+            except BalanceExhaustedError:
+                raise  # 402 is fatal — propagate immediately
             except Exception as e:
                 console_warn(f"Failed to fetch {handle}: {e}")
                 self._failed_authors.append(handle)  # AR5-8
@@ -379,6 +349,8 @@ class Scanner:
                         tweet["attributes"] = attrs
                         outsider_results.setdefault(bucket, []).append(tweet)
 
+                except BalanceExhaustedError:
+                    raise  # 402 is fatal — propagate immediately
                 except Exception as e:
                     console_warn(f"Deep mode query '{query}' failed: {e}")
 

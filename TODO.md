@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `625 passed`
+- `./.venv/bin/python -m pytest -q` → `634 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -27,10 +27,335 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 
 ---
 
+## Phase 2 — `sable serve` FastAPI Backend
+
+**Status:** NOT STARTED
+**Consumer:** SableWeb (Next.js portal, separate repo at `~/Projects/SableWeb`)
+**Reference:** `docs/ROADMAP.md` Phase 2 section, `docs/ROLES.md`, `docs/SCHEMA_INVENTORY.md`
+**Why now:** SableWeb is transitioning from hardcoded mock data to live data. SableWeb reads sable.db directly for entity/diagnostic/action data, but vault inventory, pulse performance, and meta intelligence data live in Slopper's databases (pulse.db, meta.db) and must be exposed via HTTP.
+
+---
+
+### Architecture
+
+```
+SableWeb (Next.js)
+    │
+    │  HTTP (localhost:8420)
+    │  Authorization: Bearer <service-token>
+    ▼
+sable serve (FastAPI)
+    │
+    ├── pulse.db   (posts, snapshots, account_stats)
+    ├── meta.db    (scanned_tweets, format_baselines, topic_signals)
+    └── vault/     (markdown content notes in ~/.sable/vault/)
+```
+
+**Key constraints:**
+- Read-only API. No write endpoints in Phase 2.
+- Service-to-service auth only. SableWeb authenticates users; `sable serve` validates a shared token.
+- Org-scoped. Every endpoint takes an `org` parameter and queries only that org's data.
+- Same machine. SableWeb and `sable serve` run on the same host. No CORS needed (proxied).
+
+---
+
+### File Structure
+
+```
+sable/serve/
+├── __init__.py          ← exists (stub docstring)
+├── app.py               ← FastAPI app factory, lifespan, CORS
+├── auth.py              ← token auth dependency
+├── routes/
+│   ├── __init__.py
+│   ├── vault.py         ← vault inventory + content browser
+│   ├── pulse.py         ← posting log, snapshots, format performance
+│   └── meta.py          ← topic signals, format baselines, watchlist health
+└── deps.py              ← shared dependencies (DB connections, path resolution)
+```
+
+---
+
+### Dependencies To Add
+
+```
+# pyproject.toml [project.optional-dependencies]
+serve = ["fastapi>=0.115", "uvicorn[standard]>=0.32"]
+```
+
+Optional dependency group — `pip install -e ".[serve]"`. Does not affect CLI-only usage.
+
+---
+
+### CLI Entry Point
+
+Add `serve` command to `sable/cli.py`:
+
+```python
+@cli.command()
+@click.option("--host", default="127.0.0.1")
+@click.option("--port", default=8420, type=int)
+@click.option("--reload", is_flag=True, help="Auto-reload on file changes (dev only)")
+def serve(host: str, port: int, reload: bool):
+    """Start the Sable API server (Phase 2)."""
+    import uvicorn
+    uvicorn.run("sable.serve.app:create_app", host=host, port=port, reload=reload, factory=True)
+```
+
+---
+
+### Auth (`sable/serve/auth.py`)
+
+```python
+from fastapi import Depends, HTTPException, Request
+from sable.config import get as get_config
+
+def verify_token(request: Request):
+    """Validate service-to-service Bearer token."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(401, "Missing token")
+    token = auth[7:]
+    expected = get_config("serve.token")  # from ~/.sable/config.yaml
+    if not expected:
+        raise HTTPException(500, "serve.token not configured")
+    if token != expected:
+        raise HTTPException(403, "Invalid token")
+```
+
+Config key: `serve.token` in `~/.sable/config.yaml`. Generate with `python -c "import secrets; print(secrets.token_hex(32))"`.
+
+---
+
+### Endpoints
+
+#### Vault Routes (`sable/serve/routes/vault.py`)
+
+**GET `/api/vault/inventory/{org}`**
+
+Returns vault content inventory for an org: total produced, posted, unused, by-format breakdown, unused assets list, recent posted with performance.
+
+Source: `load_all_notes()` from `sable/vault/search.py`, filtered by org. Cross-reference with `pulse.db posts` for posted status and engagement.
+
+Response shape (matches SableWeb `ContentPipeline` ops type):
+```json
+{
+  "total_produced": 52,
+  "total_posted": 38,
+  "total_unused": 14,
+  "stale_threshold_days": 14,
+  "by_format": [
+    {"format": "meme", "produced": 30, "posted": 19, "unused": 11}
+  ],
+  "unused_assets": [
+    {"title": "...", "format": "meme", "produced_at": "2026-03-03", "age_days": 18}
+  ],
+  "recent_posted": [
+    {"title": "...", "format": "meme", "produced_at": "...", "posted_at": "...",
+     "performance": {"engagement": 847, "format_avg": 512, "lift": 1.65}}
+  ]
+}
+```
+
+Implementation: Reuse `load_all_notes(vault_path, org)` → filter by `posted_by` / `suggested_for` → cross-reference `pulse.db posts` for engagement data → compute age, staleness, format breakdown.
+
+---
+
+**GET `/api/vault/search/{org}?q={query}&limit={n}`**
+
+Wraps `search_vault()`. Returns ranked content notes matching query.
+
+Response: `[{"title": "...", "path": "...", "score": 0.92, "format": "meme", "frontmatter": {...}}]`
+
+---
+
+#### Pulse Routes (`sable/serve/routes/pulse.py`)
+
+**GET `/api/pulse/performance/{org}`**
+
+Returns content performance data for an org over the last 30 days.
+
+Source: `pulse.db posts + snapshots`, grouped and aggregated.
+
+Response shape (matches SableWeb `ContentPerformance` client type):
+```json
+{
+  "total_posts": 98,
+  "sable_posts": 38,
+  "organic_posts": 60,
+  "sable_share_of_engagement": 0.64,
+  "sable_avg_engagement": 1247,
+  "organic_avg_engagement": 412,
+  "sable_lift_vs_organic": 2.03,
+  "top_performing_formats": [...],
+  "by_format": [...],
+  "weekly_trend": [
+    {"week": "W09", "sable_engagement": 12400, "organic_engagement": 8200, "sable_share": 0.6}
+  ],
+  "meta_informed": {
+    "meta_informed_posts": 26,
+    "meta_informed_avg": 1580,
+    "non_meta_avg": 620,
+    "meta_lift": 1.55
+  }
+}
+```
+
+Implementation:
+1. Query `pulse.db posts` for org's accounts (via roster) in last 30 days
+2. Join with latest `snapshots` per post for engagement metrics
+3. Classify sable vs organic using `sable_content_type` field (non-null = sable)
+4. Group by format (`sable_content_type` mapped to format buckets)
+5. Compute weekly aggregates using `posted_at` week extraction
+6. Cross-reference `meta.db format_baselines` for meta-informed classification
+
+**Sable vs organic split:** Posts with `sable_content_type IS NOT NULL` or `sable_content_path IS NOT NULL` are Sable posts. Everything else from the org's tracked accounts is organic. This is the same heuristic the CLI `sable pulse report` uses.
+
+---
+
+**GET `/api/pulse/posting-log/{org}?days={n}`**
+
+Returns raw posting log. Source: `pulse.db posts + snapshots`.
+
+Response: `[{"url": "...", "text": "...", "posted_at": "...", "likes": 1200, "replies": 34, ...}]`
+
+---
+
+#### Meta Routes (`sable/serve/routes/meta.py`)
+
+**GET `/api/meta/topics/{org}`**
+
+Returns topic signals from the most recent meta scan.
+
+Source: `meta.db topic_signals` WHERE org = :org, ordered by `avg_lift` desc.
+
+Response shape (matches SableWeb `TopicSignal` type):
+```json
+[
+  {"topic": "ZK proof mechanics", "momentum_score": 0.82, "confidence": "high", "trend_status": "rising"}
+]
+```
+
+Implementation: Query `topic_signals` for latest `scan_id` for org. Map `avg_lift` → `momentum_score`, compute `trend_status` from acceleration field, derive `confidence` from `mention_count` thresholds.
+
+---
+
+**GET `/api/meta/baselines/{org}`**
+
+Returns format baseline data (lift per format bucket).
+
+Source: `meta.db format_baselines` WHERE org = :org.
+
+Response shape (matches SableWeb `FormatLiftSignal` type):
+```json
+[
+  {"format": "meme", "signal": "DOUBLE_DOWN", "rationale": "Image-led thesis posts at 3,716 avg..."}
+]
+```
+
+Implementation: Query `format_baselines` for latest 30d window. Classify signal using lift thresholds: >1.5 = DOUBLE_DOWN, <0.7 = EXECUTION_GAP, else PERFORMING. Generate rationale string from baseline numbers.
+
+---
+
+**GET `/api/meta/watchlist/{org}`**
+
+Returns watchlist health diagnostics (coverage, staleness, scan history).
+
+Source: `meta.db scan_runs + author_profiles` WHERE org = :org.
+
+Response: `{"total_authors": 45, "stale_authors": 3, "last_scan": "2026-03-20", "coverage": 0.93}`
+
+---
+
+### App Factory (`sable/serve/app.py`)
+
+```python
+from fastapi import FastAPI
+from sable.serve.routes import vault, pulse, meta
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="Sable API", version="0.1.0")
+    app.include_router(vault.router, prefix="/api/vault", tags=["vault"])
+    app.include_router(pulse.router, prefix="/api/pulse", tags=["pulse"])
+    app.include_router(meta.router, prefix="/api/meta", tags=["meta"])
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    return app
+```
+
+---
+
+### Shared Dependencies (`sable/serve/deps.py`)
+
+```python
+import sqlite3
+from functools import lru_cache
+from sable.shared.paths import resolve_path
+
+@lru_cache
+def get_pulse_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(resolve_path("pulse.db"), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+@lru_cache
+def get_meta_db() -> sqlite3.Connection:
+    path = resolve_path("pulse/meta.db")
+    conn = sqlite3.connect(path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+```
+
+---
+
+### Tests
+
+```
+tests/serve/
+├── test_app.py              — app factory, health endpoint
+├── test_auth.py             — token validation, missing/invalid token
+├── test_vault_routes.py     — inventory, search (with fixture vault notes)
+├── test_pulse_routes.py     — performance aggregation, weekly trend
+└── test_meta_routes.py      — topic signals, baselines, watchlist
+```
+
+Use `fastapi.testclient.TestClient`. Create fixture SQLite databases with known data. Verify response shapes match SableWeb TypeScript type expectations.
+
+---
+
+### Implementation Order
+
+```
+1. app.py + auth.py + deps.py + health endpoint + CLI serve command
+2. pulse routes (performance, posting-log) — most data, highest value
+3. meta routes (topics, baselines, watchlist) — extends pulse
+4. vault routes (inventory, search) — requires vault note loading
+5. Tests for all routes
+```
+
+Each step is independently deployable. SableWeb can start consuming pulse data while vault routes are still in progress.
+
+---
+
+### Validation
+
+```bash
+./.venv/bin/python -m pytest tests/serve/ -q
+./.venv/bin/ruff check sable/serve/
+./.venv/bin/mypy sable/serve/
+# Manual: curl http://localhost:8420/health
+# Manual: curl -H "Authorization: Bearer <token>" http://localhost:8420/api/pulse/performance/psy_protocol
+```
+
+---
+
 ## Audit Remediation Queue (2026-04-01)
 
 **Status: COMPLETE (2026-04-02).** All AUDIT items landed with adversarial QA sign-off.
-625 tests passing, ruff clean, mypy clean.
+634 tests passing, ruff clean, mypy clean.
 
 ### AUDIT-1 · Secret handling + CLI error redaction hardening
 
@@ -346,10 +671,32 @@ Run after landing any of AUDIT-1 through AUDIT-5:
 ./.venv/bin/mypy sable
 ```
 
-Current baseline (post full audit remediation + Codex hardening, 2026-04-02):
-- `./.venv/bin/python -m pytest -q` → `625 passed`
+Current baseline (post full audit remediation + Codex hardening + SocialData hardening, 2026-04-02):
+- `./.venv/bin/python -m pytest -q` → `634 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
+
+---
+
+## SocialData API Hardening (2026-04-02)
+
+**Status: COMPLETE.** Audited against `SablePlatform/docs/SOCIALDATA_BEST_PRACTICES.md`.
+
+**What shipped:**
+- ✅ Centralized HTTP client: `sable/shared/socialdata.py` — all 4 modules use `socialdata_get_async` / `socialdata_get`
+- ✅ **402 fatal handling:** `BalanceExhaustedError` raised immediately, no retry, propagates past per-author exception handlers in scanner
+- ✅ **429 exponential backoff + jitter:** 1s→4s→16s→64s schedule (was: flat 5s single retry in scanner only, zero handling in tracker/trends/suggest)
+- ✅ **5xx retry:** Same schedule as 429 (was: raise immediately, no retry)
+- ✅ **Network error retry:** Timeouts, DNS, connection resets retried with same schedule
+- ✅ Removed duplicate `_get_headers()`, `_BASE_URL`, direct `httpx` imports from scanner.py, tracker.py, trends.py, suggest.py
+- ✅ Fixed pre-existing endpoint bug: `suggest.py` used `/twitter/tweet/{id}` (singular), corrected to `/twitter/tweets/{id}` (plural)
+- ✅ 9 new tests in `tests/shared/test_socialdata.py` covering 402, 429 retry+exhaust, 5xx, 200, 404, network error retry+exhaust, backoff schedule
+
+**Known remaining gaps (low priority):**
+- No per-phase cost breakdown in scanner (tracks total only)
+- No cost tracking in tracker.py, trends.py, suggest.py (infrequent use)
+- No cursor cycling detection (not currently exploitable — single-page fetches only)
+- No checkpoint/resume (scan sizes well under 50 calls)
 
 ---
 
