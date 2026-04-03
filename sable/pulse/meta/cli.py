@@ -115,6 +115,53 @@ def watchlist_stats():
             console.print(f"  {niche}: {count}")
 
 
+@watchlist_group.command("amplifiers")
+@click.option("--org", required=True, help="Org to analyze")
+@click.option("--window-days", "window_days", default=30, show_default=True,
+              help="Look-back window in days")
+@click.option("--top", "top_n", default=10, show_default=True,
+              help="Number of top amplifiers to show")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON")
+def watchlist_amplifiers(org, window_days, top_n, as_json):
+    """Rank watchlist accounts by amplification power."""
+    import json as json_mod
+    from sable.pulse.meta.amplifiers import compute_amplifiers
+    from sable.pulse.meta import db as meta_db
+
+    meta_db.migrate()
+    results = compute_amplifiers(org=org, window_days=window_days, conn=meta_db.get_conn())
+
+    if not results:
+        console.print(f"[dim]No tweet data for org '{org}' in the last {window_days} days.[/dim]")
+        return
+
+    results = results[:top_n]
+
+    if as_json:
+        from dataclasses import asdict
+        console.print(json_mod.dumps([asdict(r) for r in results], indent=2))
+        return
+
+    from rich.table import Table
+    table = Table(title=f"Top {len(results)} Amplifiers — {org} (last {window_days}d)")
+    table.add_column("Rank", justify="right", style="bold")
+    table.add_column("Handle")
+    table.add_column("Amp Score", justify="right")
+    table.add_column("RT_v", justify="right")
+    table.add_column("RPR", justify="right")
+    table.add_column("QTR", justify="right")
+    for r in results:
+        table.add_row(
+            str(r.rank),
+            r.author,
+            f"{r.amp_score:.3f}",
+            f"{r.rt_v:.2f}",
+            f"{r.rpr:.3f}",
+            f"{r.qtr:.3f}",
+        )
+    console.print(table)
+
+
 @watchlist_group.command("health")
 @click.option("--org", default=None)
 def watchlist_health(org):
