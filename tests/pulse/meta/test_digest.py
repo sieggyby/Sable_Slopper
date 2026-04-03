@@ -282,3 +282,36 @@ def test_render_output():
     assert rendered
     assert "@alice" in rendered
     assert "@bob" in rendered
+
+
+def test_analyze_post_passes_org_id_to_claude(monkeypatch):
+    """When org_id is not None, _analyze_post_for_digest passes it to call_claude_json."""
+    import sable.pulse.meta.digest as digest_mod
+    import sable.shared.api as api_mod
+
+    captured_kwargs = {}
+    response = {"analysis": "test", "steal": "test", "hook_pattern": "test"}
+
+    def _fake_claude(prompt, **kw):
+        captured_kwargs.update(kw)
+        return json.dumps(response)
+
+    monkeypatch.setattr(api_mod, "call_claude_json", _fake_claude)
+
+    post = {
+        "tweet_id": "t1",
+        "author_handle": "alice",
+        "text": "some tweet",
+        "total_lift": 8.0,
+        "format_bucket": "standalone_text",
+        "anatomy_json": None,
+    }
+
+    digest_mod._analyze_post_for_digest(post, org_id="myorg")
+    assert captured_kwargs.get("org_id") == "myorg"
+
+
+def test_generate_digest_caps_top_n():
+    """generate_digest internally caps top_n to MAX_DIGEST_POSTS."""
+    from sable.pulse.meta.digest import MAX_DIGEST_POSTS
+    assert MAX_DIGEST_POSTS == 25

@@ -64,6 +64,56 @@ def test_normalise_tweet_empty_date_returns_none():
     assert result is None
 
 
+def test_normalise_tweet_missing_all_engagement_fields_returns_none():
+    """If none of the core engagement counters are present, reject the tweet."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    raw = _valid_raw_tweet()
+    del raw["favorite_count"]
+    del raw["reply_count"]
+    del raw["retweet_count"]
+    # quote_count, bookmark_count, views_count are not core — their absence alone is fine
+    result = _normalise_tweet(raw, "@testuser")
+    assert result is None
+
+
+def test_normalise_tweet_partial_engagement_fields_accepted():
+    """If at least one core engagement counter is present, accept the tweet."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    raw = _valid_raw_tweet()
+    del raw["reply_count"]
+    del raw["retweet_count"]
+    # favorite_count still present
+    result = _normalise_tweet(raw, "@testuser")
+    assert result is not None
+    assert result["likes"] == 10
+    # Missing fields default to 0
+    assert result["replies"] == 0
+    assert result["reposts"] == 0
+
+
+def test_normalise_tweet_zero_engagement_accepted():
+    """A tweet with explicitly zero engagement is valid — not malformed."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    raw = _valid_raw_tweet(favorite_count=0, reply_count=0, retweet_count=0)
+    result = _normalise_tweet(raw, "@testuser")
+    assert result is not None
+    assert result["likes"] == 0
+
+
+def test_normalise_tweet_non_numeric_engagement_coerced_to_zero():
+    """Non-numeric engagement values are coerced to 0 via _safe_int."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    raw = _valid_raw_tweet(favorite_count="not_a_number")
+    result = _normalise_tweet(raw, "@testuser")
+    assert result is not None
+    assert result["likes"] == 0
+    assert isinstance(result["likes"], int)
+
+
 def test_mixed_batch_skips_malformed():
     """A batch with one malformed tweet still normalises the valid ones."""
     from sable.pulse.meta.scanner import _normalise_tweet
@@ -77,3 +127,28 @@ def test_mixed_batch_skips_malformed():
     valid = [r for r in results if r is not None]
     assert len(valid) == 2
     assert {r["tweet_id"] for r in valid} == {"111", "222"}
+
+
+def test_scanner_warns_on_skipped_malformed_tweets(capsys):
+    """The scanner batch path emits a warning when tweets are skipped."""
+    from sable.pulse.meta.scanner import _normalise_tweet, console_warn
+
+    good = _valid_raw_tweet(id_str="111")
+    bad = _valid_raw_tweet(id_str="222")
+    # Remove all core engagement fields to trigger rejection
+    del bad["favorite_count"]
+    del bad["reply_count"]
+    del bad["retweet_count"]
+
+    raw_tweets = [good, bad]
+    normalised_raw = [_normalise_tweet(t, "@user") for t in raw_tweets]
+    normalised = [t for t in normalised_raw if t is not None]
+    skipped = len(normalised_raw) - len(normalised)
+
+    assert skipped == 1
+    assert len(normalised) == 1
+
+    # Verify warning path works
+    console_warn(f"Skipped {skipped} malformed tweet(s) for @user")
+    captured = capsys.readouterr()
+    assert "Skipped 1 malformed" in captured.err

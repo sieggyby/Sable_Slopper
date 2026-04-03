@@ -113,11 +113,16 @@ def _analyze_post_for_digest(post: dict, org_id: Optional[str]) -> tuple[str, st
         return "unknown", "analysis unavailable", ""
 
 
+MAX_DIGEST_POSTS = 25
+
+
 def generate_digest(
     org: str,
     period_days: int,
     top_n: int,
 ) -> DigestReport:
+    top_n = min(top_n, MAX_DIGEST_POSTS)
+
     from sable.pulse.meta.db import get_conn
 
     conn = get_conn()

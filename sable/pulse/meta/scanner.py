@@ -15,6 +15,16 @@ from sable.shared.retry import retry_with_backoff_async
 _BASE_URL = "https://api.socialdata.tools"
 _COST_PER_REQUEST = 0.002  # rough estimate per API call
 
+_CORE_ENGAGEMENT_KEYS = ("favorite_count", "retweet_count", "reply_count")
+
+
+def _safe_int(val, default: int = 0) -> int:
+    """Coerce a value to int, returning default on failure."""
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
 
 def _get_headers() -> dict:
     return {
@@ -26,7 +36,8 @@ def _get_headers() -> dict:
 def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
     """Normalise a raw SocialData tweet into our internal format.
 
-    Returns None if the tweet is malformed (missing id or unparseable date).
+    Returns None if the tweet is malformed (missing id, unparseable date,
+    or no core engagement fields present).
     """
     user = raw.get("user", {})
     tweet_id = str(raw.get("id_str") or raw.get("id") or "")
@@ -39,6 +50,12 @@ def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
     created_at = raw.get("created_at", "")
     posted_at = _parse_twitter_date(created_at)
     if posted_at is None:
+        return None
+
+    # Validate engagement fields are present in the API response.
+    # If none of the core counters exist, the payload shape has drifted
+    # and zero-filling would poison baselines and lift calculations.
+    if not any(k in raw for k in _CORE_ENGAGEMENT_KEYS):
         return None
 
     # Media detection
@@ -72,12 +89,12 @@ def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
         "text": text,
         "posted_at": posted_at,
         "urls": urls,  # AR5-16: raw URL list for has_link recomputation in classify_format
-        "likes": raw.get("favorite_count", 0) or 0,
-        "replies": raw.get("reply_count", 0) or 0,
-        "reposts": raw.get("retweet_count", 0) or 0,
-        "quotes": raw.get("quote_count", 0) or 0,
-        "bookmarks": raw.get("bookmark_count", 0) or 0,
-        "video_views": raw.get("views_count", 0) or 0,
+        "likes": _safe_int(raw.get("favorite_count", 0)),
+        "replies": _safe_int(raw.get("reply_count", 0)),
+        "reposts": _safe_int(raw.get("retweet_count", 0)),
+        "quotes": _safe_int(raw.get("quote_count", 0)),
+        "bookmarks": _safe_int(raw.get("bookmark_count", 0)),
+        "video_views": _safe_int(raw.get("views_count", 0)),
         "video_duration": video_duration,
         "is_quote_tweet": is_quote,
         "is_thread": is_thread,
@@ -85,7 +102,7 @@ def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
         "has_image": has_image,
         "has_video": has_video,
         "has_link": has_link,
-        "author_followers": user.get("followers_count", 0) or 0,
+        "author_followers": _safe_int(user.get("followers_count", 0)),
     }
 
 

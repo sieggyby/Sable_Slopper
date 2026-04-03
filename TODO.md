@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `607 passed`
+- `./.venv/bin/python -m pytest -q` → `620 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -36,46 +36,23 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 
 **Risk level:** Tier 1 — credential exposure.
 
-**Status:** ✅ Complete (2026-04-02). See `docs/AUDIT_HISTORY.md` for history.
+**Status:** ✅ Complete (2026-04-02).
 
-**What shipped (35ec0be):**
+**What shipped:**
 - ✅ `config show` masks secrets with `(set)` / `(not set)` via `_SECRET_CONFIG_KEYS`
-- ✅ `config set` warns operators to prefer env vars for secret keys
+- ✅ `config set` refuses secret keys entirely; directs operators to env vars
+- ✅ `require_key()` error message points to env var, not `config set`
+- ✅ `SECRET_ENV_MAP` canonical mapping in `sable/config.py`, imported by `cli.py`
+- ✅ `elevenlabs_api_key` added to `_DEFAULTS` and `SECRET_ENV_MAP`
 - ✅ All 40+ CLI exception handlers redact via `redact_error()` (18 files)
 - ✅ `redact_error` patterns cover: `sk-ant-*`, `r8_*` (bare), env var assignments,
   Bearer tokens, `xi-api-key` headers
-- ✅ Tests: 8 config show, 8 CLI error redaction, 11 redact_error unit (27 total)
-
-**What remains (from Codex review 2026-04-02):**
-
-1. **`config set` still writes raw secrets to YAML.** The warning is good but `set_key()`
-   still persists the raw value. `config set` should refuse secret keys entirely and
-   direct operators to env vars.
-   - `sable/cli.py:56` — `config_set` still calls `cfg.set_key(key, value)` for secrets
-   - `sable/config.py:92` — `set_key()` has no guard
-
-2. **`require_key()` still recommends `config set` for missing keys.** The error message
-   says `Set it with: sable config set {key} <value>`, directing operators toward the
-   insecure persistence path.
-   - `sable/config.py:112` — RuntimeError message references `config set`
-   - Fix: change message to recommend the env var name instead
-
-**Relevant files (remaining):**
-- `sable/cli.py` (config_set: refuse secret keys)
-- `sable/config.py` (require_key: update error message)
-
-**Remaining acceptance criteria:**
-- `sable config set anthropic_api_key <value>` is rejected (not persisted)
-- `require_key()` error message points to env var, not `config set`
-
-**Remaining tests to add:**
-- `tests/test_cli_config.py`
-  - `config set` with a secret key rejects and does not write to YAML
-  - `require_key()` missing-key error message references env var, not `config set`
+- ✅ Tests: 9 config show/set, 8 CLI error redaction, 11 redact_error unit
 
 ### AUDIT-2 · SocialData response validation before persistence
 
 **Risk level:** Tier 1 — silent data corruption / misleading outputs.
+**Status:** ✅ Complete (2026-04-02).
 
 **Why this is a real bug:**
 - `sable/pulse/meta/scanner.py::_normalise_tweet()` currently trusts malformed
@@ -118,6 +95,7 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 ### AUDIT-3 · Thin-sample trustworthiness gate for `sable pulse recommend`
 
 **Risk level:** Tier 1 — confident but misleading client-facing output.
+**Status:** ✅ Complete (2026-04-02).
 
 **Why this is a real bug:**
 - `sable/pulse/recommender.py::generate_recommendations()` will produce full Claude
@@ -158,6 +136,7 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 ### AUDIT-4 · Small-vault search fallback parity
 
 **Risk level:** Tier 1 — avoidable operator-facing failure in a core workflow.
+**Status:** ✅ Complete (2026-04-02).
 
 **Why this is a real bug:**
 - `sable/vault/search.py::search_vault()` only falls back to keyword ranking when the
@@ -198,6 +177,7 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 ### AUDIT-5 · Org-scoped Claude budget enforcement gaps
 
 **Risk level:** Tier 1/Tier 2 — burns money and breaks the platform contract.
+**Status:** ✅ Complete (2026-04-02).
 
 **Why this is a real bug:**
 - the shared Claude wrapper already enforces budget + cost logging when `org_id` is
@@ -268,6 +248,7 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 ### AUDIT-6 · Follow-up maintainability cleanup after the fixes above
 
 **Risk level:** Tier 2 — hidden coupling.
+**Status:** ✅ Complete (2026-04-02). Addressed via `SECRET_ENV_MAP` deduplication and org_id threading.
 
 **Why this matters:**
 - budget enforcement currently depends on each call site remembering to pass `org_id`
@@ -290,6 +271,7 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 ### AUDIT-7 · Remove silent degradation in operator-facing audit flows
 
 **Risk level:** Tier 2, with Tier 1 spillover when failures hide stale or untrustworthy output.
+**Status:** ✅ Complete (2026-04-02).
 
 **Why this is missing from the queue:**
 - several of the exact paths touched by AUDIT-4 and AUDIT-5 still use broad
@@ -336,6 +318,7 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 ### AUDIT-8 · Migration test version assertions are stale
 
 **Risk level:** Tier 3 — test maintenance.
+**Status:** ✅ Complete (2026-04-02). Version derived from `_MIGRATIONS` source of truth.
 
 **Why this fails:**
 - `tests/platform/test_migration.py` hardcodes schema version `14` in three places
@@ -363,8 +346,8 @@ Run after landing any of AUDIT-1 through AUDIT-5:
 ./.venv/bin/mypy sable
 ```
 
-Current baseline (post full audit remediation, 2026-04-02):
-- `./.venv/bin/python -m pytest -q` → `607 passed`
+Current baseline (post full audit remediation + Codex hardening, 2026-04-02):
+- `./.venv/bin/python -m pytest -q` → `620 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 

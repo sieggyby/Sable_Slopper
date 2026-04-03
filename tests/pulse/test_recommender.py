@@ -146,3 +146,26 @@ def test_generate_recommendations_top_post_in_prompt(monkeypatch):
     prompt = prompts_seen[0]
     # High post appears before low post in "Top Performing" section
     assert prompt.index("High engagement post") < prompt.index("Low engagement post")
+
+
+def test_generate_recommendations_passes_org_id_to_claude(monkeypatch):
+    """Claude call receives org_id from account.org."""
+    posts, snaps = _make_posts_and_snaps(6)
+    captured_kwargs = {}
+
+    fake_result = {"summary": "ok", "recommendations": [], "content_ideas": [], "avoid": []}
+
+    monkeypatch.setattr("sable.pulse.recommender.get_posts_for_account", lambda h, limit: posts)
+    monkeypatch.setattr("sable.pulse.recommender.get_latest_snapshot", lambda pid: snaps.get(pid))
+    monkeypatch.setattr("sable.pulse.recommender.save_recommendation", lambda h, c: None)
+    monkeypatch.setattr(
+        "sable.pulse.recommender.call_claude_json",
+        lambda prompt, **kw: (captured_kwargs.update(kw) or json.dumps(fake_result))
+    )
+
+    from sable.pulse.recommender import generate_recommendations
+    account = _make_account()
+    account.org = "testorg"
+    generate_recommendations(account, followers=1000)
+
+    assert captured_kwargs.get("org_id") == "testorg"

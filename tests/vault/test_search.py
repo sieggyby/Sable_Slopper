@@ -67,6 +67,40 @@ def test_search_vault_small_result_fallback_on_claude_failure(tmp_path):
     assert len(result) <= config.max_suggestions
 
 
+def test_search_vault_small_result_passes_org_to_claude_rank(tmp_path):
+    """With <=50 candidates, org is threaded to claude_rank."""
+    from sable.vault.search import search_vault, SearchResult
+    from sable.vault.config import VaultConfig
+
+    notes = _make_fake_notes(30)
+    sentinel = [SearchResult(id="note-0", score=99, reason="test", note=notes[0])]
+    config = VaultConfig()
+
+    with patch("sable.vault.search.load_candidates", return_value=notes), \
+         patch("sable.vault.search.claude_rank", return_value=sentinel) as mock_rank:
+        search_vault("defi crypto", tmp_path, "myorg", config=config)
+
+    assert mock_rank.called
+    assert mock_rank.call_args[1].get("org") == "myorg"
+
+
+def test_search_vault_large_result_passes_org_to_claude_rank(tmp_path):
+    """With >50 candidates, org is threaded to claude_rank."""
+    from sable.vault.search import search_vault, SearchResult
+    from sable.vault.config import VaultConfig
+
+    notes = _make_fake_notes(60)
+    sentinel = [SearchResult(id="note-0", score=99, reason="test", note=notes[0])]
+    config = VaultConfig()
+
+    with patch("sable.vault.search.load_candidates", return_value=notes), \
+         patch("sable.vault.search.claude_rank", return_value=sentinel) as mock_rank:
+        search_vault("defi crypto", tmp_path, "myorg", config=config)
+
+    assert mock_rank.called
+    assert mock_rank.call_args[1].get("org") == "myorg"
+
+
 def test_search_vault_large_result_fallback_on_claude_failure(tmp_path):
     """With >50 candidates and claude_rank raising, fallback returns list[SearchResult] — no crash."""
     from sable.vault.search import search_vault, SearchResult, SearchFilters
