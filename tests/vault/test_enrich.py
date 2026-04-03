@@ -19,7 +19,7 @@ def _make_items(n: int) -> list[dict]:
 
 def _make_call_fn(enriched: list[dict]):
     """Returns a call_fn that responds with the given enriched list."""
-    def call_fn(prompt):
+    def call_fn(prompt, **kw):
         return json.dumps(enriched)
     return call_fn
 
@@ -36,7 +36,7 @@ def test_enrich_chunk_calls_call_fn_once_per_chunk():
         for i in range(3)
     ]
 
-    def call_fn(prompt):
+    def call_fn(prompt, **kw):
         calls.append(prompt)
         return json.dumps(enriched_response)
 
@@ -64,7 +64,7 @@ def test_enrich_chunk_parses_dict_with_items_key():
     items = _make_items(1)
     enriched_data = [{"id": "item-0", "topics": ["layer2"], "questions_answered": [], "depth": "intermediate", "tone": "educational", "keywords": ["eth"]}]
 
-    def call_fn(prompt):
+    def call_fn(prompt, **kw):
         return json.dumps({"items": enriched_data})
 
     config = _make_config()
@@ -76,7 +76,7 @@ def test_enrich_chunk_parses_dict_with_items_key():
 def test_enrich_chunk_marks_pending_on_call_failure():
     items = _make_items(2)
 
-    def call_fn(prompt):
+    def call_fn(prompt, **kw):
         raise RuntimeError("Claude is down")
 
     config = _make_config()
@@ -109,7 +109,7 @@ def test_enrich_batch_splits_into_multiple_chunks(monkeypatch):
     items = _make_items(5)
     call_counts = []
 
-    def fake_enrich_chunk(chunk, org_topics, config, call_fn):
+    def fake_enrich_chunk(chunk, org_topics, config, call_fn, org=""):
         call_counts.append(len(chunk))
         return [dict(item, enrichment_status="done", topics=[], questions_answered=[], depth="", tone="", keywords=[]) for item in chunk]
 
@@ -126,7 +126,7 @@ def test_enrich_batch_splits_into_multiple_chunks(monkeypatch):
 def test_enrich_batch_marks_pending_on_chunk_failure(monkeypatch):
     items = _make_items(3)
 
-    def fake_enrich_chunk(chunk, org_topics, config, call_fn):
+    def fake_enrich_chunk(chunk, org_topics, config, call_fn, org=""):
         raise RuntimeError("API error")
 
     monkeypatch.setattr("sable.vault.enrich._enrich_chunk", fake_enrich_chunk)
@@ -135,3 +135,69 @@ def test_enrich_batch_marks_pending_on_chunk_failure(monkeypatch):
     config = _make_config(batch_size=10)
     result = enrich_batch(items, [], config)
     assert all(r.get("enrichment_status") == "pending" for r in result)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# org_id threading and chunk failure warnings (Codex feedback)
+# ─────────────────────────────────────────────────────────────────────
+
+def test_enrich_chunk_passes_org_id_to_claude():
+    """_enrich_chunk passes org_id kwarg to the call function."""
+    captured = {}
+
+    def fake_call(prompt, **kw):
+        captured.update(kw)
+        return json.dumps([{"id": "item-0", "topics": ["defi"], "keywords": ["test"]}])
+
+    config = _make_config()
+    items = _make_items(1)
+    _enrich_chunk(items, ["defi"], config, fake_call, org="myorg")
+    assert captured.get("org_id") == "myorg"
+
+
+def test_enrich_chunk_empty_org_sends_none():
+    """Empty org string sends org_id=None."""
+    captured = {}
+
+    def fake_call(prompt, **kw):
+        captured.update(kw)
+        return json.dumps([{"id": "item-0", "topics": ["defi"], "keywords": ["test"]}])
+
+    config = _make_config()
+    items = _make_items(1)
+    _enrich_chunk(items, ["defi"], config, fake_call, org="")
+    assert captured.get("org_id") is None
+
+
+def test_enrich_batch_threads_org_to_claude(monkeypatch):
+    """enrich_batch passes org through to call_claude_json."""
+    captured = {}
+
+    def fake_claude(prompt, **kw):
+        captured.update(kw)
+        return json.dumps([{"id": f"item-{i}", "topics": [], "keywords": []} for i in range(2)])
+
+    monkeypatch.setattr("sable.shared.api.call_claude_json", fake_claude)
+    config = _make_config()
+    enrich_batch(_make_items(2), ["defi"], config, org="testorg")
+    assert captured.get("org_id") == "testorg"
+
+
+def test_enrich_batch_chunk_failure_emits_warning(monkeypatch):
+    """Chunk failure logs a warning and marks items as pending."""
+    from unittest.mock import patch as _patch
+
+    def fake_enrich_chunk(chunk, org_topics, config, call_fn, org=""):
+        raise RuntimeError("API error")
+
+    monkeypatch.setattr("sable.vault.enrich._enrich_chunk", fake_enrich_chunk)
+    monkeypatch.setattr("sable.shared.api.call_claude_json", lambda prompt, **kw: "[]")
+
+    with _patch("sable.vault.enrich.logger") as mock_logger:
+        config = _make_config(batch_size=10)
+        result = enrich_batch(_make_items(2), [], config, org="testorg")
+
+    assert all(r.get("enrichment_status") == "pending" for r in result)
+    assert mock_logger.warning.called
+    warning_args = str(mock_logger.warning.call_args)
+    assert "Enrichment chunk failed" in warning_args

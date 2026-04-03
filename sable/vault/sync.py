@@ -239,7 +239,7 @@ def sync(
         org_topics = _get_org_topics(org)
         from sable.vault.enrich import enrich_batch
         try:
-            enriched = enrich_batch(new_items, org_topics, config)
+            enriched = enrich_batch(new_items, org_topics, config, org=org)
             for ef in enriched:
                 content_type = ef.get("type", "clip")
                 subdir = _TYPE_SUBDIR.get(content_type, f"{content_type}s")

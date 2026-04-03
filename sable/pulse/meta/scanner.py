@@ -52,11 +52,17 @@ def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
     if posted_at is None:
         return None
 
-    # Validate engagement fields are present in the API response.
-    # If none of the core counters exist, the payload shape has drifted
-    # and zero-filling would poison baselines and lift calculations.
+    # Validate engagement fields: at least one core counter must be present,
+    # and every present core counter must be coercible to int.  A provider
+    # drift that drops or retypes a single field should not silently zero-fill.
     if not any(k in raw for k in _CORE_ENGAGEMENT_KEYS):
         return None
+    for k in _CORE_ENGAGEMENT_KEYS:
+        if k in raw:
+            try:
+                int(raw[k])
+            except (TypeError, ValueError):
+                return None
 
     # Media detection
     extended = raw.get("extended_entities") or raw.get("entities") or {}

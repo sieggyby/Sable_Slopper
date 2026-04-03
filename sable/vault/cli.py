@@ -154,7 +154,7 @@ def vault_enrich(org, vault):
     org_topics = _get_org_topics(org)
 
     with console.status(f"Enriching {len(pending)} notes..."):
-        enriched = enrich_batch(pending, org_topics, config)
+        enriched = enrich_batch(pending, org_topics, config, org=org)
 
     # Write enrichment fields back to each note
     content_dir = vault_path / "content"

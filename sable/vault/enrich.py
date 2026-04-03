@@ -2,15 +2,19 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Optional
 
 from sable.vault.config import VaultConfig
+
+logger = logging.getLogger(__name__)
 
 
 def enrich_batch(
     content_batch: list[dict],
     org_topics: list[str],
     config: Optional[VaultConfig] = None,
+    org: str = "",
 ) -> list[dict]:
     """Enrich a batch of content items with topics, questions, depth, tone, keywords.
 
@@ -30,10 +34,11 @@ def enrich_batch(
     for i in range(0, len(results), batch_size):
         chunk = results[i : i + batch_size]
         try:
-            enriched = _enrich_chunk(chunk, org_topics, config, call_claude_json)
+            enriched = _enrich_chunk(chunk, org_topics, config, call_claude_json, org=org)
             for j, item in enumerate(enriched):
                 results[i + j] = item
-        except Exception:
+        except Exception as e:
+            logger.warning("Enrichment chunk failed (items %d–%d): %s", i, i + len(chunk) - 1, e)
             for j in range(len(chunk)):
                 results[i + j]["enrichment_status"] = "pending"
 
@@ -45,6 +50,7 @@ def _enrich_chunk(
     org_topics: list[str],
     config: VaultConfig,
     call_fn,
+    org: str = "",
 ) -> list[dict]:
     """Run one Claude call to enrich a chunk of items."""
     items_payload = []
@@ -79,7 +85,7 @@ For each item return:
 
 Return a JSON array of enrichment objects, one per item. No extra text."""
 
-    raw = call_fn(prompt)
+    raw = call_fn(prompt, org_id=org if org else None)
     enriched_data = json.loads(raw) if isinstance(raw, str) else raw
 
     if isinstance(enriched_data, dict) and "items" in enriched_data:

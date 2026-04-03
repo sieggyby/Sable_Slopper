@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `620 passed`
+- `./.venv/bin/python -m pytest -q` → `625 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -30,7 +30,7 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 ## Audit Remediation Queue (2026-04-01)
 
 **Status: COMPLETE (2026-04-02).** All AUDIT items landed with adversarial QA sign-off.
-607 tests passing, ruff clean, mypy clean.
+625 tests passing, ruff clean, mypy clean.
 
 ### AUDIT-1 · Secret handling + CLI error redaction hardening
 
@@ -347,7 +347,7 @@ Run after landing any of AUDIT-1 through AUDIT-5:
 ```
 
 Current baseline (post full audit remediation + Codex hardening, 2026-04-02):
-- `./.venv/bin/python -m pytest -q` → `620 passed`
+- `./.venv/bin/python -m pytest -q` → `625 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 

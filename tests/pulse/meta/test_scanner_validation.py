@@ -103,15 +103,24 @@ def test_normalise_tweet_zero_engagement_accepted():
     assert result["likes"] == 0
 
 
-def test_normalise_tweet_non_numeric_engagement_coerced_to_zero():
-    """Non-numeric engagement values are coerced to 0 via _safe_int."""
+def test_normalise_tweet_non_numeric_core_engagement_rejected():
+    """Non-numeric core engagement value rejects the tweet (provider drift guard)."""
     from sable.pulse.meta.scanner import _normalise_tweet
 
     raw = _valid_raw_tweet(favorite_count="not_a_number")
     result = _normalise_tweet(raw, "@testuser")
+    assert result is None
+
+
+def test_normalise_tweet_non_numeric_non_core_engagement_coerced():
+    """Non-numeric non-core engagement (e.g. quote_count) is coerced to 0 via _safe_int."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    raw = _valid_raw_tweet(quote_count="garbage")
+    result = _normalise_tweet(raw, "@testuser")
     assert result is not None
-    assert result["likes"] == 0
-    assert isinstance(result["likes"], int)
+    assert result["quotes"] == 0
+    assert isinstance(result["quotes"], int)
 
 
 def test_mixed_batch_skips_malformed():
