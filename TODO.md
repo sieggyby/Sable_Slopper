@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `850 passed`
+- `./.venv/bin/python -m pytest -q` → `865 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -1225,6 +1225,41 @@ Intervention context injected into the calendar prompt as a structured section.
 **When to build:** After CHURN-1 ships. CHURN-2 consumes CHURN-1's playbook output.
 CHURN-1 can be fed by either Platform's decay alerting export or FEATURE-16 Silence
 Gradient output — CHURN-2 inherits whichever input path CHURN-1 uses.
+
+---
+
+## SablePlatform Integration (from adversarial review 2026-04-04)
+
+### ~~P0-1: Fix `sable advise` Adapter Invocation [BUG]~~ — Resolved 2026-04-04
+
+Added `--org` flag to `sable advise` (Option A). When `--org` is provided, it overrides the roster's org association and allows handles not in the Slopper roster to run advise. SablePlatform adapter already implements Option B (`_resolve_primary_handle`); the `--org` flag is defense-in-depth. 9 tests. Adversarial QA: 2 rounds, all clean.
+
+### P1-2: Cost Logging for Non-Advise Claude Calls
+- `sable advise` logs cost via `log_cost()`. But `sable write`, `sable clip` (eval), `sable score` make Claude calls without org-scoped cost logging.
+- Add optional `--org` flag to `write`, `score`, `clip process`. When present, call `log_cost(conn, org_id, call_type, cost_usd)` after each Claude call. Log only, no budget gating — content generation is operator-initiated.
+- SablePlatform side: Done (`cost_events` table + `log_cost()` exist).
+
+### ~~P1-3: Pulse Freshness Sync to `sable.db sync_runs`~~ — Resolved 2026-04-04
+
+`sable pulse track` and `sable pulse meta scan` now write `sync_runs` rows to sable.db after completion (`sync_type='pulse_track'` and `'pulse_meta_scan'`). Non-fatal with try/finally for connection cleanup, narrowed to `(sqlite3.Error, OSError)`. 6 tests. Adversarial QA: 2 rounds, all clean.
+
+**Remaining:** SablePlatform `weekly_client_loop.py` freshness query needs updating to read these new sync_type values instead of (or in addition to) direct pulse.db/meta.db reads.
+
+### P2-4: Content Performance Outcomes from Pulse Snapshots
+- New `sync_content_outcomes(org_id)` in `sable/pulse/` (~60 lines). Reads pulse.db weekly aggregates, computes deltas, writes `outcomes` rows in sable.db via `create_outcome()`.
+- SablePlatform side: Done (`outcomes` table + `create_outcome()` exist).
+- Consumer: SableWeb impact timeline and value card.
+
+### P2-5: Strategy Recommendations as Platform Actions
+- `weekly_client_loop` parses `discord_playbook` artifacts for actions but NOT `twitter_strategy_brief` artifacts from `sable advise`.
+- SablePlatform side: Extend `_register_actions` to also parse `twitter_strategy_brief` artifacts.
+- Slopper side: Nothing — brief already contains parseable recommendation sections.
+- Depends on P0-1 landing first.
+
+### P2-6: Vault Content as Platform Artifacts
+- Content from `sable write`, `sable meme`, `sable clip` is not registered in `sable.db artifacts`.
+- Add `_register_vault_artifact(org_id, path, format_type)` helper. Call from write.py, meme.py, clip.py post-production. Only when `--org` is resolvable.
+- SablePlatform side: Done (`artifacts` table supports arbitrary types).
 
 ---
 

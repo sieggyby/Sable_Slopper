@@ -197,6 +197,9 @@ Schema v5 → v6. Write path owned by Cult Grader's `platform_sync.py`.
 | 2026-04-02 (SocialData hardening) | 634 | 0 | 0 |
 | 2026-04-03 (Community Intelligence) | 798 | 0 | 0 |
 | 2026-04-03 (Phase 2 sable serve) | 828 | 0 | 0 |
+| 2026-04-03 (FEATURE-3, CLIP-2, CLIP-3) | 850 | 0 | 0 |
+| 2026-04-04 (P0-1 advise --org) | 859 | 0 | 0 |
+| 2026-04-04 (P1-3 pulse sync_runs) | 865 | 0 | 0 |
 
 ---
 

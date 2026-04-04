@@ -283,3 +283,49 @@ New `sable/serve/` package:
 30 new tests in `tests/serve/` covering all endpoints, auth rejection, and health check.
 
 Validation: 828 passed, 0 ruff violations, 0 mypy errors.
+
+---
+
+## P0-1 — `sable advise --org` Flag (2026-04-04)
+
+**Bug:** `sable advise` required the handle to be in Slopper's roster with an org association. SablePlatform's `SlopperAdvisoryAdapter` resolves org → handle via `entity_handles`, but if the resolved handle isn't in the roster, advise fails with `HANDLE_NOT_IN_ROSTER`.
+
+**Fix:** Added `--org ORG_ID` flag to `sable advise`. When provided:
+- Overrides the roster account's org association
+- Allows handles not in the Slopper roster to run advise (profile files fall back to defaults)
+- Empty string `--org ""` is treated as None (falls through to roster)
+
+**Files changed:**
+- `sable/commands/advise.py` — `--org` option, passed to `generate_advise()`
+- `sable/advise/generate.py` — `org: str | None` parameter, resolution: `org or account.org`
+- Also fixed variable shadowing: `org` DB row → `org_row` to preserve the parameter
+
+**Tests:** 9 new in `tests/advise/test_org_flag.py` — org override, handle-not-in-roster, error precedence, empty string, CLI wiring.
+
+**QA:** Adversarial 2 rounds. Round 1: 2 T2 + 1 T3 findings (shadowing, empty-string edge case, help text). All fixed. Round 2: clean.
+
+Validation: 859 passed, 0 ruff violations.
+
+---
+
+## P1-3 — Pulse Freshness Sync to `sable.db sync_runs` (2026-04-04)
+
+**Problem:** `sable pulse track` and `sable pulse meta scan` write to `pulse.db` and `meta.db` respectively, but never record a sync timestamp in `sable.db sync_runs`. SablePlatform's `weekly_client_loop` freshness checks can't see when pulse data was last refreshed.
+
+**Fix:** After successful completion, both commands now write a `sync_runs` row:
+- `pulse track` → `sync_type='pulse_track'`, `records_synced=len(tweets)`
+- `meta scan` → `sync_type='pulse_meta_scan'`, `records_synced=tweets_new`
+
+**Design:** Non-fatal — sync_runs write failures log a warning but don't fail the command. Connection wrapped in try/finally. Exception narrowed to `(sqlite3.Error, OSError)`. `pulse track` resolves org via roster; `meta scan` has org as a required CLI option.
+
+**Files changed:**
+- `sable/pulse/cli.py` — sync_runs write after `snapshot_account()` success
+- `sable/pulse/meta/cli.py` — sync_runs write after `complete_scan_run()`
+
+**Tests:** 6 new in `tests/pulse/test_sync_runs.py` — write, skip-no-org, skip-not-in-roster, non-fatal failure (for each command).
+
+**Remaining:** SablePlatform `weekly_client_loop.py` needs updating to query these new sync_type values.
+
+**QA:** Adversarial 2 rounds. Round 1: 4 T2 + 2 T3 findings (connection leak, broad except, lazy imports, naming). All fixed. Round 2: clean.
+
+Validation: 865 passed, 0 ruff violations.

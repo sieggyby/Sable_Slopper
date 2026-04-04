@@ -290,11 +290,12 @@ sable score HANDLE --text "draft tweet" [--format BUCKET] [--org ORG]
 Multi-stage strategic brief: profile → pulse → vault → recommendations.
 
 ```
-sable advise HANDLE [--cheap] [--force] [--dry-run] [--export] [--bridge-aware] [--community-voice] [--churn-input PATH]
+sable advise HANDLE [--org ORG_ID] [--cheap] [--force] [--dry-run] [--export] [--bridge-aware] [--community-voice] [--churn-input PATH]
 ```
 
 | Flag | Description |
 |------|-------------|
+| `--org ORG_ID` | Org ID (defaults to roster account org). Allows handles not in roster. |
 | `--cheap` | Use cheaper/faster model |
 | `--force` | Force regeneration even if cached |
 | `--dry-run` | Estimate cost without generating |
