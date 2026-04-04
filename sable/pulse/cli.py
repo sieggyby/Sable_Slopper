@@ -259,3 +259,23 @@ def pulse_link(post_id, content_type, content_path):
     from sable.pulse.linker import manual_link
     manual_link(post_id, content_type, content_path)
     console.print(f"[green]✓ Linked {post_id} → {content_type}: {content_path}[/green]")
+
+
+@pulse_group.command("outcomes")
+@click.option("--org", required=True, help="Org ID for outcome records.")
+@click.option("--handle", required=True, help="Account handle to compute outcomes for.")
+def pulse_outcomes(org, handle):
+    """Sync content performance outcomes from pulse snapshots to sable.db."""
+    from sable.platform.errors import SableError
+
+    try:
+        from sable.pulse.outcomes import sync_content_outcomes
+        count = sync_content_outcomes(org_id=org, handle=handle)
+        console.print(f"[green]✓[/green] Created {count} outcome record(s) for {handle} ({org})")
+    except SableError as e:
+        console.print(f"[red]Error [{e.code}]: {e.message}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        from sable.platform.errors import redact_error
+        console.print(f"[red]Error: {redact_error(str(e))}[/red]")
+        sys.exit(1)
