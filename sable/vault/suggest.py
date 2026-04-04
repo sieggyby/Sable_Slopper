@@ -134,7 +134,8 @@ Return a JSON array of objects with:
 No extra text."""
 
     try:
-        raw = call_claude_json(prompt, org_id=org if org else None)
+        raw = call_claude_json(prompt, org_id=org if org else None,
+                               call_type="vault_suggest")
         drafts_data = json.loads(raw) if isinstance(raw, str) else raw
 
         if isinstance(drafts_data, dict) and "drafts" in drafts_data:

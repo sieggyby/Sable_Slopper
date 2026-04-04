@@ -31,7 +31,7 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 **Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, and more.
 All community intelligence features are shipped (FEATURE-10 through FEATURE-16, CHURN-1, CHURN-2).
 
-**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Bearer token auth, 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. 30 serve tests (require fastapi optional dep to collect). Test count: 861 core + 30 serve = 891.
+**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Bearer token auth, 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. 30 serve tests (require fastapi optional dep to collect). Test count: 869 core + 30 serve = 899.
 
 **Remaining Phase 2 work:**
 - Cloudflare Tunnel deployment (see `docs/ROADMAP.md`)

@@ -204,6 +204,7 @@ Schema v5 → v6. Write path owned by Cult Grader's `platform_sync.py`.
 | 2026-04-04 (P2-4 content outcomes) | 884 | 0 | 0 |
 | 2026-04-04 (P2-6 content artifacts) | 891 | 0 | 0 |
 | 2026-04-04 (P2-5 + P1-3 downstream verified in SablePlatform) | 891 | 0 | 0 |
+| 2026-04-04 (cost observability + stale test schemas) | 899 | 0 | 0 |
 
 ---
 

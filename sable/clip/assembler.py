@@ -65,6 +65,7 @@ def assemble_clip(
     highlight_active: bool = True,
     audio_only: bool = False,
     face_track: bool = False,
+    org_id: str | None = None,
 ) -> dict:
     """
     Full assembly pipeline:
@@ -199,6 +200,7 @@ def assemble_clip(
         source_video=source_video,
         clip_start=start,
         clip_end=end,
+        org_id=org_id,
     )
     meta["thumbnail"] = str(thumb_path)
 

@@ -187,6 +187,7 @@ sable character-explainer setup-voice [options]
 | `--orientation` | `landscape` | `landscape` (1280×720) or `portrait` (720×1280) |
 | `--platform` | `twitter` | Encoding preset: `twitter`, `youtube`, `discord`, `telegram` |
 | `--no-talking-head` | — | Disable mouth animation |
+| `--org` | — | Org slug for cost logging |
 
 ### character-explainer setup-voice flags
 | Flag | Description |

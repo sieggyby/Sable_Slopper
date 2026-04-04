@@ -96,7 +96,8 @@ Return JSON:
 }}
 """
 
-    raw = call_claude_json(prompt, max_tokens=2048, org_id=account.org if account.org else None)
+    raw = call_claude_json(prompt, max_tokens=2048, org_id=account.org if account.org else None,
+                           call_type="pulse_recommend")
     try:
         raw = raw.strip()
         if raw.startswith("```"):

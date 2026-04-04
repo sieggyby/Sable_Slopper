@@ -124,9 +124,11 @@ def scene_generate(account, topic, dry_run):
         console.print(f"[red]Account '{account}' not found in roster.[/red]")
         raise SystemExit(1)
 
+    resolved_org = acct.org or None
+
     with console.status("Generating scene with Claude..."):
         try:
-            spec = generate_scene(acct, topic=topic, dry_run=dry_run)
+            spec = generate_scene(acct, topic=topic, dry_run=dry_run, org_id=resolved_org)
         except Exception as e:
             from sable.platform.errors import redact_error
             console.print(f"[red]Generation failed: {redact_error(str(e))}[/red]")

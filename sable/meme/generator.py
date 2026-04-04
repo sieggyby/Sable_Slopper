@@ -15,6 +15,7 @@ def generate_meme_text(
     topic: Optional[str] = None,
     vibe: Optional[str] = None,
     dry_run: bool = False,
+    org_id: Optional[str] = None,
 ) -> dict[str, str]:
     """
     Generate text for a specific meme template using Claude.
@@ -59,7 +60,8 @@ Return JSON only:
     if dry_run:
         return {z["id"]: f"[DRY RUN: {z['label']}]" for z in template.get("zones", [])}
 
-    raw = call_claude_json(prompt, max_tokens=512)  # budget-exempt: meme generation has no org context
+    raw = call_claude_json(prompt, max_tokens=512, org_id=org_id,
+                           call_type="meme_generate", budget_check=False)
 
     try:
         raw = raw.strip()
@@ -73,6 +75,7 @@ Return JSON only:
 def suggest_template(
     account: Account,
     topic: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> str:
     """Ask Claude which template best fits this account + topic."""
     templates = load_registry()
@@ -97,7 +100,8 @@ Return the template ID that best matches this account's voice and the topic.
 Return only the template ID string, nothing else.
 """
 
-    result = call_claude_json(prompt, max_tokens=64)  # budget-exempt: meme generation has no org context
+    result = call_claude_json(prompt, max_tokens=64, org_id=org_id,
+                              call_type="meme_suggest", budget_check=False)
     # Strip quotes if present
     return result.strip().strip('"\'')
 
@@ -106,6 +110,7 @@ def generate_batch(
     account: Account,
     num_memes: int = 5,
     topics: Optional[list[str]] = None,
+    org_id: Optional[str] = None,
 ) -> list[dict]:
     """
     Generate a batch of meme suggestions (template + text) for an account.
@@ -144,7 +149,8 @@ Return JSON array:
 ]
 """
 
-    raw = call_claude_json(prompt, max_tokens=2048)  # budget-exempt: meme generation has no org context
+    raw = call_claude_json(prompt, max_tokens=2048, org_id=org_id,
+                           call_type="meme_batch", budget_check=False)
     try:
         raw = raw.strip()
         if raw.startswith("```"):

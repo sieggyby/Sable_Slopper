@@ -60,11 +60,12 @@ Background:
 Respond with only the summary. No preamble."""
 
 
-def _distill_background(client, background: str, model: str) -> str:
+def _distill_background(client, background: str, model: str,
+                        org_id: str | None = None) -> str:
     """Summarise a long research doc down to 3-5 sentences of core mechanism."""
     prompt = _BACKGROUND_SUMMARY_PROMPT.format(background=background)
-    # budget-exempt: character explainer has no org context
-    return call_claude(prompt, model=model, max_tokens=256).strip()
+    return call_claude(prompt, model=model, max_tokens=256, org_id=org_id,
+                       call_type="explainer_distill", budget_check=False).strip()
 
 
 def generate_script(
@@ -72,6 +73,7 @@ def generate_script(
     background: Optional[str],
     character: CharacterProfile,
     config: ExplainerConfig,
+    org_id: str | None = None,
 ) -> ExplainerScript:
     """Generate an in-character explanation script via Claude."""
     client = get_client()  # kept for compatibility; generation uses call_claude below
@@ -88,7 +90,8 @@ def generate_script(
     # Distill long background docs to a tight factual brief before sending to the writer
     background_brief: str | None
     if background and len(background.split()) > 200:
-        background_brief = _distill_background(client, background, config.claude_model)
+        background_brief = _distill_background(client, background, config.claude_model,
+                                               org_id=org_id)
     else:
         background_brief = background
 
@@ -98,8 +101,8 @@ def generate_script(
 
     user_message = "\n".join(user_parts)
 
-    # budget-exempt: character explainer has no org context
-    text = call_claude(user_message, system=system, model=config.claude_model, max_tokens=512).strip()
+    text = call_claude(user_message, system=system, model=config.claude_model, max_tokens=512,
+                       org_id=org_id, call_type="explainer_script", budget_check=False).strip()
     words = text.split()
 
     # Truncation fallback: if over 1.2× word limit, cut to last complete sentence

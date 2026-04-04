@@ -14,6 +14,7 @@ def generate_scene(
     account: Account,
     topic: Optional[str] = None,
     dry_run: bool = False,
+    org_id: Optional[str] = None,
 ) -> dict:
     """
     Ask Claude to select wojaks and compose a scene spec.
@@ -81,7 +82,8 @@ Return JSON only:
             }
         return {"layers": [], "caption": "[DRY RUN]"}
 
-    raw = call_claude_json(prompt, max_tokens=512)  # budget-exempt: wojak generation has no org context
+    raw = call_claude_json(prompt, max_tokens=512, org_id=org_id,
+                           call_type="wojak_generate", budget_check=False)
 
     try:
         raw = raw.strip()

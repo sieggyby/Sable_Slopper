@@ -390,3 +390,27 @@ Validation: 884 passed, 0 ruff violations.
 **QA:** Adversarial 2 rounds. Round 1: 0 T1, 4 T2 (get_db outside try, batch gap, naming, conn overhead), 3 T3. Fixed: get_db inside try, batch registration added. Round 2: clean.
 
 Validation: 891 passed, 0 ruff violations.
+
+---
+
+## Cost Observability — org_id threading for all Claude calls (2026-04-04)
+
+**Problem:** 8 Claude call sites in meme (3), wojak (1), thumbnail (1), character_explainer (2) generators had no `org_id`, making their spend invisible in `cost_events`. Vault search/suggest and pulse recommend had `call_type="unknown"`.
+
+**Fix:** Added `org_id: str | None = None` parameter to all generator functions (`generate_meme_text`, `suggest_template`, `generate_batch`, `generate_scene`, `_get_headline_and_palette`, `generate_thumbnail`, `assemble_clip`, `generate_script`, `_distill_background`, `generate_explainer`). CLI handlers thread `acc.org` through. Character explainer gained `--org` flag. All use `budget_check=False` (cost logged, not budget-gated). Added descriptive `call_type` values to vault/pulse calls that had `"unknown"`.
+
+**Files:** 13 source files modified (`sable/meme/generator.py`, `sable/meme/cli.py`, `sable/wojak/generator.py`, `sable/wojak/cli.py`, `sable/clip/thumbnail.py`, `sable/clip/assembler.py`, `sable/clip/cli.py`, `sable/character_explainer/script.py`, `sable/character_explainer/pipeline.py`, `sable/character_explainer/cli.py`, `sable/pulse/recommender.py`, `sable/vault/search.py`, `sable/vault/suggest.py`).
+
+**Tests:** 8 new in `tests/test_cost_observability.py`.
+
+**QA:** Adversarial 1 round. FIND-07: stale schema in `test_account_report.py` — fixed. All else clean.
+
+---
+
+## Stale Test Schemas — scanned_tweets alignment (2026-04-04)
+
+**Problem:** `test_anatomy.py`, `test_digest.py`, and `test_account_report.py` had `scanned_tweets` test schemas missing 7–35 columns vs production `_SCHEMA` in `sable/pulse/meta/db.py`.
+
+**Fix:** Updated all three test files to use the full production `scanned_tweets` schema. 72 affected tests still pass.
+
+Validation: 899 passed, 0 ruff violations.

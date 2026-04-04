@@ -152,7 +152,8 @@ For each relevant item (score >= 40), return:
 
 Return a JSON array sorted by score descending. Only include items with score >= 40. No extra text."""
 
-    raw = call_claude_json(prompt, org_id=org if org else None)
+    raw = call_claude_json(prompt, org_id=org if org else None,
+                           call_type="vault_search")
     ranked = json.loads(raw) if isinstance(raw, str) else raw
 
     if isinstance(ranked, dict) and "results" in ranked:

@@ -67,13 +67,16 @@ def meme_generate(account, template, topic, vibe, output, style, dry_run, save_b
         console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
+    resolved_org = acc.org or None
+
     if template is None:
         with console.status("Auto-selecting best template..."):
-            template = suggest_template(acc, topic=topic)
+            template = suggest_template(acc, topic=topic, org_id=resolved_org)
         console.print(f"[dim]Selected template: {template}[/dim]")
 
     with console.status("Generating meme text with Claude..."):
-        texts = generate_meme_text(template, acc, topic=topic, vibe=vibe, dry_run=dry_run)
+        texts = generate_meme_text(template, acc, topic=topic, vibe=vibe, dry_run=dry_run,
+                                   org_id=resolved_org)
 
     console.print("\n[bold]Generated text:[/bold]")
     for zone_id, text in texts.items():
@@ -152,10 +155,11 @@ def meme_batch(account, count, topics, do_render, approve):
         console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
 
+    resolved_org = acc.org or None
     topic_list = [t.strip() for t in topics.split(",") if t.strip()] if topics else None
 
     with console.status(f"Generating {count} meme ideas..."):
-        batch = generate_batch(acc, num_memes=count, topics=topic_list)
+        batch = generate_batch(acc, num_memes=count, topics=topic_list, org_id=resolved_org)
 
     console.print(f"[green]✓[/green] Generated {len(batch)} ideas\n")
 

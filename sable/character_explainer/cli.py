@@ -37,6 +37,7 @@ def explainer_group():
 @click.option("--platform", default="twitter",
               type=click.Choice(["twitter", "youtube", "discord", "telegram"]), show_default=True,
               help="Optimize encoding for target platform")
+@click.option("--org", default=None, help="Org slug for cost logging.")
 def generate_cmd(
     topic: str,
     character: str,
@@ -48,6 +49,7 @@ def generate_cmd(
     no_talking_head: bool,
     orientation: str,
     platform: str,
+    org: Optional[str],
 ) -> None:
     """Generate a character explainer video."""
     from sable.character_explainer.config import ExplainerConfig
@@ -110,6 +112,7 @@ def generate_cmd(
             output_path=output,
             background=background,
             config=config,
+            org_id=org or None,
         )
         console.print(f"[green]✓ Done:[/green] {result}")
     except Exception as e:

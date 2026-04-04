@@ -165,6 +165,7 @@ def clip_process(
             highlight_active=not no_highlight,
             audio_only=audio_only,
             face_track=face_track,
+            org_id=resolved_org,
         )
         console.print(f"  [green]✓[/green] {out_file}")
         if meta.get("thumbnail"):

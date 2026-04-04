@@ -26,6 +26,7 @@ def generate_explainer(
     output_path: str | Path,
     background: Optional[str] = None,
     config: Optional[ExplainerConfig] = None,
+    org_id: str | None = None,
 ) -> Path:
     """
     Full pipeline: script → TTS → subtitles → video assembly.
@@ -45,7 +46,7 @@ def generate_explainer(
     effective_backend = config.tts_backend or character.tts_backend
 
     # 2. Generate script
-    script = generate_script(topic, background, character, config)
+    script = generate_script(topic, background, character, config, org_id=org_id)
 
     with tempfile.TemporaryDirectory(prefix="sable_explainer_") as tmp:
         tmp_dir = Path(tmp)

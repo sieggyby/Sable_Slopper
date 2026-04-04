@@ -4,26 +4,21 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `891 passed`
+- `./.venv/bin/python -m pytest -q` → `899 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
 ---
 
-## Structural Debt
+## ~~Structural Debt~~ — Resolved 2026-04-04
 
-### AI spend observability gap
+### ~~AI spend observability gap~~ — Resolved 2026-04-04
 
-Non-org Claude call sites (content generation flows like clip/thumbnail/write without
-`--org`) remain intentionally budget-exempt. Spend is not observable in a single place
-for these flows. Org-scoped advise/meta paths are fully gated.
+All Claude call sites now thread `org_id` from account roster context. Meme (3 calls), wojak (1), thumbnail (1), and character_explainer (2) generators accept `org_id` parameter and pass it to `call_claude_json`/`call_claude` with `budget_check=False` + descriptive `call_type`. Character explainer gained `--org` CLI flag. Vault search/suggest and pulse recommend also gained descriptive `call_type` values. 8 tests. Adversarial QA: 1 round, FIND-07 fixed.
 
-**When to fix:** When a second active client makes cost attribution important.
+### ~~Stale test schemas~~ — Resolved 2026-04-04
 
-### Stale test schemas
-
-Some tests still encode stale producer/consumer schemas that don't match the live
-contracts. Lint and mypy are clean; the issue is semantic correctness of test fixtures.
+`test_anatomy.py`, `test_digest.py`, and `test_account_report.py` `scanned_tweets` schemas updated to match production `_SCHEMA` in `sable/pulse/meta/db.py`. All 22+50 affected tests pass.
 
 ---
 

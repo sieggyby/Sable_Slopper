@@ -87,7 +87,7 @@ body {{
 </body></html>"""
 
 
-def _get_headline_and_palette(hint: str) -> tuple[str, str]:
+def _get_headline_and_palette(hint: str, org_id: str | None = None) -> tuple[str, str]:
     """Ask Claude for a 4–6 word headline and a palette name."""
     from sable.shared.api import call_claude_json
 
@@ -97,7 +97,8 @@ def _get_headline_and_palette(hint: str) -> tuple[str, str]:
         f"Clip text: {hint or 'crypto community discussion'}\n\n"
         'Return JSON: {"headline": "...", "palette": "<red|blue|green|orange|purple|teal>"}'
     )
-    raw = call_claude_json(prompt, max_tokens=256)  # budget-exempt: thumbnail generation has no org context
+    raw = call_claude_json(prompt, max_tokens=256, org_id=org_id,
+                           call_type="clip_thumbnail", budget_check=False)
     try:
         data = json.loads(raw)
         headline = str(data.get("headline", "Something Big Is Coming")).strip()
@@ -510,6 +511,7 @@ def generate_thumbnail(
     clip_start: float = 0.0,
     clip_end: float = 0.0,
     accent_color: Optional[str] = None,
+    org_id: str | None = None,
 ) -> Path:
     """
     Generate a 1280×720 thumbnail PNG.
@@ -520,7 +522,7 @@ def generate_thumbnail(
       3. No video frame → PIL gradient-only
       4. Any exception → PIL gradient-only
     """
-    headline, palette_name = _get_headline_and_palette(headline_hint)
+    headline, palette_name = _get_headline_and_palette(headline_hint, org_id=org_id)
     if accent_color and accent_color in PALETTES:
         palette_name = accent_color
 
