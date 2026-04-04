@@ -87,7 +87,7 @@ def test_select_clips_calls_claude_once_per_batch(monkeypatch):
 
     call_count = [0]
 
-    def fake_call_claude(prompt, max_tokens=None):
+    def fake_call_claude(prompt, max_tokens=None, **kwargs):
         call_count[0] += 1
         return "[]"
 
@@ -119,7 +119,7 @@ def test_select_clips_offsets_indices_from_second_batch(monkeypatch):
     call_results = ["[]", second_batch_result]
     call_idx = [0]
 
-    def fake_call_claude(prompt, max_tokens=None):
+    def fake_call_claude(prompt, max_tokens=None, **kwargs):
         r = call_results[call_idx[0]]
         call_idx[0] += 1
         return r

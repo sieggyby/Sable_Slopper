@@ -101,6 +101,7 @@ def call_claude(
     max_tokens: int = 2048,
     org_id: Optional[str] = None,
     call_type: str = "unknown",
+    budget_check: bool = True,
 ) -> str:
     """Simple single-turn Claude call. Returns text response."""
     return call_claude_with_usage(
@@ -110,6 +111,7 @@ def call_claude(
         max_tokens=max_tokens,
         org_id=org_id,
         call_type=call_type,
+        budget_check=budget_check,
     ).text
 
 
@@ -120,8 +122,14 @@ def call_claude_with_usage(
     max_tokens: int = 2048,
     org_id: Optional[str] = None,
     call_type: str = "unknown",
+    budget_check: bool = True,
 ) -> ClaudeCallResult:
-    """Claude call wrapper that optionally enforces org budget and returns usage details."""
+    """Claude call wrapper that optionally enforces org budget and returns usage details.
+
+    When budget_check=False and org_id is provided, cost is still logged but
+    check_budget() is skipped.  Use this for operator-initiated content
+    generation (write, score, clip) that should not be budget-gated.
+    """
     client = get_client()
     if model is None:
         model = cfg.get("default_model", "claude-sonnet-4-6")
@@ -137,7 +145,8 @@ def call_claude_with_usage(
         from sable.platform.db import get_db
         from sable.platform.cost import check_budget, log_cost
         conn = get_db()
-        check_budget(conn, org_id)
+        if budget_check:
+            check_budget(conn, org_id)
         budget_org_id = org_id
 
     try:
@@ -174,8 +183,9 @@ def call_claude_json(
     max_tokens: int = 2048,
     org_id: Optional[str] = None,
     call_type: str = "unknown",
+    budget_check: bool = True,
 ) -> str:
     """Call Claude expecting JSON output. Returns raw text (caller parses)."""
     json_system = (system + "\n\nRespond with valid JSON only. No markdown fences.").strip()
     return call_claude(prompt, system=json_system, model=model, max_tokens=max_tokens,
-                       org_id=org_id, call_type=call_type)
+                       org_id=org_id, call_type=call_type, budget_check=budget_check)

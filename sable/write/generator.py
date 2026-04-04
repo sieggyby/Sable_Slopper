@@ -456,6 +456,7 @@ def generate_tweet_variants(
             max_tokens=2048,
             call_type="write_variants",
             org_id=resolved_org,
+            budget_check=False,
         )
 
         # Parse response

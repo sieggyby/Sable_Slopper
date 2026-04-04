@@ -422,6 +422,7 @@ def _evaluate_variants_batch(
     segments: list[dict],
     words: list[dict] | None = None,
     max_dur: float = 90.0,
+    org_id: str | None = None,
 ) -> list[dict]:
     """
     One Claude call to pick the best duration variant per clip.
@@ -440,7 +441,8 @@ def _evaluate_variants_batch(
         results = []
         for offset in range(0, len(clips_with_variants), _MAX_EVAL_BATCH):
             batch = clips_with_variants[offset:offset + _MAX_EVAL_BATCH]
-            results.extend(_evaluate_variants_batch(batch, segments, words=words, max_dur=max_dur))
+            results.extend(_evaluate_variants_batch(batch, segments, words=words,
+                                                       max_dur=max_dur, org_id=org_id))
         return results
 
     clip_descriptions = []
@@ -493,7 +495,9 @@ Set extend=true if chosen="long" and the argument still hasn't fully resolved (t
 
 Set lands=false when the chosen variant cuts off before the rhetorical point is complete."""
 
-    raw = retry_with_backoff(lambda: call_claude_json(prompt, max_tokens=1024))  # budget-exempt: clip pipeline has no org context at eval time
+    raw = retry_with_backoff(lambda: call_claude_json(prompt, max_tokens=1024,
+                                                        org_id=org_id, call_type="clip_eval",
+                                                        budget_check=False))
 
     try:
         raw = raw.strip()
@@ -506,7 +510,9 @@ Set lands=false when the chosen variant cuts off before the rhetorical point is 
         _logger.warning("Claude eval parse failed, raw=%r", raw[:500])
         # AR5-27: single retry before falling back to []
         try:
-            raw2 = call_claude_json(prompt, max_tokens=1024)  # budget-exempt: clip pipeline has no org context at eval time
+            raw2 = call_claude_json(prompt, max_tokens=1024,
+                                       org_id=org_id, call_type="clip_eval",
+                                       budget_check=False)
             raw2 = raw2.strip()
             if raw2.startswith("```"):
                 raw2 = raw2.split("\n", 1)[1].rsplit("```", 1)[0]
@@ -604,6 +610,7 @@ def select_clips(
     min_duration: float = 8.0,
     max_duration: float = 90.0,
     dry_run: bool = False,
+    org_id: str | None = None,
 ) -> list[dict]:
     """
     Use Claude to identify the best clip segments from a transcript.
@@ -719,7 +726,9 @@ Return a JSON array only. Each element:
 Sort by score descending. Return [] if nothing qualifies."""
 
         max_tokens = min(max(2048, len(batch_windows) * 80), 8192)
-        raw = call_claude_json(prompt, max_tokens=max_tokens)  # budget-exempt: clip pipeline has no org context at eval time
+        raw = call_claude_json(prompt, max_tokens=max_tokens,
+                               org_id=org_id, call_type="clip_select",
+                               budget_check=False)
 
         try:
             raw = raw.strip()
@@ -757,7 +766,8 @@ Sort by score descending. Return [] if nothing qualifies."""
             clips_with_variants.append(clip)
 
     # One Claude call to pick the best duration variant per clip
-    clips = _evaluate_variants_batch(clips_with_variants, segments, words=words, max_dur=max_duration)
+    clips = _evaluate_variants_batch(clips_with_variants, segments, words=words,
+                                     max_dur=max_duration, org_id=org_id)
 
     # Apply max_clips cap if provided
     if max_clips is not None:

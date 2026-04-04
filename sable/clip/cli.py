@@ -43,11 +43,12 @@ def clip_group():
               help="Use source audio only — brainrot fills the full frame (for podcasts, screen-shares)")
 @click.option("--face-track", is_flag=True,
               help="Center crop on detected faces (falls back to motion tracking, then center)")
+@click.option("--org", default=None, help="Org slug for cost logging (defaults to account's org).")
 def clip_process(
     video, account, num_clips, min_duration, max_duration,
     caption_style, caption_color, brainrot_energy, whisper_model, dry_run, no_brainrot,
     image_overlay, target_duration, clip_sizes, platform, no_highlight, audio_only,
-    face_track,
+    face_track, org,
 ):
     """Process a video into short-form vertical clips for an account."""
     from sable.shared.download import maybe_download
@@ -70,6 +71,8 @@ def clip_process(
         from sable.platform.errors import redact_error
         console.print(f"[red]{redact_error(str(e))}[/red]")
         sys.exit(1)
+
+    resolved_org = org or acc.org or None
 
     energy = brainrot_energy or acc.content.brainrot_energy
     cap_style = caption_style or acc.content.caption_style
@@ -110,6 +113,7 @@ def clip_process(
             min_duration=min_duration,
             max_duration=max_duration,
             dry_run=dry_run,
+            org_id=resolved_org,
         )
     if dry_run and clips and clips[0].get("window_count") is not None:
         console.print(f"[green]✓[/green] Selected {len(clips)} clips ({clips[0]['window_count']} windows detected)")

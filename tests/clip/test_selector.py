@@ -368,7 +368,7 @@ def test_evaluate_variants_batch_splits_when_over_20_clips(monkeypatch):
 
     call_count = [0]
 
-    def fake_claude(prompt, max_tokens=None):
+    def fake_claude(prompt, max_tokens=None, **kwargs):
         call_count[0] += 1
         return "[]"
 

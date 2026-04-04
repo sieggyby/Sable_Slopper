@@ -26,7 +26,10 @@ def interpret_terms(
     from sable.platform.db import get_db
     from sable.platform.cost import check_budget
     platform_conn = get_db()
-    check_budget(platform_conn, org)
+    try:
+        check_budget(platform_conn, org)
+    finally:
+        platform_conn.close()
 
     batch = terms[:25]
     term_list = "\n".join(f"- {t['term']}" for t in batch)
@@ -40,7 +43,8 @@ def interpret_terms(
     )
 
     try:
-        raw = call_claude_json(prompt, call_type="lexicon_interpret", org_id=org)
+        raw = call_claude_json(prompt, call_type="lexicon_interpret", org_id=org,
+                               budget_check=False)
         parsed = json.loads(raw)
         # Handle wrapped response: {"terms": [...]} or {"results": [...]}
         if isinstance(parsed, dict):

@@ -86,6 +86,7 @@ def generate_playbook(
                 max_tokens=800,
                 org_id=org,
                 call_type="churn_intervention",
+                budget_check=False,
             )
             parsed = json.loads(raw)
             if not isinstance(parsed, dict):
