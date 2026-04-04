@@ -67,6 +67,9 @@ def generate_advise(
     cheap: bool = False,
     dry_run: bool = False,
     export: bool = False,
+    bridge_aware: bool = False,
+    community_voice: bool = False,
+    churn_data: list[dict] | None = None,
 ) -> str:
     """
     Generate Twitter strategy brief for handle.
@@ -170,6 +173,35 @@ def generate_advise(
 
     try:
         summary_text = render_summary(assembled)
+
+        # Inject bridge node section if requested
+        if bridge_aware:
+            from sable.advise.stage1 import _assemble_bridge_section, _open_db_readonly
+            from sable.shared.paths import meta_db_path
+            meta_conn = _open_db_readonly(meta_db_path())
+            bridge_section = _assemble_bridge_section(org_id, conn, meta_conn)
+            if meta_conn:
+                meta_conn.close()
+            if bridge_section:
+                summary_text += "\n" + bridge_section
+
+        # Inject community language section if requested
+        if community_voice:
+            from sable.advise.stage1 import _assemble_community_language
+            cl_section = _assemble_community_language(org_id, conn)
+            if cl_section:
+                summary_text += "\n" + cl_section
+
+        # Inject churn data if provided
+        if churn_data and isinstance(churn_data, list):
+            churn_lines = ["## At-Risk Members"]
+            for m in churn_data[:20]:
+                handle_str = m.get("handle", "?")
+                decay = m.get("decay_score", "?")
+                topics = ", ".join(m.get("topics", [])) if m.get("topics") else "none"
+                churn_lines.append(f"- {handle_str}: decay={decay}, topics=[{topics}]")
+            churn_lines.append("")
+            summary_text += "\n" + "\n".join(churn_lines)
 
         # Per-brief cost cap enforcement (live runs only)
         if model not in ("template_only",) and not budget_exceeded:

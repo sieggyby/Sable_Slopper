@@ -323,6 +323,143 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
     return result
 
 
+def _assemble_bridge_section(
+    org_id: str,
+    platform_conn: sqlite3.Connection,
+    meta_conn: Optional[sqlite3.Connection],
+) -> str:
+    """Assemble bridge node activity section for advise prompt.
+
+    Queries sable.db for entities with 'bridge_node' tag, then meta.db
+    for each bridge node's recent engagement. Returns empty string if
+    zero bridge nodes or meta.db unavailable.
+    """
+    try:
+        rows = platform_conn.execute(
+            """SELECT DISTINCT e.entity_id, e.display_name
+               FROM entities e
+               JOIN entity_tags t ON e.entity_id = t.entity_id
+               WHERE e.org_id = ? AND t.tag = 'bridge_node' AND t.is_current = 1
+                 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))
+                 AND e.status != 'archived'
+               LIMIT 5""",
+            (org_id,),
+        ).fetchall()
+    except Exception as e:
+        logger.warning("_assemble_bridge_section entity query failed: %s", e)
+        return ""
+
+    if not rows:
+        return ""
+
+    if meta_conn is None:
+        return ""
+
+    lines = ["## Bridge Node Activity"]
+    for row in rows:
+        eid = row["entity_id"]
+        name = row["display_name"] or eid
+
+        # Get Twitter handle for this entity
+        try:
+            handle_row = platform_conn.execute(
+                "SELECT handle FROM entity_handles WHERE entity_id = ? AND platform = 'twitter'",
+                (eid,),
+            ).fetchone()
+        except Exception:
+            handle_row = None
+
+        if not handle_row:
+            lines.append(f"  - {name}: no Twitter handle linked")
+            continue
+
+        handle = handle_row["handle"]
+        norm = handle if handle.startswith("@") else f"@{handle}"
+
+        # Recent engagement from meta.db
+        try:
+            stats = meta_conn.execute(
+                """SELECT COUNT(*) as cnt,
+                          AVG(COALESCE(total_lift, 0)) as avg_lift
+                   FROM scanned_tweets
+                   WHERE author_handle = ? AND org = ?
+                     AND posted_at >= datetime('now', '-14 days')""",
+                (norm, org_id),
+            ).fetchone()
+            cnt = stats["cnt"] if stats else 0
+            avg_lift = stats["avg_lift"] if stats and stats["avg_lift"] else 0
+            if cnt > 0:
+                lines.append(f"  - {name} ({norm}): {cnt} tweets, avg lift {avg_lift:.1f}x")
+            else:
+                lines.append(f"  - {name} ({norm}): no recent activity")
+        except Exception as e:
+            logger.warning("_assemble_bridge_section meta query failed for %s: %s", norm, e)
+            lines.append(f"  - {name} ({norm}): data unavailable")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _assemble_community_language(
+    org_id: str,
+    platform_conn: sqlite3.Connection,
+) -> str:
+    """Assemble community language signal section from CultGrader diagnostic data.
+
+    Queries diagnostic_runs for the latest completed run with non-null language
+    fields. 14-day freshness gate. Returns empty string if no data, stale, or
+    columns don't exist yet (pre-migration).
+    """
+    try:
+        row = platform_conn.execute(
+            """SELECT language_arc_phase, emergent_cultural_terms_json,
+                      mantra_candidates_json, started_at
+               FROM diagnostic_runs
+               WHERE org_id = ? AND started_at IS NOT NULL
+                 AND started_at > datetime('now', '-14 days')
+               ORDER BY started_at DESC LIMIT 1""",
+            (org_id,),
+        ).fetchone()
+    except Exception as e:
+        # Columns may not exist yet (pre-migration)
+        logger.debug("_assemble_community_language query failed (expected pre-migration): %s", e)
+        return ""
+
+    if not row:
+        return ""
+
+    arc_phase = row["language_arc_phase"] if row["language_arc_phase"] else None
+    terms_json = row["emergent_cultural_terms_json"] if row["emergent_cultural_terms_json"] else None
+    mantras_json = row["mantra_candidates_json"] if row["mantra_candidates_json"] else None
+
+    if not any([arc_phase, terms_json, mantras_json]):
+        return ""
+
+    lines = ["## Community Language Signal"]
+
+    if arc_phase:
+        lines.append(f"Language arc phase: {arc_phase}")
+
+    if terms_json:
+        try:
+            terms = json.loads(terms_json)
+            if isinstance(terms, list) and terms:
+                lines.append(f"Emergent cultural terms: {', '.join(str(t) for t in terms[:10])}")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if mantras_json:
+        try:
+            mantras = json.loads(mantras_json)
+            if isinstance(mantras, list) and mantras:
+                lines.append(f"Mantra candidates: {', '.join(str(m) for m in mantras[:5])}")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 def render_summary(data: dict) -> str:
     """Build the structured text summary for Claude."""
     lines = []

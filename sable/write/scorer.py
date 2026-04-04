@@ -126,19 +126,28 @@ def score_draft(
     draft_text: str,
     format_bucket: str,
     org: str | None,
+    voice_corpus: str | None = None,
 ) -> HookScore:
-    """Score a draft tweet's hook against recent high-performing patterns."""
+    """Score a draft tweet's hook against recent high-performing patterns.
+
+    When voice_corpus is provided (via --voice-check), it replaces the default
+    200-char tone excerpt with the full voice corpus for richer scoring.
+    """
     acc = require_account(handle)
     resolved_org: str = org or acc.org or ""
 
     patterns = get_hook_patterns(resolved_org, format_bucket)
 
-    tone_excerpt = ""
-    tone_path = profile_dir(handle) / "tone.md"
-    try:
-        tone_excerpt = tone_path.read_text(encoding="utf-8")[:200]
-    except (OSError, FileNotFoundError):
-        pass
+    if voice_corpus:
+        voice_section = voice_corpus
+    else:
+        tone_excerpt = ""
+        tone_path = profile_dir(handle) / "tone.md"
+        try:
+            tone_excerpt = tone_path.read_text(encoding="utf-8")[:200]
+        except (OSError, FileNotFoundError):
+            pass
+        voice_section = tone_excerpt
 
     numbered_patterns = "\n".join(
         f"{i}. {p.name} — {p.description} — e.g. \"{p.example}\""
@@ -146,7 +155,7 @@ def score_draft(
     )
 
     prompt = (
-        f"Account voice profile:\n{tone_excerpt}\n\n"
+        f"Account voice profile:\n{voice_section}\n\n"
         f"High-performing hook patterns in {format_bucket} right now:\n{numbered_patterns}\n\n"
         f"Draft tweet:\n{draft_text}\n\n"
         "Score this draft 1-10 on hook strength, pattern match, and voice fit.\n\n"

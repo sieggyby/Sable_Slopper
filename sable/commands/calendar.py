@@ -24,8 +24,17 @@ console = Console()
     "--save", "save_plan", is_flag=True, default=False,
     help="Save calendar to ~/.sable/playbooks/.",
 )
+@click.option(
+    "--churn-input", "churn_input_path", type=click.Path(exists=True), default=None,
+    help="Path to at-risk members JSON for re-engagement slot injection.",
+)
+@click.option(
+    "--prioritize-churn", is_flag=True, default=False,
+    help="Remove 30%% cap on churn-annotated slots.",
+)
 def calendar_command(
-    handle: str, days: int, formats_target: int, org: str | None, save_plan: bool
+    handle: str, days: int, formats_target: int, org: str | None, save_plan: bool,
+    churn_input_path: str | None, prioritize_churn: bool,
 ) -> None:
     """Generate a posting calendar for an account."""
     from sable.calendar.planner import build_calendar, render_calendar
@@ -45,15 +54,36 @@ def calendar_command(
             "[yellow]No org resolved — vault and meta sections will be skipped.[/yellow]"
         )
 
-    plan = build_calendar(
-        handle=account.handle,
-        org=resolved_org or "",
-        days=days,
-        formats_target=formats_target,
-        pulse_db_path=pulse_db_path(),
-        meta_db_path=meta_db_path() if resolved_org else None,
-        vault_root=vault_dir(resolved_org) if resolved_org else None,
-    )
+    churn_playbook = None
+    if churn_input_path:
+        import json as _json
+        try:
+            with open(churn_input_path, encoding="utf-8") as _f:
+                churn_playbook = _json.load(_f)
+            if not isinstance(churn_playbook, list):
+                console.print("[red]Churn input must be a JSON array[/red]")
+                sys.exit(1)
+        except (ValueError, OSError) as e:
+            console.print(f"[red]Error reading churn input: {e}[/red]")
+            sys.exit(1)
+
+    from sable.platform.errors import SableError, redact_error as _redact
+
+    try:
+        plan = build_calendar(
+            handle=account.handle,
+            org=resolved_org or "",
+            days=days,
+            formats_target=formats_target,
+            pulse_db_path=pulse_db_path(),
+            meta_db_path=meta_db_path() if resolved_org else None,
+            vault_root=vault_dir(resolved_org) if resolved_org else None,
+            churn_playbook=churn_playbook,
+            prioritize_churn=prioritize_churn,
+        )
+    except SableError as e:
+        console.print(f"[red]Error [{e.code}]: {_redact(e.message)}[/red]")
+        sys.exit(1)
 
     output = render_calendar(plan)
     console.print(output)

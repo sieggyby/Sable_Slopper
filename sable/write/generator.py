@@ -10,6 +10,7 @@ from typing import Optional
 
 from sable.roster.manager import require_account
 from sable.shared.api import build_account_context, call_claude_json
+from sable.shared.paths import profile_dir
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +219,96 @@ def _load_viral_anatomy_patterns(
     return patterns, anatomy_ref
 
 
+def assemble_voice_corpus(
+    handle: str,
+    org: str,
+    vault_path: Optional[Path],
+    max_notes: int = 10,
+    max_tokens_per_note: int = 500,
+    max_total_tokens: int = 4000,
+) -> str:
+    """Build a voice corpus string from profile files and recent vault notes.
+
+    Loads tone.md (full) + notes.md (full) from profile dir, then recent
+    vault notes filtered by posted_by containing handle. Caps enforced.
+    Returns assembled string for scorer prompt injection.
+    """
+    from sable import config as cfg
+
+    max_notes = int(cfg.get("voice_check_max_notes", max_notes))
+    max_tokens_per_note = int(cfg.get("voice_check_max_tokens_per_note", max_tokens_per_note))
+    max_total_tokens = int(cfg.get("voice_check_max_total_tokens", max_total_tokens))
+
+    parts: list[str] = []
+    pdir = profile_dir(handle)
+
+    # tone.md — always include full
+    tone_path = pdir / "tone.md"
+    try:
+        tone_text = tone_path.read_text(encoding="utf-8").strip()
+        if tone_text:
+            parts.append(f"## Voice Profile (tone.md)\n{tone_text}")
+    except (OSError, FileNotFoundError):
+        pass
+
+    # notes.md — always include full
+    notes_path = pdir / "notes.md"
+    try:
+        notes_text = notes_path.read_text(encoding="utf-8").strip()
+        if notes_text:
+            parts.append(f"## Account Notes\n{notes_text}")
+    except (OSError, FileNotFoundError):
+        pass
+
+    # Recent vault notes posted by this handle
+    if vault_path and vault_path.exists():
+        try:
+            from sable.vault.notes import load_all_notes
+
+            all_notes = load_all_notes(vault_path)
+            # Filter by posted_by containing handle
+            norm_handle = handle.lstrip("@").lower()
+            posted_notes = []
+            for n in all_notes:
+                for entry in (n.get("posted_by") or []):
+                    acc = entry.get("account", "").lstrip("@").lower()
+                    if acc == norm_handle:
+                        posted_notes.append(n)
+                        break
+
+            # Sort by most recent posted_at
+            def _posted_at(n: dict) -> str:
+                for entry in (n.get("posted_by") or []):
+                    acc = entry.get("account", "").lstrip("@").lower()
+                    if acc == norm_handle:
+                        return entry.get("posted_at", "")
+                return ""
+
+            posted_notes.sort(key=_posted_at, reverse=True)
+            posted_notes = posted_notes[:max_notes]
+
+            if posted_notes:
+                vault_lines = []
+                for n in posted_notes:
+                    title = n.get("title") or n.get("id") or "untitled"
+                    body = n.get("body", "")
+                    # Rough token cap: ~4 chars per token
+                    char_cap = max_tokens_per_note * 4
+                    if len(body) > char_cap:
+                        body = body[:char_cap] + "…"
+                    vault_lines.append(f"- **{title}**: {body}")
+                parts.append("## Recent Posted Content\n" + "\n".join(vault_lines))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            logger.warning("assemble_voice_corpus vault load failed: %s", e)
+
+    corpus = "\n\n".join(parts)
+    # Total token cap
+    total_char_cap = max_total_tokens * 4
+    if len(corpus) > total_char_cap:
+        corpus = corpus[:total_char_cap] + "…"
+    return corpus
+
+
 def generate_tweet_variants(
     handle: str,
     org: str,
@@ -229,6 +320,7 @@ def generate_tweet_variants(
     vault_root: Optional[Path],
     watchlist_wire: bool = False,
     use_anatomy: bool = True,
+    lexicon_terms: list[dict] | None = None,
 ) -> WriteResult:
     """Assemble context, call Claude, return WriteResult with variants and metadata."""
     acc = require_account(handle)
@@ -269,6 +361,18 @@ def generate_tweet_variants(
                     niche_wire_block = f"\nTrending niche topics to consider: {terms}"
             except Exception as e:
                 logger.warning("watchlist_wire fetch failed: %s", e)
+
+        # Lexicon: inject community vocabulary if provided
+        lexicon_block = ""
+        if lexicon_terms:
+            term_strs = [
+                f"  • {t['term']}" + (f" — {t['gloss']}" if t.get("gloss") else "")
+                for t in lexicon_terms[:15]
+            ]
+            lexicon_block = (
+                "\nCommunity vocabulary (use naturally when relevant, "
+                "never force):\n" + "\n".join(term_strs) + "\n"
+            )
 
         # Viral anatomy patterns: inject structural DNA from highest-lift tweets
         anatomy_block = ""
@@ -330,7 +434,8 @@ def generate_tweet_variants(
             f"Topic to write about: {topic_str}"
             f"{source_block}"
             f"{vault_block}"
-            f"{niche_wire_block}\n\n"
+            f"{niche_wire_block}"
+            f"{lexicon_block}\n\n"
             f"Generate {num_variants} tweet variants. For each:\n"
             "- Write the tweet text (respect Twitter's 280-char limit for standalone; "
             "280 per tweet for threads)\n"

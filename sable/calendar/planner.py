@@ -22,6 +22,7 @@ class CalendarSlot:
     action: str               # "post_ready" | "create"
     vault_note_id: Optional[str]
     rationale: str
+    churn_targets: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -168,6 +169,51 @@ def _get_format_trends(org: str, conn: sqlite3.Connection) -> dict[str, float]:
 # Build + Render
 # ---------------------------------------------------------------------------
 
+CHURN_SLOT_CAP = 0.30  # max fraction of slots for churn re-engagement
+
+
+def _build_churn_prompt_section(
+    churn_playbook: list[dict] | None,
+    prioritize_churn: bool,
+) -> str:
+    """Build the churn re-engagement prompt section."""
+    if not churn_playbook:
+        return ""
+
+    # Deduplicate by handle
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for member in churn_playbook:
+        h = member.get("handle", "")
+        if h and h not in seen:
+            seen.add(h)
+            unique.append(member)
+
+    lines = ["\n## Re-engagement Targets"]
+    lines.append("The following at-risk members should be targeted for re-engagement.")
+    if not prioritize_churn:
+        lines.append(
+            f"Annotate up to {int(CHURN_SLOT_CAP * 100)}% of slots with churn_targets "
+            "containing the handles of members this content could re-engage."
+        )
+    else:
+        lines.append(
+            "Annotate as many slots as possible with churn_targets "
+            "containing the handles of members this content could re-engage."
+        )
+
+    for m in unique[:20]:  # cap context size
+        topics = ", ".join(m.get("topics", [])) if m.get("topics") else "none"
+        lines.append(
+            f"- {m.get('handle', '?')}: "
+            f"decay={m.get('decay_score', '?')}, "
+            f"topics=[{topics}], "
+            f"role={m.get('role', 'member')}"
+        )
+
+    return "\n".join(lines) + "\n"
+
+
 def build_calendar(
     handle: str,
     org: str,
@@ -176,6 +222,8 @@ def build_calendar(
     pulse_db_path: Path,
     meta_db_path: Optional[Path],
     vault_root: Optional[Path],
+    churn_playbook: Optional[list[dict]] = None,
+    prioritize_churn: bool = False,
 ) -> CalendarPlan:
     """Assemble inputs and call Claude to produce a CalendarPlan."""
     h = handle if handle.startswith("@") else f"@{handle}"
@@ -237,7 +285,7 @@ Constraints:
 - Use "post_ready" action + vault_note_id when scheduling a vault item; otherwise "create".
 - Return exactly {days} days starting from {horizon_start}.
 - Each day should have 1–2 slots.
-
+{_build_churn_prompt_section(churn_playbook, prioritize_churn)}
 Return JSON with this exact structure:
 {{
   "days": [
@@ -250,7 +298,8 @@ Return JSON with this exact structure:
           "topic_suggestion": "...",
           "action": "create",
           "vault_note_id": null,
-          "rationale": "..."
+          "rationale": "...",
+          "churn_targets": []
         }}
       ]
     }}
@@ -264,7 +313,29 @@ Return JSON with this exact structure:
 
     raw = call_claude_json(prompt, system, org_id=org, call_type="calendar", max_tokens=2048)
 
-    return _parse_calendar_response(raw, h, org, days, now)
+    plan = _parse_calendar_response(raw, h, org, days, now)
+
+    # Enforce churn slot cap
+    if churn_playbook and not prioritize_churn:
+        _enforce_churn_cap(plan)
+
+    return plan
+
+
+def _enforce_churn_cap(plan: CalendarPlan) -> None:
+    """Strip churn_targets from excess slots to respect CHURN_SLOT_CAP."""
+    all_slots = [s for d in plan.days for s in d.slots]
+    total = len(all_slots)
+    if total == 0:
+        return
+
+    max_churn = max(1, int(total * CHURN_SLOT_CAP))
+    churn_count = 0
+    for slot in all_slots:
+        if slot.churn_targets:
+            churn_count += 1
+            if churn_count > max_churn:
+                slot.churn_targets = []
 
 
 def _parse_calendar_response(
@@ -297,6 +368,7 @@ def _parse_calendar_response(
                     action=s.get("action", "create"),
                     vault_note_id=s.get("vault_note_id"),
                     rationale=s.get("rationale", ""),
+                    churn_targets=s.get("churn_targets", []),
                 )
                 slots.append(slot)
                 formats_covered.add(slot.format_bucket)

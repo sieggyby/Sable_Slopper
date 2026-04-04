@@ -132,6 +132,34 @@ CREATE INDEX IF NOT EXISTS idx_viral_anatomies_org
     ON viral_anatomies (org);
 CREATE INDEX IF NOT EXISTS idx_viral_anatomies_org_bucket
     ON viral_anatomies (org, format_bucket);
+
+CREATE TABLE IF NOT EXISTS lexicon_terms (
+    org TEXT NOT NULL,
+    term TEXT NOT NULL,
+    category TEXT,
+    gloss TEXT,
+    lsr REAL,
+    updated_at TEXT,
+    UNIQUE(org, term)
+);
+CREATE INDEX IF NOT EXISTS idx_lexicon_terms_org ON lexicon_terms(org);
+
+CREATE TABLE IF NOT EXISTS author_cadence (
+    author_handle TEXT NOT NULL,
+    org TEXT NOT NULL,
+    computed_at TEXT NOT NULL,
+    posts_recent_half INTEGER,
+    posts_prior_half INTEGER,
+    median_lift_recent REAL,
+    median_lift_prior REAL,
+    vol_drop REAL,
+    eng_drop REAL,
+    fmt_reg REAL,
+    silence_gradient REAL,
+    insufficient_data TEXT,
+    window_days INTEGER,
+    UNIQUE(author_handle, org)
+);
 """
 
 
