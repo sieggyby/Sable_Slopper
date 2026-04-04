@@ -7,6 +7,7 @@ import click
 
 @click.command("advise")
 @click.argument("handle")
+@click.option("--org", default=None, help="Org ID (defaults to roster account org)")
 @click.option("--cheap", is_flag=True, help="Use cheaper/faster model")
 @click.option("--force", is_flag=True, help="Force regeneration even if cached")
 @click.option("--dry-run", is_flag=True, help="Estimate cost without generating")
@@ -17,7 +18,7 @@ import click
               help="Inject CultGrader community language data into the brief")
 @click.option("--churn-input", "churn_input_path", type=click.Path(exists=True), default=None,
               help="Path to at-risk members JSON to fold into the brief")
-def advise_command(handle, cheap, force, dry_run, export, bridge_aware, community_voice, churn_input_path):
+def advise_command(handle, org, cheap, force, dry_run, export, bridge_aware, community_voice, churn_input_path):
     """Generate Twitter strategy brief for a managed account."""
     from sable.platform.errors import SableError
     from sable.advise.generate import generate_advise
@@ -40,7 +41,7 @@ def advise_command(handle, cheap, force, dry_run, export, bridge_aware, communit
         path = generate_advise(
             handle, force=force, cheap=cheap, dry_run=dry_run, export=export,
             bridge_aware=bridge_aware, community_voice=community_voice,
-            churn_data=churn_data,
+            churn_data=churn_data, org=org,
         )
         if not dry_run and path:
             console.print(f"[green]✓ Strategy brief:[/green] {path}")

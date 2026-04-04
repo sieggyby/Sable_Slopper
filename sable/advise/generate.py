@@ -70,10 +70,15 @@ def generate_advise(
     bridge_aware: bool = False,
     community_voice: bool = False,
     churn_data: list[dict] | None = None,
+    org: str | None = None,
 ) -> str:
     """
     Generate Twitter strategy brief for handle.
     Returns file path of the generated brief.
+
+    When ``org`` is provided, it overrides the roster's org association for the
+    handle.  This allows SablePlatform's adapter to invoke advise for handles
+    that may not yet be in the Slopper roster.
     """
     normalized_handle = _normalize_handle(handle)
 
@@ -81,18 +86,19 @@ def generate_advise(
     from sable.roster.manager import load_roster
     roster = load_roster()
     account = roster.get(normalized_handle)
-    if account is None:
-        raise SableError(HANDLE_NOT_IN_ROSTER, f"Handle '{normalized_handle}' not in roster")
 
-    org_id = account.org
+    # Resolve org_id: explicit --org flag > roster account org
+    org_id = org or (account.org if account else None)
     if not org_id:
+        if account is None:
+            raise SableError(HANDLE_NOT_IN_ROSTER, f"Handle '{normalized_handle}' not in roster")
         raise SableError(NO_ORG_FOR_HANDLE, f"Roster handle '{normalized_handle}' has no org")
 
     conn = get_db()
 
     # Verify org
-    org = conn.execute("SELECT * FROM orgs WHERE org_id=?", (org_id,)).fetchone()
-    if not org:
+    org_row = conn.execute("SELECT * FROM orgs WHERE org_id=?", (org_id,)).fetchone()
+    if not org_row:
         raise SableError(ORG_NOT_FOUND, f"Org '{org_id}' not found in sable.db")
 
     # Check cache
