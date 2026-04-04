@@ -17,12 +17,16 @@ pip install -e ".[dev]"
 sable --version
 ```
 
-The `[dev]` extra installs `pytest`, `ruff`, and `mypy`. Optional dep groups:
+The `[dev]` extra installs `pytest`, `pytest-asyncio`, `ruff`, and `mypy`. Optional dep groups:
 
 | Group | Install | Needed for |
 |-------|---------|-----------|
+| `face` | `pip install -e ".[face]"` | `sable face` swap pipeline (replicate, face-recognition, imagehash) |
+| `pulse` | `pip install -e ".[pulse]"` | `sable pulse meta` Levenshtein matching (python-Levenshtein) |
 | `score` | `pip install -e ".[score]"` | `scripts/score_brainrot.py` (librosa, opencv-python, numpy) |
-| `local-tts` | `pip install -e ".[local-tts]"` | `character-explainer` with `--tts-backend local` (F5-TTS) |
+| `thumbnail` | `pip install -e ".[thumbnail]"` | `sable clip` HTML thumbnails (playwright) |
+| `serve` | `pip install -e ".[serve]"` | `sable serve` FastAPI backend (fastapi, uvicorn). Required to collect the 30 serve tests. |
+| `all` | `pip install -e ".[all]"` | Installs every optional dep group at once |
 
 ## API Keys
 

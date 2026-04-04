@@ -45,6 +45,8 @@ Implemented in SableTracking (not in this repo directly):
 
 ## Phase 2 — FastAPI Backend (consumed by SableWeb)
 
+**Status: Complete** — `sable serve` + all Phase 2 CLI features are shipped. Remaining: Cloudflare Tunnel deployment (belongs to SableWeb), `vault/permissions.py` RBAC stub (see `docs/ROLES.md`).
+
 **Target: Expose vault and pulse data to SableWeb's `/ops` surface via a read API**
 
 SableWeb (Next.js, separate repo) is the single web UI for both operators and clients. Slopper Phase 2 does not produce its own frontend — it produces a FastAPI backend that SableWeb calls. This avoids two auth systems, two deployment models, and duplicated reads from the same databases.

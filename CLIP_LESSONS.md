@@ -11,6 +11,8 @@ Tracked failures, fixes, and open problems from iterating the clip pipeline.
 - **Batch eval structure** — one Claude call for all clips (Option B) is efficient and gives Claude cross-clip context for relative scoring.
 - **Dry-run pipeline** — `--dry-run` flag works end-to-end, skips Claude calls, and returns sane metadata.
 - **Transcript extraction** — `yt-dlp` + `whisper` pipeline handles YouTube URLs directly; word-level timestamps are reliable.
+- **Face-centered crop (CLIP-2)** — `compute_face_offset()` in `sable/clip/face_track.py` samples frames, detects faces via `face_recognition`, and returns a fractional horizontal offset [-1.0, 1.0] to center the dominant face region in the crop. Weighted by face area across samples. Falls back to motion tracking or center crop.
+- **Motion-tracking crop (CLIP-3)** — `_compute_motion_offset()` in `sable/clip/face_track.py` provides an optical-flow fallback when no faces are detected. Samples frames at ~1fps, computes dense Farneback optical flow, finds the horizontal center of motion, and returns a fractional pan offset. Prevents dead-space crops on talking-head videos where the speaker isn't centered.
 
 ---
 
