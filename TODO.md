@@ -1242,17 +1242,15 @@ Added `budget_check: bool = True` parameter to `call_claude_with_usage`/`call_cl
 
 `sable pulse track` and `sable pulse meta scan` now write `sync_runs` rows to sable.db after completion (`sync_type='pulse_track'` and `'pulse_meta_scan'`). Non-fatal with try/finally for connection cleanup, narrowed to `(sqlite3.Error, OSError)`. 6 tests. Adversarial QA: 2 rounds, all clean.
 
-**Remaining:** SablePlatform `weekly_client_loop.py` freshness query needs updating to read these new sync_type values instead of (or in addition to) direct pulse.db/meta.db reads.
+SablePlatform `weekly_client_loop.py` updated (2026-04-04): dual-source freshness check queries `sync_runs` for `pulse_track`/`meta_scan` with artifact fallback. 6 tests in SablePlatform.
 
 ### ~~P2-4: Content Performance Outcomes from Pulse Snapshots~~ — Resolved 2026-04-04
 
 New `sync_content_outcomes(org_id, handle, conn)` in `sable/pulse/outcomes.py`. Reads pulse.db posts+snapshots, computes per-content-type avg engagement rate (view-normalised), writes outcome rows to sable.db via `create_outcome()`. Includes delta from prior outcomes. CLI: `sable pulse outcomes --org --handle`. 8 tests. Adversarial QA: 2 rounds, FIND-01 fixed (single query lookup).
 
-### P2-5: Strategy Recommendations as Platform Actions
-- `weekly_client_loop` parses `discord_playbook` artifacts for actions but NOT `twitter_strategy_brief` artifacts from `sable advise`.
-- SablePlatform side: Extend `_register_actions` to also parse `twitter_strategy_brief` artifacts.
-- Slopper side: Nothing — brief already contains parseable recommendation sections.
-- Depends on P0-1 landing first.
+### ~~P2-5: Strategy Recommendations as Platform Actions~~ — Resolved 2026-04-04 (SablePlatform-side)
+
+No Slopper work needed — brief already contains parseable recommendation sections. SablePlatform `weekly_client_loop.py` extended `_register_actions` (2026-04-04) to parse `twitter_strategy_brief` artifacts (`action_type=post_content`) alongside `discord_playbook`. 6 tests in SablePlatform.
 
 ### ~~P2-6: Vault Content as Platform Artifacts~~ — Resolved 2026-04-04
 
