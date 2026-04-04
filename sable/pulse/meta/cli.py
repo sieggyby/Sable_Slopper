@@ -1,6 +1,7 @@
 """CLI for sable pulse meta — content shape intelligence."""
 from __future__ import annotations
 
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -315,6 +316,23 @@ def meta_scan(org, deep, full, cheap, dry_run, skip_if_fresh=None):
         f"({result['tweets_collected']} collected from {len(watchlist)} accounts)"
     )
     console.print(f"[dim]Estimated cost: ${result.get('estimated_cost', 0.0):.3f}[/dim]")
+
+    # Record sync timestamp in sable.db for freshness checks (non-fatal)
+    try:
+        from sable.platform.db import get_db
+        _conn = get_db()
+        try:
+            _conn.execute(
+                """INSERT INTO sync_runs (org_id, sync_type, status, completed_at, records_synced)
+                   VALUES (?, 'pulse_meta_scan', 'completed', datetime('now'), ?)""",
+                (org, result.get("tweets_new", 0)),
+            )
+            _conn.commit()
+        finally:
+            _conn.close()
+    except (sqlite3.Error, OSError):
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Failed to record pulse_meta_scan sync run", exc_info=True)
 
     # AR5-8: warn about failed author fetches
     if result.get("failed_authors"):

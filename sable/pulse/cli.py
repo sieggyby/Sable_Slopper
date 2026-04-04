@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 from typing import Optional
 
@@ -38,6 +39,28 @@ def pulse_track(account, mock):
         with console.status(f"Fetching tweets for {handle}..."):
             tweets = snapshot_account(handle, mock=mock)
         console.print(f"[green]✓[/green] Tracked {len(tweets)} tweets for {handle}")
+
+        # Record sync timestamp in sable.db for freshness checks (non-fatal)
+        from sable.roster.manager import load_roster
+        roster = load_roster()
+        account_obj = roster.get(handle)
+        if account_obj and account_obj.org:
+            try:
+                from sable.platform.db import get_db
+                _conn = get_db()
+                try:
+                    _conn.execute(
+                        """INSERT INTO sync_runs (org_id, sync_type, status, completed_at, records_synced)
+                           VALUES (?, 'pulse_track', 'completed', datetime('now'), ?)""",
+                        (account_obj.org, len(tweets)),
+                    )
+                    _conn.commit()
+                finally:
+                    _conn.close()
+            except (sqlite3.Error, OSError):
+                import logging as _logging
+                _logging.getLogger(__name__).warning("Failed to record pulse_track sync run", exc_info=True)
+
     except Exception as e:
         from sable.platform.errors import redact_error
         console.print(f"[red]Error: {redact_error(str(e))}[/red]")
