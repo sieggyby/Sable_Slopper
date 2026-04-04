@@ -10,7 +10,7 @@ High-volume crypto Twitter content production toolkit. CLI-driven, Claude-powere
 | `sable clip` | Video → vertical clips with brainrot + captions |
 | `sable meme` | Template-based meme generation |
 | `sable face` | Replicate-powered face swap |
-| `sable pulse` | Performance tracking, format lift, attribution, and AI recommendations |
+| `sable pulse` | Performance tracking, format lift, attribution, content outcomes, and AI recommendations |
 | `sable character-explainer` | Brainrot explainer videos with famous character voices |
 | `sable vault` | Content catalog, search engine, and client knowledge base |
 | `sable wojak` | Wojak asset library and Claude-driven scene compositor |
@@ -264,6 +264,9 @@ sable pulse attribution @tig_intern --days 30 --org multisynq
 
 # Search trending content in the niche watchlist
 sable pulse trends --org multisynq --format short_clip
+
+# Compute content performance outcomes per content type
+sable pulse outcomes --org multisynq --handle @tig_intern
 
 # Export data
 sable pulse export --account @tig_intern --format csv --output report.csv

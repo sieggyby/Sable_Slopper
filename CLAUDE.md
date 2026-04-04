@@ -31,7 +31,7 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 **Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, and more.
 All community intelligence features are shipped (FEATURE-10 through FEATURE-16, CHURN-1, CHURN-2).
 
-**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Bearer token auth, 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. 30 new tests in `tests/serve/`. Test count: 891.
+**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Bearer token auth, 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. 30 serve tests (require fastapi optional dep to collect). Test count: 861 core + 30 serve = 891.
 
 **Remaining Phase 2 work:**
 - Cloudflare Tunnel deployment (see `docs/ROADMAP.md`)
@@ -65,8 +65,8 @@ Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
   now exists in `sable.db`; pulse/meta/vault still use plain string org grouping.
 
 - **`sable.db` is the platform cross-tool store.** Entities, tags, merge candidates, jobs,
-  artifacts, cost events, diagnostic runs, and sync runs live here. `sable/platform/`
-  modules are the only writers. All CLI handlers catch `SableError` and call `sys.exit(1)`.
+  artifacts, cost events, outcomes, diagnostic runs, and sync runs live here. `sable/platform/`
+  modules are the primary writers; `sable/pulse/outcomes.py` also writes via `sable/platform/outcomes.py`. All CLI handlers catch `SableError` and call `sys.exit(1)`.
   `diagnostic_runs` now has language columns (`language_arc_phase`,
   `emergent_cultural_terms_json`, `mantra_candidates_json`) queried by `--community-voice`,
   but these columns require a future migration to exist in the table.

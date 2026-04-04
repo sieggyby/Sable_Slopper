@@ -129,8 +129,16 @@ sable pulse outcomes --org ORG --handle HANDLE
 ### pulse outcomes
 
 Compute content performance outcomes from pulse snapshots and write them to `sable.db outcomes`.
-Groups posts by `sable_content_type`, computes average engagement rate per type plus an aggregate,
-and records deltas against prior outcome rows.
+Groups posts by `sable_content_type` (clip, meme, text, unknown), computes average engagement rate
+per type plus an `engagement_rate_overall` aggregate, and records deltas against prior outcome rows.
+
+Engagement rate formula: `(likes + retweets + replies + quotes) / max(views, 1)`.
+
+Metric names follow the pattern `engagement_rate_{content_type}` (e.g., `engagement_rate_clip`,
+`engagement_rate_meme`) plus one `engagement_rate_overall`. Each run records `metric_before`
+(prior run's value) and `metric_after` (current), with `metric_delta` auto-computed.
+
+No external API calls. Zero cost.
 
 ```
 sable pulse outcomes --org ORG --handle HANDLE

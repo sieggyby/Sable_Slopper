@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Sable Slopper is a CLI toolkit with 22 subsystems sharing a common config layer, three SQLite databases, and three external API integrations.
+Sable Slopper is a CLI toolkit with 22 subsystems sharing a common config layer, three SQLite databases, and four external API integrations (plus local F5-TTS).
 
 ---
 
@@ -33,6 +33,8 @@ sable/
 │   ├── jobs.py                      ← job/step lifecycle + resume state machine
 │   ├── cost.py                      ← cost logging + budget enforcement
 │   ├── stale.py                     ← mark_artifacts_stale()
+│   ├── artifacts.py                 ← register_content_artifact() for clip/meme production
+│   ├── outcomes.py                  ← re-export: create_outcome, list_outcomes from sable_platform
 │   ├── discord_pulse.py             ← discord_pulse_runs writer
 │   └── cli.py                       ← org, entity, job, db, resume commands
 │
@@ -79,7 +81,7 @@ sable/
 │   └── routes/          ← vault, pulse, meta endpoints
 │
 ├── pulse/               ← performance tracking + attribution
-│   ├── cli.py           ← sable pulse group (track, report, recommend, export, trends, account, attribution, link, meta)
+│   ├── cli.py           ← sable pulse group (track, report, recommend, export, trends, account, attribution, link, outcomes, meta)
 │   ├── tracker.py       ← tweet fetch + DB write
 │   ├── reporter.py      ← performance reporting
 │   ├── recommender.py   ← AI recommendations from pulse data
@@ -89,6 +91,7 @@ sable/
 │   ├── exporter.py      ← pulse data export
 │   ├── feedback.py      ← operator feedback helpers
 │   ├── linker.py        ← content→post link helpers
+│   ├── outcomes.py      ← content performance outcomes sync (reads pulse.db, writes sable.db)
 │   ├── scorer.py        ← hook scoring
 │   ├── trends.py        ← trend classification
 │   └── meta/            ← content shape intelligence (see below)
@@ -145,7 +148,7 @@ Three SQLite databases stored under `$SABLE_HOME/` (default `~/.sable/`). Note: 
 |------|---------|-----------|
 | `pulse.db` | Tweet performance data, posting log, roster accounts | `sable pulse track`, `sable pulse log`, `sable roster` |
 | `meta.db` | Watchlist tweet cache, per-author baselines, incremental scan cursors, format baseline history, lexicon_terms, author_cadence | `sable pulse meta scan`, `sable lexicon`, `sable cadence` |
-| `sable.db` | Orgs, entities, handles, tags, merge candidates, jobs, cost events, artifacts, sync_runs, diagnostic_runs, content_items, discord_pulse_runs | `sable/platform/` modules; SableTracking `app/platform_sync.py` (external) |
+| `sable.db` | Orgs, entities, handles, tags, merge candidates, jobs, cost events, artifacts, outcomes, sync_runs, diagnostic_runs, content_items, discord_pulse_runs | `sable/platform/` modules; `sable/pulse/outcomes.py`; SableTracking `app/platform_sync.py` (external) |
 
 `pulse.db` and `meta.db` do not share tables; `pulse meta` reads roster data from `pulse.db` for org membership but writes only to `meta.db`. `sable.db` is entirely separate and written only through `sable/platform/`. External tools (SableTracking's `app/platform_sync.py`) write via the same `sable/platform/` helpers — they never write raw SQL.
 

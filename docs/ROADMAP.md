@@ -67,6 +67,12 @@ SableWeb (Next.js, separate repo) is the single web UI for both operators and cl
 - `sable vault suggest` — reply suggestion is generative/interactive; does not fit a read-only portal. Revisit when SableWeb becomes action-capable.
 - `sable vault assign`, `sable vault gaps`, `sable vault export` — operator workflows that are fast enough in CLI
 
+**Additional Phase 2 CLI features (delivered alongside `sable serve`):**
+- `sable pulse outcomes --org --handle` — content performance outcomes: groups posts by `sable_content_type`, computes engagement rates, writes to `sable.db outcomes` table with delta tracking (P2-4)
+- Content artifact registration — `sable/platform/artifacts.py` writes clip and meme production artifacts to `sable.db artifacts` for stale detection and SableWeb content library (P2-6)
+- Cost logging decoupled from budget gating — `budget_check=False` parameter on `call_claude_with_usage()` lets write/score/clip log costs without triggering budget hard gates (P1-2)
+- Pulse freshness sync to `sync_runs` — pulse track/meta/recommend record sync metadata for SableWeb freshness display (P1-3)
+
 **Deployment:** Cloudflare Tunnel belongs to SableWeb's deployment story, not this repo. `sable serve` runs as a local or Railway service; SableWeb proxies to it.
 
 ---

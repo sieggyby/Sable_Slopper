@@ -477,6 +477,7 @@ orgs:
 | `job_steps`        | Individual steps per job with retry tracking         |
 | `artifacts`        | Output files/blobs produced by jobs                  |
 | `cost_events`      | Per-call AI/API cost tracking                        |
+| `outcomes`         | Content performance outcomes (engagement rates per content type) |
 | `sync_runs`        | Audit log of platform sync operations (extended by migration 002) |
 
 #### sync_runs (migration 002 adds columns, schema_version → 2)
@@ -548,6 +549,41 @@ sable_verdict        TEXT  -- nullable
 total_cost_usd       REAL  -- nullable
 ```
 Indexes: `idx_diagnostic_org`, `idx_diagnostic_cult_run_id` (UNIQUE), `idx_diagnostic_slug`
+
+#### outcomes (created by SablePlatform migrations)
+Content performance outcomes. Written by `sable pulse outcomes` command via `create_outcome()`.
+```sql
+outcome_id    TEXT PRIMARY KEY,
+org_id        TEXT NOT NULL,
+entity_id     TEXT,            -- nullable (content outcomes don't target a specific entity)
+action_id     TEXT,            -- nullable
+outcome_type  TEXT NOT NULL,   -- 'content_performance'
+description   TEXT,
+metric_name   TEXT,            -- 'engagement_rate_{type}' or 'engagement_rate_overall'
+metric_before REAL,            -- prior run's metric_after (NULL on first run)
+metric_after  REAL,            -- current average engagement rate
+metric_delta  REAL,            -- auto-computed by create_outcome()
+data_json     TEXT,            -- JSON: {handle, content_type, post_count} or {handle, total_posts, content_types}
+recorded_by   TEXT,            -- 'pulse_outcomes'
+created_at    TEXT DEFAULT CURRENT_TIMESTAMP
+```
+
+Engagement rate formula: `(likes + retweets + replies + quotes) / max(views, 1)`.
+One row per unique `sable_content_type` (clip, meme, text, unknown) plus one `engagement_rate_overall` aggregate row.
+
+---
+
+### Content Artifact Registration — `sable/platform/artifacts.py`
+
+Helper function `register_content_artifact(org_id, artifact_type, path, metadata)` writes content production artifacts (clips, memes) to sable.db `artifacts` table. Called from `sable/clip/cli.py` and `sable/meme/cli.py` when org is resolvable. Non-fatal on failure (logs warning, does not raise).
+
+Artifact types used: `content_clip`, `content_meme`.
+
+---
+
+### Platform Outcomes Re-export — `sable/platform/outcomes.py`
+
+Thin re-export of `create_outcome` and `list_outcomes` from `sable_platform.db.outcomes`. Used by `sable/pulse/outcomes.py`.
 
 ---
 
