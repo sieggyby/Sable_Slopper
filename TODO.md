@@ -30,6 +30,32 @@ SableTracking writes 17 fields to `content_items.metadata_json` as an unversione
 
 ---
 
+## Production Infrastructure (from 2026-04-04 suite audit)
+
+### SS-1: CI/CD pipeline [S]
+
+**File:** New `.github/workflows/ci.yml`
+
+**Change:** GitHub Actions on PR and push to main: `pip install -e ".[dev]"` → `ruff check .` → `mypy sable` → `pytest -q`. Cache pip deps. 921 tests, currently manual-only.
+
+### SS-2: Cloudflare Tunnel deployment for `sable serve` [L]
+
+**Current:** `sable serve` (FastAPI, 7 endpoints + /health, bearer token auth) is production-ready code with no deployment story. This is THE critical blocker for SableWeb content pipeline — content performance, format intelligence, topic signals, and vault inventory sections all return null when `SLOPPER_URL` is not configured.
+
+**Change:** Set up Cloudflare Tunnel to expose `sable serve`. Configure service-to-service token auth at the Cloudflare level (on top of existing bearer token). Document the `SLOPPER_URL` and `SLOPPER_TOKEN` that SableWeb needs.
+
+**Consumer:** SableWeb content_performance, format_analysis, topic_trends, content_pipeline, vault sections.
+
+### SS-3: API contract documentation [S]
+
+**File:** New `docs/API_REFERENCE.md`
+
+**Current:** `sable serve` has 7 endpoints but no documented response shapes. SableWeb needs exact paths, params, and JSON response types to build the fetch layer.
+
+**Change:** Document each endpoint: path, HTTP method, query params, request body (if any), response JSON shape with field types. Include `/health` response shape so SableWeb's health endpoint can verify Slopper availability.
+
+---
+
 ## Phase 2+ (Deferred)
 
 ### Phase 2 remaining
