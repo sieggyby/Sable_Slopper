@@ -109,6 +109,21 @@ def meme_generate(account, template, topic, vibe, output, style, dry_run, save_b
 
     console.print(f"\n[green]✓ Saved:[/green] {out_path}")
 
+    # Register as platform artifact if org is resolvable
+    resolved_org = acc.org or None
+    if resolved_org:
+        try:
+            from sable.platform.artifacts import register_content_artifact
+            register_content_artifact(
+                org_id=resolved_org,
+                artifact_type="content_meme",
+                path=str(out_path),
+                metadata={"handle": acc.handle, "template": template, "topic": topic or ""},
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Artifact registration failed: %s", e)
+
     if save_bank:
         caption = texts.get("caption") or texts.get("bottom") or list(texts.values())[-1]
         save_to_bank(acc.handle, caption)
@@ -179,6 +194,21 @@ def meme_batch(account, count, topics, do_render, approve):
             }
             Path(str(out_path) + "_meta.json").write_text(_json.dumps(_meta, indent=2))
             console.print(f"  [green]✓[/green] {out_path}")
+
+            # Register as platform artifact if org is resolvable
+            resolved_org = acc.org or None
+            if resolved_org:
+                try:
+                    from sable.platform.artifacts import register_content_artifact
+                    register_content_artifact(
+                        org_id=resolved_org,
+                        artifact_type="content_meme",
+                        path=str(out_path),
+                        metadata={"handle": acc.handle, "template": tmpl, "topic": topic},
+                    )
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning("Artifact registration failed: %s", e)
 
     console.print(f"\n[bold]Done.[/bold] Memes in {out_dir}")
 

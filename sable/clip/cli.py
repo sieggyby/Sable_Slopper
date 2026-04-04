@@ -172,6 +172,24 @@ def clip_process(
         if clip.get("caption_hint"):
             console.print(f"  [dim]Caption: {clip['caption_hint']}[/dim]")
 
+        # Register as platform artifact if org is resolvable
+        if resolved_org:
+            try:
+                from sable.platform.artifacts import register_content_artifact
+                register_content_artifact(
+                    org_id=resolved_org,
+                    artifact_type="content_clip",
+                    path=str(out_file),
+                    metadata={
+                        "handle": acc.handle,
+                        "score": clip.get("score"),
+                        "caption_hint": clip.get("caption_hint", ""),
+                    },
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("Artifact registration failed: %s", e)
+
     console.print(f"\n[bold green]Done.[/bold green] Output: {out_dir}")
 
 
