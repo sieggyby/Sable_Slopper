@@ -12,7 +12,21 @@
 
 ## Open Items
 
-*No open items. All TODO items resolved as of 2026-04-04.*
+### TRACK-METADATA: SableTracking metadata_json schema contract
+
+SableTracking writes 17 fields to `content_items.metadata_json` as an unversioned JSON blob. Slopper reads it in stage1.py via `meta.get("source_tool") == "sable_tracking"` with no schema validation. If SableTracking adds, renames, or removes a field, Slopper breaks silently.
+
+**Upstream plan (SableTracking P7-1):** SablePlatform will publish a `TrackingMetadata(BaseModel)` contract in `sable_platform/contracts/tracking.py` with `schema_version: int`. SableTracking will use it to build metadata_json.
+
+**Slopper action when contract lands:**
+1. Import `TrackingMetadata` from `sable_platform.contracts.tracking`
+2. In stage1.py where metadata_json is parsed (~line 276), validate against the contract: `TrackingMetadata.model_validate(meta)`
+3. Log warning (not error) for unknown `schema_version` — graceful forward compatibility
+4. Replace bare `meta.get("key")` calls with typed field access
+
+**Current 17 fields:** source_tool, url, canonical_author_handle, quality_score, audience_annotation, timing_annotation, grok_status, engagement_score, lexicon_adoption, emotional_valence, subsquad_signal, format_type, intent_type, topic_tags, review_status, outcome_type, is_reusable_template.
+
+**Status:** Waiting on SablePlatform to publish the contract. No action until then.
 
 ---
 
