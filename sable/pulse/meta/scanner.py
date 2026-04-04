@@ -9,6 +9,7 @@ from sable.shared.handles import strip_handle, normalize_handle
 from sable.shared.socialdata import socialdata_get_async, BalanceExhaustedError
 
 _COST_PER_REQUEST = 0.002  # rough estimate per API call
+_MAX_TWEET_PAGES = 32      # 32 pages × 100 tweets = 3200 tweet ceiling
 
 _CORE_ENGAGEMENT_KEYS = ("favorite_count", "retweet_count", "reply_count")
 
@@ -125,33 +126,77 @@ async def _fetch_author_tweets_async(
     since_id: Optional[str] = None,
     limit: int = 100,
     lookback_hours: int = 48,
-) -> list[dict]:
-    """Fetch tweets for one author, optionally since a last tweet ID."""
+    max_requests: int = _MAX_TWEET_PAGES,
+) -> tuple[list[dict], int]:
+    """Fetch tweets for one author with cursor cycling.
+
+    Returns (filtered_tweets, api_request_count) so the caller can track cost.
+    Paginates up to max_requests pages (default 3200 tweets) or until all new
+    tweets are collected. Stops early when reaching ``since_id`` or the lookback
+    window.
+    """
     handle_clean = strip_handle(handle)
-    params: dict = {"type": "tweets", "limit": min(limit, 100)}
-
-    data = await socialdata_get_async(
-        f"/twitter/user/{handle_clean}/tweets", params=params,
-    )
-
-    raw_tweets = data.get("tweets", data.get("data", []))
-
-    # Filter to incremental range if since_id given
-    if since_id and raw_tweets:
-        raw_tweets = [t for t in raw_tweets
-                      if str(t.get("id_str") or t.get("id") or "") > since_id]
-
-    # Filter to lookback window
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
-    filtered = []
-    for t in raw_tweets:
-        posted_at = _parse_twitter_date(t.get("created_at", ""))
-        if posted_at is None:  # AR5-19: skip tweets with unparseable dates
-            continue
-        if posted_at >= cutoff:
-            filtered.append(t)
 
-    return filtered
+    all_tweets: list[dict] = []
+    seen_ids: set[str] = set()
+    cursor: Optional[str] = None
+    request_count = 0
+
+    for _ in range(max_requests):
+        params: dict = {"type": "tweets", "limit": min(limit, 100)}
+        if cursor:
+            params["cursor"] = cursor
+
+        data = await socialdata_get_async(
+            f"/twitter/user/{handle_clean}/tweets", params=params,
+        )
+        request_count += 1
+
+        raw_tweets = data.get("tweets", data.get("data", []))
+        if not raw_tweets:
+            break
+
+        hit_since_id = False
+        hit_lookback = False
+
+        for t in raw_tweets:
+            tid = str(t.get("id_str") or t.get("id") or "")
+            if not tid or tid in seen_ids:
+                continue
+            seen_ids.add(tid)
+
+            # Stop if we've reached the incremental cursor (integer comparison
+            # per AR5-9: tweet IDs are numeric but stored as strings)
+            if since_id and tid.isdigit() and since_id.isdigit():
+                if int(tid) <= int(since_id):
+                    hit_since_id = True
+                    continue
+            elif since_id and tid <= since_id:
+                hit_since_id = True
+                continue
+
+            posted_at = _parse_twitter_date(t.get("created_at", ""))
+            if posted_at is None:
+                continue
+
+            # Stop collecting once past lookback window
+            if posted_at < cutoff:
+                hit_lookback = True
+                continue
+
+            all_tweets.append(t)
+
+        # Stop paginating if we've reached old data or no more pages
+        if hit_since_id or hit_lookback:
+            break
+
+        next_cursor = data.get("next_cursor")
+        if not next_cursor:
+            break
+        cursor = next_cursor
+
+    return all_tweets, request_count
 
 
 async def _search_tweets_async(query: str, limit: int = 50) -> list[dict]:
@@ -189,11 +234,17 @@ class Scanner:
         self._estimated_cost: float = 0.0  # P2: track for partial failure reporting
         self._tweets_new: int = 0          # P2: track for partial failure reporting
         self._failed_authors: list[str] = []  # AR5-8: track failed author fetches
+        self._cost_fetch: float = 0.0      # per-phase cost: author tweet fetches
+        self._cost_deep: float = 0.0       # per-phase cost: deep keyword searches
 
     def estimate_cost(self) -> dict:
-        """Estimate cost without making API calls."""
+        """Estimate cost without making API calls.
+
+        Assumes 1 request per account (minimum). High-volume accounts may
+        trigger cursor cycling with up to _MAX_TWEET_PAGES requests each.
+        """
         n_accounts = len(self.watchlist)
-        # ~1 request per account + deep overhead
+        # ~1 request per account (min) + deep overhead
         n_requests = n_accounts + (10 if self.deep else 0)
         est_cost = n_requests * _COST_PER_REQUEST
         return {
@@ -218,10 +269,16 @@ class Scanner:
         from sable.pulse.meta.fingerprint import classify_tweet
         from sable.pulse.meta.normalize import compute_author_lift
 
+        # Resume support: skip authors already checkpointed for this scan
+        completed_authors = self.db.get_completed_authors(scan_id)
+
         # Process each watchlist account
         for entry in self.watchlist:
             handle = entry.get("handle", "")
             if not handle:
+                continue
+
+            if handle in completed_authors:
                 continue
 
             # Get last seen tweet ID for incremental scan
@@ -232,13 +289,22 @@ class Scanner:
                     since_id = profile.get("last_tweet_id")
 
             try:
-                raw_tweets = await _fetch_author_tweets_async(
+                # Budget-aware page cap: don't let one author consume
+                # all remaining budget via cursor cycling
+                remaining_budget = self.max_cost - estimated_cost
+                budget_pages = max(1, int(remaining_budget / _COST_PER_REQUEST))
+                page_cap = min(_MAX_TWEET_PAGES, budget_pages)
+
+                raw_tweets, fetch_requests = await _fetch_author_tweets_async(
                     handle,
                     since_id=since_id,
                     lookback_hours=self.lookback_hours,
+                    max_requests=page_cap,
                 )
-                estimated_cost += _COST_PER_REQUEST
-                self._estimated_cost += _COST_PER_REQUEST
+                fetch_cost = fetch_requests * _COST_PER_REQUEST
+                estimated_cost += fetch_cost
+                self._estimated_cost += fetch_cost
+                self._cost_fetch += fetch_cost
             except BalanceExhaustedError:
                 raise  # 402 is fatal — propagate immediately
             except Exception as e:
@@ -315,6 +381,9 @@ class Scanner:
                         last_seen=datetime.now(timezone.utc).isoformat(),
                     )
 
+            # Checkpoint: mark this author as processed for resume support
+            self.db.checkpoint_author(scan_id, handle, tweets_collected=len(normalised) if normalised else 0)
+
         # Deep mode: search by topic keywords
         outsider_results: dict[str, list] = {}
         if not aborted and self.deep:
@@ -326,6 +395,8 @@ class Scanner:
                 try:
                     raw = await _search_tweets_async(query, limit=30)
                     estimated_cost += _COST_PER_REQUEST
+                    self._estimated_cost += _COST_PER_REQUEST
+                    self._cost_deep += _COST_PER_REQUEST
                     if estimated_cost > self.max_cost:
                         aborted = True
                         break
@@ -358,6 +429,10 @@ class Scanner:
             "tweets_collected": tweets_collected,
             "tweets_new": tweets_new,
             "estimated_cost": estimated_cost,
+            "cost_breakdown": {
+                "fetch": self._cost_fetch,
+                "deep_search": self._cost_deep,
+            },
             "outsider_results": outsider_results,
             "failed_authors": self._failed_authors,  # AR5-8
             "dry_run": False,

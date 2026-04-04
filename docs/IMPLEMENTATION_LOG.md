@@ -414,3 +414,37 @@ Validation: 891 passed, 0 ruff violations.
 **Fix:** Updated all three test files to use the full production `scanned_tweets` schema. 72 affected tests still pass.
 
 Validation: 899 passed, 0 ruff violations.
+
+---
+
+## Brainrot Theme Matching (2026-04-04)
+
+**Problem:** Brainrot overlay videos were selected by duration + energy only. No content awareness — a clip about DeFi regulation could get paired with random gaming footage.
+
+**Fix:** Claude now returns `theme_tags` (1-3 topic keywords) per clip during selection. Tags are threaded through `_resolve_clip` → `_evaluate_variants_batch` → `assemble_clip` → brainrot `pick()`. The `pick()` function uses layered preference: theme-matched + long duration > theme-matched > long duration > any. Falls back to untagged sources when no theme match exists — never fails to find a source.
+
+**Files:** `sable/clip/selector.py` (prompt + threading), `sable/clip/assembler.py` (new `theme_tags` param), `sable/clip/brainrot.py` (refactored `pick()` + new `_pick_best()` helper), `sable/clip/cli.py` (threading).
+
+**Tests:** 6 new in `tests/clip/test_brainrot.py` (theme preference, fallback, theme+duration, no-tags, selector threading).
+
+---
+
+## SocialData Hardening: Cost Breakdown, Cost Logging, Cursor Cycling, Checkpoint/Resume (2026-04-04)
+
+### Per-phase cost breakdown
+Scanner now tracks `_cost_fetch` and `_cost_deep` separately. Returns `cost_breakdown` dict in scan results. CLI output shows per-phase costs (e.g., "fetch $0.040, deep $0.006"). 3 tests.
+
+### SocialData cost logging to sable.db
+Meta scan CLI and pulse track CLI now log SocialData API costs to `sable.db cost_events` via `log_cost()` with `model="socialdata"` and descriptive `call_type` values. Non-fatal pattern. 3 tests.
+
+### Cursor cycling for >100 tweets
+`_fetch_author_tweets_async` now paginates via `next_cursor` from SocialData API. Caps at 32 pages (3200 tweets). Uses integer tweet ID comparison for `since_id` (per AR5-9). Returns `(tweets, request_count)` so scanner can track per-author cost accurately. Budget-aware page cap prevents one prolific author from consuming the entire scan budget. 6 tests.
+
+### Checkpoint/resume for interrupted scans
+New `scan_checkpoints` table in meta.db. Scanner writes per-author checkpoint after processing. New `--resume SCAN_ID` CLI flag resumes an interrupted scan, skipping already-checkpointed authors. Validates scan_id exists before resuming. 5 tests.
+
+**QA:** Adversarial agent found 3 T1 issues (deep cost undercount in `_estimated_cost`, unbounded per-author pagination budget, orphaned resume scan_id), 2 T2 (hardcoded cost assumption in tracker, duplicate DB pattern). All fixed.
+
+**Files:** `sable/pulse/meta/scanner.py`, `sable/pulse/meta/db.py`, `sable/pulse/meta/cli.py`, `sable/pulse/cli.py`, `sable/clip/brainrot.py`.
+
+Validation: 921 passed, 0 ruff violations, 0 new mypy errors.

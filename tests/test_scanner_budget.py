@@ -124,7 +124,7 @@ def test_watchlist_budget_abort_preserves_partial_counts(tmp_path, monkeypatch):
 
     with patch(
         "sable.pulse.meta.scanner._fetch_author_tweets_async",
-        new=AsyncMock(return_value=fake_tweets),
+        new=AsyncMock(return_value=(fake_tweets, 1)),
     ), patch(
         "sable.pulse.meta.fingerprint.classify_tweet",
         return_value=("standalone_text", []),
@@ -157,7 +157,7 @@ def test_deep_mode_budget_abort(tmp_path, monkeypatch):
 
     with patch(
         "sable.pulse.meta.scanner._fetch_author_tweets_async",
-        new=AsyncMock(return_value=[]),
+        new=AsyncMock(return_value=([], 1)),
     ), patch(
         "sable.pulse.meta.scanner._search_tweets_async",
         new=AsyncMock(return_value=[]),
@@ -189,7 +189,7 @@ def test_aborted_scan_records_real_partial_counts(tmp_path, monkeypatch):
 
     with patch(
         "sable.pulse.meta.scanner._fetch_author_tweets_async",
-        new=AsyncMock(return_value=fake_tweets),
+        new=AsyncMock(return_value=(fake_tweets, 1)),
     ), patch(
         "sable.pulse.meta.fingerprint.classify_tweet",
         return_value=("standalone_text", []),
@@ -242,8 +242,8 @@ def test_scanner_exception_marks_scan_run_failed(tmp_path, monkeypatch):
     with patch(
         "sable.pulse.meta.scanner._fetch_author_tweets_async",
         new=AsyncMock(side_effect=[
-            [_fake_tweet("t1", "@alice")],
-            [_fake_tweet("t2", "@bob")],
+            ([_fake_tweet("t1", "@alice")], 1),
+            ([_fake_tweet("t2", "@bob")], 1),
         ]),
     ), patch(
         "sable.pulse.meta.fingerprint.classify_tweet",

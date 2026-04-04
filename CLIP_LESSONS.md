@@ -49,7 +49,7 @@ Tracked failures, fixes, and open problems from iterating the clip pipeline.
 - **Leading filler trim** — ✓ Done (2026-03-26). `_trim_leading_filler` advances clip start past "so", "um", "yeah", bigrams like "you know" / "i mean". Max 4s window; negligible moves (<0.1s) no-op'd. Removed "and"/"now"/"right" from list — too common as crypto interview pivots.
 - **Context backtrack for dangling references** — ✓ Done (2026-03-26). `_backtrack_for_context` detects danglers ("that's why", "which means", "because of this", etc.) and backtracks start to prior sentence-ending segment. Aborts on window-boundary crossing (≥0.8s pause), duration contract violation, or >12s backtrack.
 - **Per-clip score logging in CLI output** — ✓ Done (2026-03-26). Score column added to dry-run table; score shown in assembly status line.
-- **Brainrot theme matching** — e.g. space/tech topics paired with thematically fitting brainrot. Currently only energy-matched.
+- **Brainrot theme matching** — ✓ Done (2026-04-04). Claude extracts `theme_tags` per clip during selection. `pick()` uses layered preference: theme-matched + long > theme-matched > long > any. Falls back to untagged when no theme match exists.
 
 ---
 

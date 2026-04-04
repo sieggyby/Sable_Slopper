@@ -209,7 +209,9 @@ def watchlist_health(org):
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show cost estimate without API calls")
 @click.option("--skip-if-fresh", "skip_if_fresh", type=int, default=None,
               help="Skip scan if last successful scan completed within N hours.")
-def meta_scan(org, deep, full, cheap, dry_run, skip_if_fresh=None):
+@click.option("--resume", "resume_scan_id", type=int, default=None,
+              help="Resume an interrupted scan by scan ID (skips already-checkpointed authors).")
+def meta_scan(org, deep, full, cheap, dry_run, skip_if_fresh=None, resume_scan_id=None):
     """Scan watchlist accounts and collect/classify tweets."""
     from sable.pulse.meta import db as meta_db
     from sable.pulse.meta.watchlist import list_watchlist
@@ -271,7 +273,17 @@ def meta_scan(org, deep, full, cheap, dry_run, skip_if_fresh=None):
                 )
                 return
 
-    scan_id = meta_db.create_scan_run(org, mode=mode, watchlist_size=len(watchlist))
+    if resume_scan_id is not None:
+        existing_runs = meta_db.get_scan_runs(org, limit=100)
+        if not any(r["id"] == resume_scan_id for r in existing_runs):
+            console.print(f"[red]Scan ID {resume_scan_id} not found for org '{org}'. "
+                          f"Check with: sable pulse meta status[/red]")
+            sys.exit(1)
+        scan_id = resume_scan_id
+        completed = meta_db.get_completed_authors(scan_id)
+        console.print(f"[cyan]Resuming scan {scan_id} — {len(completed)} author(s) already checkpointed[/cyan]")
+    else:
+        scan_id = meta_db.create_scan_run(org, mode=mode, watchlist_size=len(watchlist))
 
     result = None
     with console.status(f"Scanning {len(watchlist)} accounts ({mode})..."):
@@ -315,7 +327,31 @@ def meta_scan(org, deep, full, cheap, dry_run, skip_if_fresh=None):
         f"{result['tweets_new']} new tweets "
         f"({result['tweets_collected']} collected from {len(watchlist)} accounts)"
     )
-    console.print(f"[dim]Estimated cost: ${result.get('estimated_cost', 0.0):.3f}[/dim]")
+    cost_total = result.get("estimated_cost", 0.0)
+    breakdown = result.get("cost_breakdown", {})
+    cost_parts = []
+    if breakdown.get("fetch"):
+        cost_parts.append(f"fetch ${breakdown['fetch']:.3f}")
+    if breakdown.get("deep_search"):
+        cost_parts.append(f"deep ${breakdown['deep_search']:.3f}")
+    breakdown_str = f" ({', '.join(cost_parts)})" if cost_parts else ""
+    console.print(f"[dim]Estimated cost: ${cost_total:.3f}{breakdown_str}[/dim]")
+
+    # Log SocialData cost to sable.db cost_events (non-fatal)
+    socialdata_cost = result.get("estimated_cost", 0.0)
+    if socialdata_cost > 0 and org:
+        try:
+            from sable.platform.db import get_db
+            from sable.platform.cost import log_cost
+            _conn = get_db()
+            try:
+                log_cost(_conn, org, "socialdata_meta_scan", socialdata_cost,
+                         model="socialdata", input_tokens=0, output_tokens=0)
+            finally:
+                _conn.close()
+        except (sqlite3.Error, OSError):
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Failed to log SocialData cost", exc_info=True)
 
     # Record sync timestamp in sable.db for freshness checks (non-fatal)
     try:

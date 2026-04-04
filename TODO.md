@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `899 passed`
+- `./.venv/bin/python -m pytest -q` → `921 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -12,20 +12,7 @@
 
 ## Open Items
 
-### Brainrot theme matching
-
-Clip pipeline improvement: match brainrot overlay content to clip topic/vibe.
-Currently brainrot is selected by duration + energy only.
-
-**Status:** Proposed, not started. Low priority.
-
-### SocialData known gaps (non-blocking)
-
-From the 2026-04-02 hardening pass. These are improvement opportunities, not bugs:
-- No per-phase cost breakdown in `pulse meta` scan reports
-- No cost tracking in `tracker.py` / `trends.py` / `suggest.py` (these read SocialData, not Claude)
-- No cursor cycling for accounts with >3200 tweets
-- No checkpoint/resume for interrupted scans
+*No open items. All TODO items resolved as of 2026-04-04.*
 
 ---
 
@@ -65,6 +52,7 @@ From the 2026-04-02 hardening pass. These are improvement opportunities, not bug
   pulse-meta format buckets explicitly
 - `meta.db.format_baselines` stores baseline aggregates only (no `current_lift`,
   `status`, `momentum`, `confidence_grade`)
+- `meta.db.scan_checkpoints` stores per-author completion state for resume support
 - `load_all_notes()` returns frontmatter dicts with `_note_path`; scans
   `vault/content/**/*.md` only
 - Vault note lifecycle: `posted_by` and `suggested_for` — no `status='posted'` field
@@ -77,6 +65,10 @@ From the 2026-04-02 hardening pass. These are improvement opportunities, not bug
 - Claude calls via `call_claude()` / `call_claude_json()` from `sable/shared/api.py`
 - All Claude calls pass `org_id` + `call_type` for cost observability; content
   generators use `budget_check=False` (log cost, skip budget gate)
+- SocialData costs logged to `sable.db cost_events` with `model="socialdata"` and
+  call_type `socialdata_meta_scan` or `socialdata_pulse_track`
+- Brainrot `pick()` supports `tags` param for theme matching; falls back to untagged
+  if no theme match found. Theme tags are extracted by Claude in clip selector.
 - File writes via `atomic_write()` from `sable/shared/files.py`
 - All `except Exception` blocks must `logger.warning(...)` — no silent swallows
 - New modules follow: `__init__.py`, main logic file, CLI command, tests in `tests/{module}/`

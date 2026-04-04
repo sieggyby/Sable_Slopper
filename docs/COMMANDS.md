@@ -155,7 +155,7 @@ Content shape intelligence: format trends, topic signals, watchlist management.
 
 ```
 sable pulse meta --org ORG [--cheap] [--full] [--dry-run]
-sable pulse meta scan --org ORG [--cheap] [--full] [--dry-run]
+sable pulse meta scan --org ORG [--cheap] [--full] [--dry-run] [--resume SCAN_ID] [--skip-if-fresh N]
 sable pulse meta watchlist list [--org ORG]
 sable pulse meta watchlist add HANDLE [--org ORG] [--niche NICHE]
 sable pulse meta watchlist remove HANDLE [--org ORG]

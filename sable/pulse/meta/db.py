@@ -144,6 +144,15 @@ CREATE TABLE IF NOT EXISTS lexicon_terms (
 );
 CREATE INDEX IF NOT EXISTS idx_lexicon_terms_org ON lexicon_terms(org);
 
+CREATE TABLE IF NOT EXISTS scan_checkpoints (
+    scan_id INTEGER NOT NULL,
+    author_handle TEXT NOT NULL,
+    completed_at TEXT DEFAULT (datetime('now')),
+    tweets_collected INTEGER DEFAULT 0,
+    PRIMARY KEY (scan_id, author_handle)
+);
+CREATE INDEX IF NOT EXISTS idx_scan_checkpoints_scan ON scan_checkpoints(scan_id);
+
 CREATE TABLE IF NOT EXISTS author_cadence (
     author_handle TEXT NOT NULL,
     org TEXT NOT NULL,
@@ -235,6 +244,33 @@ def get_scan_runs(org: str, limit: int = 20) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Scan checkpoints (for resume after interruption)
+# ---------------------------------------------------------------------------
+
+def checkpoint_author(scan_id: int, author_handle: str, tweets_collected: int = 0) -> None:
+    """Mark an author as processed for a given scan run."""
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO scan_checkpoints (scan_id, author_handle, tweets_collected)
+               VALUES (?, ?, ?)""",
+            (scan_id, author_handle, tweets_collected),
+        )
+    conn.close()
+
+
+def get_completed_authors(scan_id: int) -> set[str]:
+    """Return set of author handles already completed for a scan run."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT author_handle FROM scan_checkpoints WHERE scan_id = ?",
+        (scan_id,),
+    ).fetchall()
+    conn.close()
+    return {r["author_handle"] for r in rows}
 
 
 # ---------------------------------------------------------------------------

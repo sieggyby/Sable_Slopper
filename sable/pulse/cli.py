@@ -40,13 +40,14 @@ def pulse_track(account, mock):
             tweets = snapshot_account(handle, mock=mock)
         console.print(f"[green]✓[/green] Tracked {len(tweets)} tweets for {handle}")
 
-        # Record sync timestamp in sable.db for freshness checks (non-fatal)
+        # Record sync + SocialData cost in sable.db (non-fatal)
         from sable.roster.manager import load_roster
         roster = load_roster()
         account_obj = roster.get(handle)
         if account_obj and account_obj.org:
             try:
                 from sable.platform.db import get_db
+                from sable.platform.cost import log_cost
                 _conn = get_db()
                 try:
                     _conn.execute(
@@ -54,12 +55,17 @@ def pulse_track(account, mock):
                            VALUES (?, 'pulse_track', 'completed', datetime('now'), ?)""",
                         (account_obj.org, len(tweets)),
                     )
+                    # snapshot_account makes 1 SocialData API call ($0.002).
+                    # If it gains pagination in the future, this should be
+                    # updated to use an actual request count.
+                    log_cost(_conn, account_obj.org, "socialdata_pulse_track", 0.002,
+                             model="socialdata", input_tokens=0, output_tokens=0)
                     _conn.commit()
                 finally:
                     _conn.close()
             except (sqlite3.Error, OSError):
                 import logging as _logging
-                _logging.getLogger(__name__).warning("Failed to record pulse_track sync run", exc_info=True)
+                _logging.getLogger(__name__).warning("Failed to record pulse_track sync/cost", exc_info=True)
 
     except Exception as e:
         from sable.platform.errors import redact_error

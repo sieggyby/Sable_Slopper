@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import random
 import yaml
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
@@ -60,15 +61,6 @@ def add_video(
         "filename": path.name,
         "energy": energy,
         "duration": round(duration, 2),
-        # TODO: Add 'theme' tag support for content-aware brainrot pairing
-        # (e.g. theme=space, theme=nature) so clips about singularity/tech get
-        # matched to thematically fitting brainrot footage. Future: reviewer UI
-        # to assign themes after watching assembled clips.
-        # TODO: Add 'aspect_ratio' tag support for platform-aware brainrot selection.
-        # Native ratio (e.g. '9:16', '16:9', '1:1') can be auto-detected at add time
-        # via get_video_dimensions() → width/height → nearest standard ratio, stored as
-        # e.g. tags=['aspect:9:16']. Future: pick() filters by aspect_ratio when the
-        # output layout requires a specific source shape.
         "tags": tags or [],
     }
     index = load_index()
@@ -89,6 +81,7 @@ def pick(
     Select a random brainrot video matching energy level.
     Falls back to adjacent energy levels if no exact match.
     When clip_duration > 0, prefers sources >= clip_duration / 2 (max 2x loop).
+    When tags are provided, prefers theme-matched sources but falls back to any.
     Returns file path or None.
     """
     if energy == "none":
@@ -97,29 +90,54 @@ def pick(
     # Filter to existing files
     index = [e for e in index if Path(e.get("path", "")).exists()]
 
-    def matches(entry: dict, eng: str) -> bool:
+    def _base_matches(entry: dict, eng: str) -> bool:
         if entry["energy"] != eng:
             return False
         if entry.get("duration", 0) < min_duration:
             return False
-        if tags:
-            if not any(t in entry.get("tags", []) for t in tags):
-                return False
         return True
+
+    def _has_theme(entry: dict) -> bool:
+        if not tags:
+            return False
+        return any(t in entry.get("tags", []) for t in tags)
 
     # Try exact energy, then adjacent
     fallback_order = _energy_fallback(energy)
     for eng in fallback_order:
-        candidates = [e for e in index if matches(e, eng)]
+        candidates = [e for e in index if _base_matches(e, eng)]
         if not candidates:
             continue
-        if clip_duration > 0:
-            # Prefer sources that won't loop more than 2x
-            preferred = [c for c in candidates if c.get("duration", 0) >= clip_duration / 2.0]
-            if preferred:
-                return random.choice(preferred)["path"]
-        return random.choice(candidates)["path"]
+        result = _pick_best(candidates, clip_duration, _has_theme if tags else None)
+        if result is not None:
+            return result
     return None
+
+
+def _pick_best(
+    candidates: list[dict],
+    clip_duration: float,
+    theme_fn: Optional[Callable[[dict], bool]] = None,
+) -> Optional[str]:
+    """Pick from candidates with layered preference: theme > duration > any."""
+    # Layer 1: theme-matched + duration-preferred
+    if theme_fn is not None:
+        themed = [c for c in candidates if theme_fn(c)]
+        if themed:
+            if clip_duration > 0:
+                long_themed = [c for c in themed if c.get("duration", 0) >= clip_duration / 2.0]
+                if long_themed:
+                    return random.choice(long_themed)["path"]
+            return random.choice(themed)["path"]
+
+    # Layer 2: duration-preferred (no theme match or no tags)
+    if clip_duration > 0:
+        preferred = [c for c in candidates if c.get("duration", 0) >= clip_duration / 2.0]
+        if preferred:
+            return random.choice(preferred)["path"]
+
+    # Layer 3: any candidate
+    return random.choice(candidates)["path"]
 
 
 def _energy_fallback(energy: str) -> list[str]:

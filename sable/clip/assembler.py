@@ -66,6 +66,7 @@ def assemble_clip(
     audio_only: bool = False,
     face_track: bool = False,
     org_id: str | None = None,
+    theme_tags: list[str] | None = None,
 ) -> dict:
     """
     Full assembly pipeline:
@@ -112,6 +113,7 @@ def assemble_clip(
         "audio_only": audio_only,
         "face_track": face_track,
         "caption": caption_hint or "",
+        "theme_tags": theme_tags or [],
     }
 
     if dry_run:
@@ -138,7 +140,8 @@ def assemble_clip(
         clip_only = brainrot_energy == "none"
         brainrot_src = None
         if not clip_only:
-            brainrot_src = pick_brainrot(energy=brainrot_energy, min_duration=5.0, clip_duration=clip_duration)
+            brainrot_src = pick_brainrot(energy=brainrot_energy, min_duration=5.0,
+                                         tags=theme_tags or None, clip_duration=clip_duration)
             if brainrot_src is None:
                 raise RuntimeError(
                     "No brainrot videos found in library. "

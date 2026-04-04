@@ -240,6 +240,7 @@ def _resolve_clip(
         "hook": selection.get("hook", ""),
         "caption_hint": selection.get("caption_hint", ""),
         "score": selection.get("score", 5),
+        "theme_tags": selection.get("theme_tags", []),
     }
 
 
@@ -584,6 +585,7 @@ Set lands=false when the chosen variant cuts off before the rhetorical point is 
             "score": clip.get("score", 5),
             "variant": chosen,
             "lands": ev.get("lands", True),
+            "theme_tags": clip.get("theme_tags", []),
         })
 
     return resolved
@@ -720,7 +722,8 @@ Return a JSON array only. Each element:
   "hook": "<the first line/hook for the caption>",
   "caption_hint": "<suggested tweet text>",
   "score": <1-10>,
-  "format": "standard"|"micro"
+  "format": "standard"|"micro",
+  "theme_tags": ["<1-3 short theme words for the clip topic, e.g. defi, regulation, ai, gaming, macro, culture, meme, tech, security, privacy, identity — pick from the clip's actual subject matter>"]
 }}
 
 Sort by score descending. Return [] if nothing qualifies."""

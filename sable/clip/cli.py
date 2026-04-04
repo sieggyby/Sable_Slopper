@@ -166,6 +166,7 @@ def clip_process(
             audio_only=audio_only,
             face_track=face_track,
             org_id=resolved_org,
+            theme_tags=clip.get("theme_tags"),
         )
         console.print(f"  [green]✓[/green] {out_file}")
         if meta.get("thumbnail"):
