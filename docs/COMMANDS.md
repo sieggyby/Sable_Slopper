@@ -69,6 +69,7 @@ sable clip process SOURCE --account HANDLE [options]
 | `--no-highlight` | — | Disable active-word karaoke highlight |
 | `--audio-only` | — | Source audio only — brainrot fills full frame (podcasts, screen-shares) |
 | `--face-track` | — | Center crop on detected faces; falls back to motion tracking, then center |
+| `--org` | account org | Org slug for cost logging (logs Claude spend without budget gating) |
 
 ### clip brainrot
 ```
@@ -122,7 +123,23 @@ sable pulse trends --org ORG [--format BUCKET]
 sable pulse account HANDLE [--days N] [--org ORG]
 sable pulse attribution HANDLE [--days N] [--org ORG]
 sable pulse link CONTENT_ID POST_ID --account HANDLE --org ORG
+sable pulse outcomes --org ORG --handle HANDLE
 ```
+
+### pulse outcomes
+
+Compute content performance outcomes from pulse snapshots and write them to `sable.db outcomes`.
+Groups posts by `sable_content_type`, computes average engagement rate per type plus an aggregate,
+and records deltas against prior outcome rows.
+
+```
+sable pulse outcomes --org ORG --handle HANDLE
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--org` | yes | Org ID for outcome records |
+| `--handle` | yes | Account handle to compute outcomes for |
 
 ### pulse meta
 

@@ -329,3 +329,64 @@ Validation: 859 passed, 0 ruff violations.
 **QA:** Adversarial 2 rounds. Round 1: 4 T2 + 2 T3 findings (connection leak, broad except, lazy imports, naming). All fixed. Round 2: clean.
 
 Validation: 865 passed, 0 ruff violations.
+
+---
+
+## P1-2 — Cost Logging for Non-Advise Claude Calls (2026-04-04)
+
+**Problem:** `call_claude_with_usage()` couples budget checking and cost logging. Write/score/clip are operator-initiated and should log costs but not budget-gate.
+
+**Fix:** Added `budget_check: bool = True` parameter to `call_claude_with_usage`, `call_claude`, `call_claude_json`. When False + org_id provided, `check_budget()` is skipped but `log_cost()` still runs.
+
+**Files changed:**
+- `sable/shared/api.py` — core `budget_check` parameter
+- `sable/write/generator.py` — `budget_check=False` on write_variants call
+- `sable/write/scorer.py` — `budget_check=False` on score_patterns + score_draft calls
+- `sable/clip/selector.py` — `org_id` param added to `select_clips()` and `_evaluate_variants_batch()`
+- `sable/clip/cli.py` — `--org` flag added to clip process
+- `sable/churn/interventions.py` — fixed double budget check (pre-existing)
+- `sable/lexicon/writer.py` — fixed double budget check + connection leak (pre-existing)
+
+**Tests:** 11 new across `tests/shared/test_api_budget_check.py` and `tests/clip/test_clip_cost_logging.py`.
+
+**QA:** Adversarial 2 rounds. Round 1: 3 T1 (double budget checks, conn leak), 4 T2, 4 T3. T1s fixed. Round 2: clean.
+
+Validation: 876 passed, 0 ruff violations.
+
+---
+
+## P2-4 — Content Performance Outcomes from Pulse Snapshots (2026-04-04)
+
+**Problem:** Pulse snapshots capture engagement metrics per post, but no outcomes are written to `sable.db outcomes`. SableWeb impact timeline has no data source.
+
+**Fix:** New `sync_content_outcomes(org_id, handle, conn)` in `sable/pulse/outcomes.py`. Reads pulse.db posts+snapshots, groups by `sable_content_type`, computes per-type avg engagement rate (view-normalised), writes outcome rows with delta from prior via `create_outcome()`.
+
+**Files changed:**
+- `sable/platform/outcomes.py` — thin re-export of `create_outcome`, `list_outcomes`
+- `sable/pulse/outcomes.py` — `sync_content_outcomes()` implementation
+- `sable/pulse/cli.py` — `sable pulse outcomes --org --handle` subcommand
+
+**Tests:** 8 new in `tests/pulse/test_outcomes.py`.
+
+**QA:** Adversarial 2 rounds. Round 1: 0 T1, 3 T2 (redundant queries, non-atomic writes, formula choice), 4 T3. FIND-01 fixed (single query with dict lookup). Round 2: clean.
+
+Validation: 884 passed, 0 ruff violations.
+
+---
+
+## P2-6 — Vault Content as Platform Artifacts (2026-04-04)
+
+**Problem:** Content from `sable meme` and `sable clip` is not registered in `sable.db artifacts`. SableWeb can't list content pipeline output.
+
+**Fix:** New `register_content_artifact(org_id, artifact_type, path, metadata)` in `sable/platform/artifacts.py`. Fully non-fatal — `get_db()` and INSERT inside try/except Exception. Integrated into meme generate, meme batch, and clip process. Only fires when org is resolvable.
+
+**Files changed:**
+- `sable/platform/artifacts.py` — new helper
+- `sable/meme/cli.py` — registration after meme generate + meme batch render
+- `sable/clip/cli.py` — registration after each clip assembly
+
+**Tests:** 7 new across `tests/platform/test_artifacts_helper.py`, `tests/meme/test_meme_artifact.py`, `tests/clip/test_clip_artifact.py`.
+
+**QA:** Adversarial 2 rounds. Round 1: 0 T1, 4 T2 (get_db outside try, batch gap, naming, conn overhead), 3 T3. Fixed: get_db inside try, batch registration added. Round 2: clean.
+
+Validation: 891 passed, 0 ruff violations.

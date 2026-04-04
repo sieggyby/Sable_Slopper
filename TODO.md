@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `865 passed`
+- `./.venv/bin/python -m pytest -q` → `891 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -1139,7 +1139,7 @@ work without cross-repo dependency.
 
 ## Churn Prediction Intervention Engine (Slopper Side)
 
-**Dependency (updated 2026-04-03):** Full chain is now live. Cult Grader computes decay scores (DECAY-0→7) → `platform_sync.py:_sync_decay_scores()` writes to `entity_decay_scores` in sable.db → Platform's `_check_member_decay()` alert fires on at-risk members → `sable-platform inspect decay` exposes data for CHURN-1/CHURN-2 consumption. Silence Gradient (`sable silence-gradient`) remains as an alternative input path for projects without enough diagnostic runs for decay scoring (requires ≥3 snapshots per member).
+**Dependency (updated 2026-04-04):** Full chain is now live. Cult Grader computes decay scores (DECAY-0→7) → `platform_sync.py:_sync_decay_scores()` writes to `entity_decay_scores` in sable.db → Platform's `_check_member_decay()` alert fires on at-risk members → `sable-platform inspect decay` exposes data for CHURN-1/CHURN-2 consumption. Additionally, Cult Grader now syncs playbook targets and outcomes to sable.db via `_sync_playbook_data()` (P1-INT-2, 2026-04-04) — `upsert_playbook_targets()` and `record_playbook_outcomes()` are wired. Silence Gradient (`sable silence-gradient`) remains as an alternative input path for projects without enough diagnostic runs for decay scoring (requires ≥3 snapshots per member).
 
 ### CHURN-1 · Intervention playbook generation — **Status: COMPLETE (2026-04-03)**
 
@@ -1234,10 +1234,9 @@ Gradient output — CHURN-2 inherits whichever input path CHURN-1 uses.
 
 Added `--org` flag to `sable advise` (Option A). When `--org` is provided, it overrides the roster's org association and allows handles not in the Slopper roster to run advise. SablePlatform adapter already implements Option B (`_resolve_primary_handle`); the `--org` flag is defense-in-depth. 9 tests. Adversarial QA: 2 rounds, all clean.
 
-### P1-2: Cost Logging for Non-Advise Claude Calls
-- `sable advise` logs cost via `log_cost()`. But `sable write`, `sable clip` (eval), `sable score` make Claude calls without org-scoped cost logging.
-- Add optional `--org` flag to `write`, `score`, `clip process`. When present, call `log_cost(conn, org_id, call_type, cost_usd)` after each Claude call. Log only, no budget gating — content generation is operator-initiated.
-- SablePlatform side: Done (`cost_events` table + `log_cost()` exist).
+### ~~P1-2: Cost Logging for Non-Advise Claude Calls~~ — Resolved 2026-04-04
+
+Added `budget_check: bool = True` parameter to `call_claude_with_usage`/`call_claude`/`call_claude_json`. When False, cost is logged via `log_cost()` but `check_budget()` is skipped. Write/score pass `budget_check=False`. Clip process gained `--org` flag, threads `org_id` through to Claude calls. Also fixed double budget checks in churn interventions and lexicon writer, and a connection leak in lexicon writer. 11 tests. Adversarial QA: 2 rounds, all clean.
 
 ### ~~P1-3: Pulse Freshness Sync to `sable.db sync_runs`~~ — Resolved 2026-04-04
 
@@ -1245,10 +1244,9 @@ Added `--org` flag to `sable advise` (Option A). When `--org` is provided, it ov
 
 **Remaining:** SablePlatform `weekly_client_loop.py` freshness query needs updating to read these new sync_type values instead of (or in addition to) direct pulse.db/meta.db reads.
 
-### P2-4: Content Performance Outcomes from Pulse Snapshots
-- New `sync_content_outcomes(org_id)` in `sable/pulse/` (~60 lines). Reads pulse.db weekly aggregates, computes deltas, writes `outcomes` rows in sable.db via `create_outcome()`.
-- SablePlatform side: Done (`outcomes` table + `create_outcome()` exist).
-- Consumer: SableWeb impact timeline and value card.
+### ~~P2-4: Content Performance Outcomes from Pulse Snapshots~~ — Resolved 2026-04-04
+
+New `sync_content_outcomes(org_id, handle, conn)` in `sable/pulse/outcomes.py`. Reads pulse.db posts+snapshots, computes per-content-type avg engagement rate (view-normalised), writes outcome rows to sable.db via `create_outcome()`. Includes delta from prior outcomes. CLI: `sable pulse outcomes --org --handle`. 8 tests. Adversarial QA: 2 rounds, FIND-01 fixed (single query lookup).
 
 ### P2-5: Strategy Recommendations as Platform Actions
 - `weekly_client_loop` parses `discord_playbook` artifacts for actions but NOT `twitter_strategy_brief` artifacts from `sable advise`.
@@ -1256,10 +1254,9 @@ Added `--org` flag to `sable advise` (Option A). When `--org` is provided, it ov
 - Slopper side: Nothing — brief already contains parseable recommendation sections.
 - Depends on P0-1 landing first.
 
-### P2-6: Vault Content as Platform Artifacts
-- Content from `sable write`, `sable meme`, `sable clip` is not registered in `sable.db artifacts`.
-- Add `_register_vault_artifact(org_id, path, format_type)` helper. Call from write.py, meme.py, clip.py post-production. Only when `--org` is resolvable.
-- SablePlatform side: Done (`artifacts` table supports arbitrary types).
+### ~~P2-6: Vault Content as Platform Artifacts~~ — Resolved 2026-04-04
+
+New `register_content_artifact(org_id, artifact_type, path, metadata)` in `sable/platform/artifacts.py`. Fully non-fatal — `get_db()` and INSERT inside try/except Exception. Integrated into meme generate, meme batch, and clip process. Only fires when org is resolvable. Write skipped (stdout only, no file artifact). 7 tests. Adversarial QA: 2 rounds, all clean.
 
 ---
 
