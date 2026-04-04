@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS posts (
     posted_at TEXT,
     sable_content_type TEXT,  -- clip | meme | faceswap | text | unknown
     sable_content_path TEXT,
+    is_thread INTEGER DEFAULT 0,
+    thread_length INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -87,6 +89,8 @@ def insert_post(
     platform: str = "twitter",
     content_type: str = "unknown",
     content_path: str = "",
+    is_thread: bool = False,
+    thread_length: int = 1,
 ) -> bool:
     """Insert a post. Returns True if newly inserted, False if already existed (AR5-24)."""
     # Normalize handle to always include @ prefix (matches get_posts_for_account convention)
@@ -101,9 +105,11 @@ def insert_post(
     with conn:
         conn.execute(
             """INSERT INTO posts
-               (id, account_handle, platform, url, text, posted_at, sable_content_type, sable_content_path)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (post_id, account_handle, platform, url, text, posted_at, content_type, content_path),
+               (id, account_handle, platform, url, text, posted_at,
+                sable_content_type, sable_content_path, is_thread, thread_length)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (post_id, account_handle, platform, url, text, posted_at,
+             content_type, content_path, int(is_thread), thread_length),
         )
     conn.close()
     return True

@@ -41,10 +41,13 @@ def clip_group():
               help="Disable active-word highlight (karaoke effect) on captions")
 @click.option("--audio-only", is_flag=True,
               help="Use source audio only — brainrot fills the full frame (for podcasts, screen-shares)")
+@click.option("--face-track", is_flag=True,
+              help="Center crop on detected faces (falls back to motion tracking, then center)")
 def clip_process(
     video, account, num_clips, min_duration, max_duration,
     caption_style, caption_color, brainrot_energy, whisper_model, dry_run, no_brainrot,
     image_overlay, target_duration, clip_sizes, platform, no_highlight, audio_only,
+    face_track,
 ):
     """Process a video into short-form vertical clips for an account."""
     from sable.shared.download import maybe_download
@@ -157,6 +160,7 @@ def clip_process(
             platform=platform,
             highlight_active=not no_highlight,
             audio_only=audio_only,
+            face_track=face_track,
         )
         console.print(f"  [green]✓[/green] {out_file}")
         if meta.get("thumbnail"):

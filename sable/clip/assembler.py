@@ -64,6 +64,7 @@ def assemble_clip(
     platform: str = "twitter",
     highlight_active: bool = True,
     audio_only: bool = False,
+    face_track: bool = False,
 ) -> dict:
     """
     Full assembly pipeline:
@@ -108,6 +109,7 @@ def assemble_clip(
         "dry_run": dry_run,
         "highlight_active": highlight_active,
         "audio_only": audio_only,
+        "face_track": face_track,
         "caption": caption_hint or "",
     }
 
@@ -120,6 +122,16 @@ def assemble_clip(
         # 1. Extract source clip
         source_clip = tmp_path / "source_clip.mp4"
         extract_clip(source_video, source_clip, start, end)
+
+        # 1b. Compute face/motion crop offset if requested
+        crop_x_offset = 0.0
+        if face_track and not audio_only:
+            from sable.clip.face_track import compute_face_offset
+            crop_x_offset = compute_face_offset(
+                source_clip,
+                target_width=profile["width"],
+            )
+            meta["crop_x_offset"] = crop_x_offset
 
         # 2. Get brainrot (skipped when brainrot_energy == "none")
         clip_only = brainrot_energy == "none"
@@ -168,6 +180,7 @@ def assemble_clip(
                 subtitle_path=subtitle_path,
                 image_overlay_path=image_overlay_path,
                 profile=profile,
+                crop_x_offset=crop_x_offset,
             )
         else:
             stack_videos(
@@ -175,6 +188,7 @@ def assemble_clip(
                 subtitle_path=subtitle_path,
                 image_overlay_path=image_overlay_path,
                 profile=profile,
+                crop_x_offset=crop_x_offset,
             )
 
     # Generate thumbnail

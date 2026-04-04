@@ -38,6 +38,7 @@ sable/
 │
 ├── roster/              ← account management + markdown profile system
 ├── clip/                ← video transcription → vertical clip pipeline
+│   ├── face_track.py    ← face-centered + motion-tracking crop offsets (CLIP-2/3)
 ├── meme/                ← template-based meme generation
 ├── face/                ← face swap via Replicate
 ├── character_explainer/ ← character explainer videos (TTS + brainrot)

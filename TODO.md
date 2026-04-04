@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `828 passed`
+- `./.venv/bin/python -m pytest -q` → `850 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -426,11 +426,16 @@ Each step is independently deployable. SableWeb can start consuming pulse data w
 
 ---
 
-## FEATURE-3 (`sable pulse account`) — Remaining Items
+## FEATURE-3 (`sable pulse account`) — Thread Detection — **COMPLETE (2026-04-03)**
 
-- **`_classify_post` thread-detection gap** (known V1 limitation): `sable_content_type='text'`
-  always passes `is_thread=False` because pulse.db has no thread marker. Text threads
-  miscategorized as `standalone_text`. Requires pulse.db schema change to fix.
+Added `is_thread` and `thread_length` columns to `pulse.db` posts table. `tracker.py`
+detects threads via SocialData `in_reply_to_screen_name` (reply to self = thread).
+`thread_length` set to 2 when `is_thread=True` (SocialData doesn't expose chain length).
+`_classify_post` in `account_report.py` now reads stored thread data instead of hardcoding
+`is_thread=False`. Thread posts correctly reach the "thread" format bucket.
+
+Tests: 4 tracker thread tests + 5 classify_post thread tests + 1 integration test.
+Test schemas updated across 5 test files.
 
 ---
 
@@ -438,71 +443,30 @@ Each step is independently deployable. SableWeb can start consuming pulse data w
 
 Sourced from competitive audit of `samuraigpt/ai-youtube-shorts-generator` (2026-04-01).
 
-### CLIP-2 · Face-centered crop for multi-speaker content
+### CLIP-2 · Face-centered crop — **COMPLETE (2026-04-03)**
 
-Current `stack_videos` (`shared/ffmpeg.py`) uses a static `scale+crop` filter that
-center-crops the source panel. For interview content where speakers switch sides of
-frame, a face-tracking crop would keep the largest detected face centered.
+`sable clip process --face-track` enables face-centered cropping. New module
+`sable/clip/face_track.py` samples frames, detects faces via `face_recognition`
+(optional dep, try/except fallback), and returns a fractional horizontal offset
+[-1.0, 1.0]. FFmpeg applies it as `crop_x = (in_w - w)/2 * (1 + offset)` — computed
+post-scale so the math is always valid regardless of source resolution.
 
-**Clarification:** This is face-centered cropping, not active-speaker detection. True
-speaker identification would require audio diarization (pyannote) or lip-movement
-analysis — neither is in scope. This tracks the largest face per frame.
+**Fallback chain:** face detection → CLIP-3 motion tracking → center crop.
+Skipped when `--audio-only` (no source video panel).
 
-**Approach:** Face detection (dlib HOG via `face_recognition`) every 10th frame (~3fps),
-interpolated positions for intermediate frames. Smoothed crop x-offset via exponential
-smoothing (e.g. 0.85 previous + 0.15 new). FFmpeg `crop` filter with per-frame offset.
+`face_recognition` remains optional — not declared in `pyproject.toml`. Falls back
+gracefully to motion tracking or center crop when unavailable.
 
-**Dependency:** `face_recognition` is currently an optional import with try/except
-fallback in `thumbnail.py`. It is NOT a declared dependency in `pyproject.toml` (dlib
-requires CMake + C++ toolchain). Decision needed: (a) declare it as a hard dep, or
-(b) keep optional and fall back to center-crop when unavailable. Option (b) is safer.
+Tests: 12 in `tests/clip/test_face_track.py`. Adversarial QA: 2 rounds, all clean.
 
-**Where it lives:** Detection + smoothing logic in new `sable/clip/face_track.py` (not
-`shared/ffmpeg.py` — that module is pure FFmpeg subprocess wrappers). Only the final
-crop-filter generation touches `ffmpeg.py`. Called from `assembler.py` when `--face-track`
-flag is passed. Default off — static crop remains the default.
+### CLIP-3 · Motion-tracking crop — **COMPLETE (2026-04-03)**
 
-**Applies to:** Both `stack_videos` and `encode_clip_only` paths. Ignored when
-`--audio-only` is set (no source video panel to crop).
+Fallback within CLIP-2's `--face-track` path. When no faces are detected,
+`_compute_motion_offset()` in `face_track.py` uses Farneback optical flow
+(`cv2.calcOpticalFlowFarneback`) at ~1fps, downscaled to 480px width for speed.
+Per-column flow magnitude → weighted center of motion → fractional offset.
 
-**Edge cases:**
-- Zero faces for entire clip → fall back to center crop
-- Face appears/disappears mid-clip → hold last known position, decay to center
-- Multiple faces → track largest, or nearest to previous position
-- Performance budget: ~1-2x assembly time overhead at 720p with dlib HOG at 3fps
-
-**When to build:** When a client asks for interview/podcast clip quality improvements, or
-when we start processing multi-camera content. Build CLIP-2 before CLIP-3 (CLIP-3
-depends on CLIP-2's detection gate).
-
-### CLIP-3 · Motion-tracking crop for screen recordings
-
-**Prerequisite: CLIP-2.** CLIP-3 is the no-face fallback within CLIP-2's `--face-track`
-path. Cannot be built or used independently.
-
-When `--face-track` is on and face detection returns no faces (screen shares, product
-demos, coding streams), the current pipeline would center-crop. An optical-flow-based
-crop would instead pan toward the area of activity (mouse cursor, typing, UI transitions).
-
-**Approach:** Farneback optical flow (`cv2.calcOpticalFlowFarneback`, `opencv-python` is
-a declared dep) computed once per second. Per-column flow magnitude summed → weighted
-center of motion → smoothed pan position. Source scaled so its width is 1.5x the output
-panel width (after the existing `scale` filter in the FFmpeg graph), giving 0.25x
-panel-width of pan room in each direction.
-
-**Where it lives:** Alongside CLIP-2 in `sable/clip/face_track.py`.
-
-**Edge cases:**
-- First frame: no prior frame for flow → default to center crop
-- Static frames (no significant flow): hold current pan position, do not drift to center.
-  Define a flow-magnitude threshold below which pan is frozen
-- Full-screen transitions (page nav, app switch): flow spikes everywhere with no
-  directional signal → treat as static, hold position
-
-**Performance:** Farneback on 1080p ~50-100ms/frame on CPU. At 1fps for a 30s clip =
-~1.5-3s overhead. Consider downscaling to 540p for flow computation.
-
-**When to build:** When we start clipping screen-share or product demo content.
+Falls back to center crop when `cv2` is unavailable or motion is uniform.
 
 ---
 
@@ -1175,12 +1139,7 @@ work without cross-repo dependency.
 
 ## Churn Prediction Intervention Engine (Slopper Side)
 
-**Dependency (updated):** Primary input path: Platform decay alerting pipeline (computes
-who is at risk). Alternative input path: FEATURE-16 Silence Gradient (`sable silence-gradient
---org <org> --output at-risk.json`) can produce a compatible at-risk list from `meta.db`
-data, unblocking CHURN-1 before Platform ships decay alerting. Slopper still does not own
-decay scoring as a platform concept — Silence Gradient is a Slopper-internal early warning
-signal that happens to produce a compatible input format.
+**Dependency (updated 2026-04-03):** Full chain is now live. Cult Grader computes decay scores (DECAY-0→7) → `platform_sync.py:_sync_decay_scores()` writes to `entity_decay_scores` in sable.db → Platform's `_check_member_decay()` alert fires on at-risk members → `sable-platform inspect decay` exposes data for CHURN-1/CHURN-2 consumption. Silence Gradient (`sable silence-gradient`) remains as an alternative input path for projects without enough diagnostic runs for decay scoring (requires ≥3 snapshots per member).
 
 ### CHURN-1 · Intervention playbook generation — **Status: COMPLETE (2026-04-03)**
 

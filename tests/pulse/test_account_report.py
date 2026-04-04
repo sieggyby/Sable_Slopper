@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS posts (
     posted_at TEXT,
     sable_content_type TEXT,
     sable_content_path TEXT,
+    is_thread INTEGER DEFAULT 0,
+    thread_length INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -126,6 +128,30 @@ def test_classify_post_missing_type_returns_valid_bucket():
     from sable.pulse.meta.fingerprint import FORMAT_BUCKETS
     result = _classify_post({})
     assert result in FORMAT_BUCKETS
+
+
+def test_classify_post_thread_returns_thread_bucket():
+    """Post with is_thread=1 and thread_length>=2 → thread bucket."""
+    result = _classify_post({"sable_content_type": "text", "is_thread": 1, "thread_length": 3})
+    assert result == "thread"
+
+
+def test_classify_post_thread_length_one_not_thread_bucket():
+    """is_thread=1 but thread_length=1 → mixed_media (classify_format: is_thread blocks standalone_text)."""
+    result = _classify_post({"sable_content_type": "text", "is_thread": 1, "thread_length": 1})
+    assert result == "mixed_media"
+
+
+def test_classify_post_not_thread_stays_standalone():
+    """is_thread=0 with any thread_length → standalone_text."""
+    result = _classify_post({"sable_content_type": "text", "is_thread": 0, "thread_length": 5})
+    assert result == "standalone_text"
+
+
+def test_classify_post_clip_ignores_thread_flag():
+    """Clip type short-circuits before thread check."""
+    result = _classify_post({"sable_content_type": "clip", "is_thread": 1, "thread_length": 3})
+    assert result == "short_clip"
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +395,39 @@ def test_posts_outside_window_excluded(tmp_path):
 
     report = compute_account_format_lift("alice", "", days=30, pulse_db_path=db)
     assert report.total_posts == 1
+
+
+# ---------------------------------------------------------------------------
+# compute_account_format_lift — thread detection
+# ---------------------------------------------------------------------------
+
+def test_thread_posts_classified_as_thread_bucket(tmp_path):
+    """Posts with is_thread=1 and thread_length>=2 land in thread bucket."""
+    db = _make_pulse_db(tmp_path)
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    # 2 thread posts
+    for i in range(2):
+        conn.execute(
+            """INSERT INTO posts (id, account_handle, text, posted_at,
+                                  sable_content_type, is_thread, thread_length)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (f"th{i}", "@alice", f"thread post {i}", _recent_iso(1), "text", 1, 3),
+        )
+        _insert_snapshot(conn, f"th{i}", likes=50)
+    # 2 standalone text posts
+    for i in range(2):
+        _insert_post(conn, f"st{i}", "@alice", "text")
+        _insert_snapshot(conn, f"st{i}", likes=20)
+    conn.commit()
+    conn.close()
+
+    report = compute_account_format_lift("alice", "", 30, db)
+    buckets = {e.format_bucket: e for e in report.entries}
+    assert "thread" in buckets, f"Expected 'thread' bucket, got {list(buckets.keys())}"
+    assert buckets["thread"].post_count == 2
+    assert "standalone_text" in buckets
+    assert buckets["standalone_text"].post_count == 2
 
 
 # ---------------------------------------------------------------------------

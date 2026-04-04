@@ -67,6 +67,8 @@ sable clip process SOURCE --account HANDLE [options]
 | `--no-brainrot` | — | Skip brainrot overlay entirely |
 | `--image-overlay` | — | PNG to composite in bottom-left |
 | `--no-highlight` | — | Disable active-word karaoke highlight |
+| `--audio-only` | — | Source audio only — brainrot fills full frame (podcasts, screen-shares) |
+| `--face-track` | — | Center crop on detected faces; falls back to motion tracking, then center |
 
 ### clip brainrot
 ```

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from sable.shared.handles import strip_handle
+from sable.shared.handles import strip_handle, normalize_handle
 
 from sable.pulse import db
 from sable.shared.paths import sable_home
@@ -114,12 +114,21 @@ def snapshot_account(handle: str, mock: bool = False) -> list[dict]:
         if not post_id:
             continue
 
+        # Thread detection: reply to self = thread continuation
+        in_reply_to = tweet.get("in_reply_to_screen_name", "")
+        is_thread = bool(in_reply_to) and normalize_handle(in_reply_to) == normalize_handle(handle)
+        # SocialData doesn't expose thread length directly; set floor of 2
+        # so classify_format can reach the "thread" bucket (requires length>=2).
+        thread_length = 2 if is_thread else 1
+
         is_new = db.insert_post(
             post_id=str(post_id),
             account_handle=handle,
             text=tweet.get("full_text", tweet.get("text", "")),
             url=f"https://twitter.com/i/web/status/{post_id}",
             posted_at=tweet.get("created_at", ""),
+            is_thread=is_thread,
+            thread_length=thread_length,
         )
         if is_new:
             new_count += 1

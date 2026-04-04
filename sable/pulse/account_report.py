@@ -77,11 +77,11 @@ def _classify_post(post: dict) -> str:
         return "long_clip"
     if ct == "faceswap":
         return "short_clip"
-    # 'text', 'unknown', or anything else: delegate to classify_format with no media flags
+    # 'text', 'unknown', or anything else: delegate to classify_format with thread data
     return classify_format(
         is_quote_tweet=False,
-        is_thread=False,
-        thread_length=1,
+        is_thread=bool(post.get("is_thread")),
+        thread_length=post.get("thread_length") or 1,
         has_video=False,
         video_duration=None,
         has_image=False,
@@ -130,6 +130,7 @@ def _load_posts_with_snapshots(
     rows = conn.execute(
         """
         SELECT p.id, p.text, p.posted_at, p.sable_content_type,
+               p.is_thread, p.thread_length,
                s.likes, s.retweets, s.replies, s.views, s.bookmarks, s.quotes
         FROM posts p
         LEFT JOIN snapshots s ON (

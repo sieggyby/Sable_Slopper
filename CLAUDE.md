@@ -31,7 +31,7 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 **Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, and more.
 All community intelligence features are shipped (FEATURE-10 through FEATURE-16, CHURN-1, CHURN-2).
 
-**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Bearer token auth, 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. 30 new tests in `tests/serve/`. Test count: 828.
+**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Bearer token auth, 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. 30 new tests in `tests/serve/`. Test count: 850.
 
 **Remaining Phase 2 work:**
 - Cloudflare Tunnel deployment (see `docs/ROADMAP.md`)
@@ -48,6 +48,7 @@ Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
   Hand-written SQL + dataclasses throughout. `sable db migrate` runs
   all migrations (001–006) via `ensure_schema()`.
   See `docs/SCHEMA_INVENTORY.md` for full table and model inventory.
+  `pulse.db.posts` has `is_thread` and `thread_length` columns (added 2026-04-03).
 
 - **`pulse.db` and `meta.db` schemas are embedded Python strings, not migration files.**
   Each module (`sable/pulse/db.py`, `sable/pulse/meta/db.py`) holds a `_SCHEMA` string

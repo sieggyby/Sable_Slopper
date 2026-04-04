@@ -123,12 +123,16 @@ def stack_videos(
     profile: Optional[dict] = None,
     interview_audio_vol: float = 1.0,
     brainrot_audio_vol: float = 0.0,
+    crop_x_offset: float = 0.0,
 ) -> None:
     """
     Stack two videos vertically into a 9:16 portrait layout.
     Top = brainrot (input 1), Bottom = source/interview (input 0).
     Audio: interview (input 0) through loudnorm; brainrot audio silent by default.
     Profile controls resolution and encoding (defaults to 1080x1920, CRF 23, 192k).
+
+    crop_x_offset: fractional pan offset [-1.0, 1.0] applied to source (bottom).
+    0 = center crop, -1 = left edge, +1 = right edge.
     """
     p = profile or {
         "width": 1080, "half_height": 960,
@@ -138,11 +142,18 @@ def stack_videos(
     w, hh = p["width"], p["half_height"]
 
     ffmpeg = require_ffmpeg()
+    # Fractional offset applied at crop time using in_w (post-scale dimensions).
+    # crop_x = (in_w - w)/2 + offset * (in_w - w)/2 = (in_w - w)/2 * (1 + offset)
+    if crop_x_offset:
+        factor = 1.0 + crop_x_offset
+        bottom_crop = f"crop={w}:{hh}:trunc((in_w-{w})/2*{factor:.4f}):(in_h-{hh})/2"
+    else:
+        bottom_crop = f"crop={w}:{hh}"
     filter_graph = (
         f"[1:v]setpts=PTS-STARTPTS,fps=30,scale={w}:{hh}:force_original_aspect_ratio=increase,"
         f"crop={w}:{hh}[top];"
         f"[0:v]setpts=PTS-STARTPTS,fps=30,scale={w}:{hh}:force_original_aspect_ratio=increase,"
-        f"crop={w}:{hh}[bottom];"
+        f"{bottom_crop}[bottom];"
         "[top][bottom]vstack=inputs=2[stacked]"
     )
 
@@ -202,11 +213,14 @@ def encode_clip_only(
     subtitle_path: Optional[str | Path] = None,
     image_overlay_path: Optional[str | Path] = None,
     profile: Optional[dict] = None,
+    crop_x_offset: float = 0.0,
 ) -> None:
     """
     Encode source clip to full 9:16 portrait (no brainrot split).
     Source is scaled and cropped to fill the entire frame.
     Audio: source through dynaudnorm. Captions and image overlay optional.
+
+    crop_x_offset: fractional pan offset [-1.0, 1.0]. 0 = center.
     """
     p = profile or {
         "width": 1080, "half_height": 960,
@@ -216,9 +230,14 @@ def encode_clip_only(
     w, full_h = p["width"], p["half_height"] * 2
 
     ffmpeg = require_ffmpeg()
+    if crop_x_offset:
+        factor = 1.0 + crop_x_offset
+        crop_expr = f"crop={w}:{full_h}:trunc((in_w-{w})/2*{factor:.4f}):(in_h-{full_h})/2"
+    else:
+        crop_expr = f"crop={w}:{full_h}"
     filter_graph = (
         f"[0:v]setpts=PTS-STARTPTS,fps=30,scale={w}:{full_h}:force_original_aspect_ratio=increase,"
-        f"crop={w}:{full_h}[scaled]"
+        f"{crop_expr}[scaled]"
     )
     filter_graph += ";[0:a]asetpts=PTS-STARTPTS,dynaudnorm=f=150:g=15[audio_out]"
 

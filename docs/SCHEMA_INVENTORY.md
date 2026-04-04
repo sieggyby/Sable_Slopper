@@ -36,6 +36,8 @@ text TEXT,
 posted_at TEXT,
 sable_content_type TEXT,   -- 'clip' | 'meme' | 'faceswap' | 'text' | 'unknown'
 sable_content_path TEXT,
+is_thread INTEGER DEFAULT 0,
+thread_length INTEGER DEFAULT 1,
 created_at TEXT DEFAULT (datetime('now'))
 ```
 
