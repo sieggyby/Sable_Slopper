@@ -181,3 +181,105 @@ Tests: 9 new in `tests/shared/test_socialdata.py` (402, 429 retry+exhaust, 5xx, 
 404, network error retry+exhaust, backoff schedule). 2 suggest tests simplified.
 
 Validation: 625→634 passed. ruff clean, mypy clean.
+
+---
+
+# Community Intelligence Features (2026-04-03)
+
+10-phase implementation of all community intelligence features from the multi-agent
+feature competition. Each phase gated by adversarial QA subagent (3-tier framework:
+Tier 1 prod/cost/secrets, Tier 2 maintainability, Tier 3 test coverage).
+
+## Phase 1 — FEATURE-11A: Watchlist Amplifiers
+New `sable/pulse/meta/amplifiers.py`: `compute_amplifiers()` with RT_v, RPR, QTR signals.
+CLI: `sable pulse watchlist --amplifiers`. Tests: ~16.
+
+## Phase 2 — FEATURE-10: Community Lexicon
+New `sable/lexicon/` package: scanner, store, writer, CLI. Exclusivity filter, LSR math,
+optional Claude interpretation. `lexicon_terms` table in meta.db.
+`sable write --lexicon` flag for prompt injection. Tests: ~27.
+
+## Phase 3 — FEATURE-12: Voice Check
+`sable write --voice-check` flag. `assemble_voice_corpus()` in generator.py loads
+tone.md + notes.md + vault notes. `score_draft()` accepts `voice_corpus` param. Tests: ~12.
+
+## Phase 4 — FEATURE-14: Narrative Velocity
+New `sable/narrative/` package: tracker, models, CLI. `load_beats()` parses YAML,
+`score_uptake()` computes keyword spread. Imports MIN_AUTHORS/MIN_TWEETS from lexicon.
+Tests: ~18.
+
+## Phase 5 — FEATURE-15: Style Delta
+New `sable/style/` package: fingerprint, delta, report, CLI. `_COARSE_MAP` covers both
+posts.sable_content_type and scanned_tweets.format_bucket vocabularies. Tests: ~20.
+
+## Phase 6 — FEATURE-16: Silence Gradient
+New `sable/cadence/` package: signals, combine, store, CLI. Three signals (vol_drop,
+eng_drop, fmt_reg) with proportional weight redistribution. `author_cadence` table in
+meta.db. Tests: ~32.
+
+## Phase 7 — FEATURE-11B: Bridge Node Signals
+`sable advise --bridge-aware` flag. `_assemble_bridge_section()` in stage1.py queries
+sable.db for bridge_node entities, meta.db for recent engagement. Tests: 6.
+
+## Phase 8 — FEATURE-13: Community Language Injection
+`sable advise --community-voice` flag. `_assemble_community_language()` in stage1.py
+queries diagnostic_runs for language_arc_phase, cultural terms, mantra candidates.
+14-day freshness gate. Tests: 6.
+
+## Phase 9 — CHURN-1: Intervention Playbook
+New `sable/churn/` package: interventions, prompts, CLI. One Claude call per at-risk
+member with budget check. Soft cap at 50 members. Tests: 16.
+
+## Phase 10 — CHURN-2: Calendar Integration
+`sable calendar --churn-input --prioritize-churn` flags. CalendarSlot gains
+`churn_targets` field. 30% slot cap enforcement. Tests: 11.
+`sable advise --churn-input` flag for brief integration.
+
+## QA Findings Fixed
+- volume_drop(0,0) misleading max-drop → now returns insufficient
+- Bridge section meta query cross-org data leak → org filter added
+- scored_at → started_at column name fix in community language
+- Calendar CLI missing SableError catch → added
+- Non-dict JSON guard in churn interventions → type check added
+
+Validation: 798 passed, 0 ruff violations, 0 mypy errors.
+
+---
+
+# Phase 2 — `sable serve` (2026-04-03)
+
+Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP.
+
+## Implementation
+
+New `sable/serve/` package:
+- `app.py` — app factory, mounts routes, registers /health
+- `auth.py` — Bearer token dependency, reads `serve.token` from config
+- `deps.py` — DB connection helpers for pulse.db, meta.db, vault
+- `routes/` — endpoint modules for pulse, meta, vault
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | No | Health check |
+| GET | `/api/pulse/performance/{org}` | Yes | Pulse performance summary |
+| GET | `/api/pulse/posting-log/{org}` | Yes | Posting log |
+| GET | `/api/meta/topics/{org}` | Yes | Topic signals |
+| GET | `/api/meta/baselines/{org}` | Yes | Format baselines |
+| GET | `/api/meta/watchlist/{org}` | Yes | Watchlist entries |
+| GET | `/api/vault/inventory/{org}` | Yes | Vault inventory |
+| GET | `/api/vault/search/{org}?q=...` | Yes | Vault keyword search |
+
+## Key decisions
+
+- Read-only: no mutations, no Claude calls, zero API cost
+- Bearer token auth on all `/api/` routes; `/health` is unauthenticated
+- Optional dependency: `pip install -e ".[serve]"` (FastAPI + uvicorn)
+- Config key: `serve.token` in `~/.sable/config.yaml`
+
+## Tests
+
+30 new tests in `tests/serve/` covering all endpoints, auth rejection, and health check.
+
+Validation: 828 passed, 0 ruff violations, 0 mypy errors.

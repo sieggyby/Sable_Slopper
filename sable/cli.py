@@ -79,6 +79,11 @@ from sable.commands.write import write_command
 from sable.commands.score import score_command
 from sable.commands.diagnose import diagnose_command
 from sable.commands.calendar import calendar_command
+from sable.lexicon.cli import lexicon_group
+from sable.narrative.cli import narrative_group
+from sable.style.cli import style_delta_command
+from sable.cadence.cli import silence_gradient_command
+from sable.churn.cli import churn_group
 
 main.add_command(roster_group)
 main.add_command(clip_group)
@@ -101,3 +106,23 @@ main.add_command(write_command)
 main.add_command(score_command)
 main.add_command(diagnose_command)
 main.add_command(calendar_command)
+main.add_command(lexicon_group)
+main.add_command(narrative_group)
+main.add_command(style_delta_command)
+main.add_command(silence_gradient_command)
+main.add_command(churn_group)
+
+
+@main.command("serve")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Bind address.")
+@click.option("--port", default=8420, type=int, show_default=True, help="Bind port.")
+@click.option("--reload", is_flag=True, default=False, help="Auto-reload on file changes (dev only).")
+def serve_command(host: str, port: int, reload: bool):
+    """Start the Sable API server (Phase 2)."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]uvicorn not installed. Run: pip install -e '.[serve]'[/red]")
+        import sys
+        sys.exit(1)
+    uvicorn.run("sable.serve.app:create_app", host=host, port=port, reload=reload, factory=True)

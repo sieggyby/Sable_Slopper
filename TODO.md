@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `634 passed`
+- `./.venv/bin/python -m pytest -q` → `828 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -29,7 +29,7 @@ contracts. Lint and mypy are clean; the issue is semantic correctness of test fi
 
 ## Phase 2 — `sable serve` FastAPI Backend
 
-**Status:** NOT STARTED
+**Status:** COMPLETE (2026-04-03)
 **Consumer:** SableWeb (Next.js portal, separate repo at `~/Projects/SableWeb`)
 **Reference:** `docs/ROADMAP.md` Phase 2 section, `docs/ROLES.md`, `docs/SCHEMA_INVENTORY.md`
 **Why now:** SableWeb is transitioning from hardcoded mock data to live data. SableWeb reads sable.db directly for entity/diagnostic/action data, but vault inventory, pulse performance, and meta intelligence data live in Slopper's databases (pulse.db, meta.db) and must be exposed via HTTP.
@@ -506,7 +506,7 @@ panel-width of pan room in each direction.
 
 ---
 
-## Community Intelligence Features
+## Community Intelligence Features — **ALL COMPLETE (2026-04-03)**
 
 Sourced from a multi-agent feature proposal competition (2026-04-01). See
 `docs/AUDIT_HISTORY.md` § "Community Intelligence Feature Competition" for full
@@ -523,22 +523,24 @@ provenance (15 proposals, 5 agents, evaluation criteria, ranking, consolidation 
 7. FEATURE-11 Part B (`--bridge-aware`) — requires CultGrader diagnostic data
 8. FEATURE-13 (`--community-voice`) — requires cross-repo migration
 
-### Documentation update checklist (per feature shipped)
+All features shipped 2026-04-03. 798 tests, ruff clean.
 
-After each feature lands, update these docs before merging:
+### Documentation update checklist
 
-- [ ] `docs/COMMANDS.md` — add new CLI commands/flags with examples
-- [ ] `docs/ARCHITECTURE.md` — add new module to tree + subsystem diagram
-- [ ] `docs/SCHEMA_INVENTORY.md` — add new tables/models/config keys
-- [ ] `README.md` — add to Modules table
-- [ ] `docs/CONFIG_REFERENCE.md` — add new config keys
-- [ ] `docs/IMPLEMENTATION_LOG.md` — append dated implementation record
-- [ ] `docs/AUDIT_HISTORY.md` — update validation history row
-- [ ] `CLAUDE.md` — update if feature adds new DB tables, architectural patterns, or cross-module dependencies
+All docs updated 2026-04-03 for FEATURE-10 through FEATURE-16, CHURN-1, and CHURN-2.
+
+- [x] `docs/COMMANDS.md` — add new CLI commands/flags with examples
+- [x] `docs/ARCHITECTURE.md` — add new module to tree + subsystem diagram
+- [x] `docs/SCHEMA_INVENTORY.md` — add new tables/models/config keys
+- [x] `README.md` — add to Modules table
+- [x] `docs/CONFIG_REFERENCE.md` — add new config keys
+- [x] `docs/IMPLEMENTATION_LOG.md` — append dated implementation record
+- [x] `docs/AUDIT_HISTORY.md` — update validation history row
+- [x] `CLAUDE.md` — update if feature adds new DB tables, architectural patterns, or cross-module dependencies
 
 ---
 
-### FEATURE-10 · Community Lexicon (`sable lexicon`)
+### FEATURE-10 · Community Lexicon (`sable lexicon`) — **Status: COMPLETE (2026-04-03)**
 
 **Problem:** `sable write` generates content with no awareness of community-specific
 language. Operators catch voice mismatches manually. `topics.py` detects trending terms
@@ -651,7 +653,7 @@ is the first thing a new operator needs to understand about a community.
 
 ---
 
-### FEATURE-11 · Watchlist Amplifiers + Bridge Node Signals
+### FEATURE-11 · Watchlist Amplifiers + Bridge Node Signals — **Status: COMPLETE (2026-04-03)**
 
 **Consolidates:** Operator PM `--amplifiers` (rank 1 overall) + Cross-repo PM Bridge Node
 Amplification + Academic PM Bridge Score (phased prerequisite). Three proposals answering
@@ -763,7 +765,7 @@ new dependencies.
 
 ---
 
-### FEATURE-12 · Voice Check (`sable write --voice-check`)
+### FEATURE-12 · Voice Check (`sable write --voice-check`) — **Status: COMPLETE (2026-04-03)**
 
 **Problem:** `sable write` generates variants but the existing `voice_fit` score in
 `score_draft()` uses only 200 characters of `tone.md`. Operators catch voice drift
@@ -829,7 +831,7 @@ called before scoring loop. `--voice-check` implies `--score`.
 
 ---
 
-### FEATURE-13 · Community Language Injection (`sable advise --community-voice`)
+### FEATURE-13 · Community Language Injection (`sable advise --community-voice`) — **Status: COMPLETE (2026-04-03)**
 
 **Problem:** CultGrader produces `emergent_cultural_terms`, `mantra_candidates`, and
 `language_arc_phase` per community. These fields are NOT currently in `sable.db` — they
@@ -893,7 +895,7 @@ SablePlatform and CultGrader.
 
 ---
 
-### FEATURE-14 · Narrative Velocity (`sable narrative`)
+### FEATURE-14 · Narrative Velocity (`sable narrative`) — **Status: COMPLETE (2026-04-03)**
 
 **Problem:** `sable calendar` plans what to post. `sable pulse meta` measures what formats
 work. Neither answers: "is our narrative arc actually landing with the community?"
@@ -966,7 +968,7 @@ candidate for a new client onboarding where the operator has a clear narrative s
 
 ---
 
-### FEATURE-15 · Style Delta (`sable style-delta`)
+### FEATURE-15 · Style Delta (`sable style-delta`) — **Status: COMPLETE (2026-04-03)**
 
 **Problem:** Operators know what formats perform well (from pulse meta) but not how their
 managed account's structural posting style differs from top performers in the niche. No
@@ -1066,7 +1068,7 @@ account.
 
 ---
 
-### FEATURE-16 · Silence Gradient (`sable silence-gradient`)
+### FEATURE-16 · Silence Gradient (`sable silence-gradient`) — **Status: COMPLETE (2026-04-03)**
 
 **Problem:** Community decay is currently only detectable after it happens. CHURN-1/CHURN-2
 (below) depend on Platform shipping a decay alerting pipeline. Silence Gradient detects
@@ -1180,7 +1182,7 @@ data, unblocking CHURN-1 before Platform ships decay alerting. Slopper still doe
 decay scoring as a platform concept — Silence Gradient is a Slopper-internal early warning
 signal that happens to produce a compatible input format.
 
-### CHURN-1 · Intervention playbook generation
+### CHURN-1 · Intervention playbook generation — **Status: COMPLETE (2026-04-03)**
 
 Given a list of at-risk members (delivered from Platform's decay alert pipeline), generate
 a targeted re-engagement playbook per member or per cohort. Each playbook entry maps a
@@ -1232,7 +1234,7 @@ prints the member count, estimated calls, and approximate spend without making a
 spend is observable and budget-gated. Profile markdown for the org's account is injected
 for tone/voice consistency.
 
-### CHURN-2 · Calendar integration for at-risk re-engagement
+### CHURN-2 · Calendar integration for at-risk re-engagement — **Status: COMPLETE (2026-04-03)**
 
 Extend `sable calendar` to accept churn intervention data and prioritize content that
 re-engages at-risk members within the generated posting schedule.

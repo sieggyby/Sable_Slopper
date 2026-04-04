@@ -22,6 +22,12 @@ High-volume crypto Twitter content production toolkit. CLI-driven, Claude-powere
 | `sable onboard` | Onboard a new client org via prospect YAML (6-step pipeline) |
 | `sable playbook` | Generate Discord engagement playbook (delegates to Cult Grader) |
 | `sable tracking` | Sync SableTracking data into sable.db |
+| `sable lexicon` | Community vocabulary extraction + lexicon management |
+| `sable narrative` | Narrative velocity: keyword spread scoring for narrative arcs |
+| `sable style-delta` | Posting style gap analysis: managed account vs top-performing watchlist |
+| `sable silence-gradient` | Pre-churn cadence signals: volume drop, engagement drop, format regression |
+| `sable churn` | Churn intervention playbook generation for at-risk community members |
+| `sable serve` | Read-only API server (FastAPI): pulse, meta, vault endpoints with Bearer auth |
 | `sable org` / `sable entity` / `sable job` / `sable db` / `sable resume` | Platform management: orgs, entities, jobs, sable.db migrations |
 
 ## Quick Start

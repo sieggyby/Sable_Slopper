@@ -1,12 +1,12 @@
 # Sable Slopper — Schema Inventory
 
-> Describes every defined schema in the codebase. Last updated 2026-03-26.
+> Describes every defined schema in the codebase. Last updated 2026-04-03.
 
 ---
 
 ## Overview
 
-The codebase has **three SQLite databases**, **26 Python data models** (dataclasses + Pydantic), **one YAML config schema**, **one YAML watchlist schema**, **one markdown frontmatter schema** (vault notes), and **one YAML character profile schema**.
+The codebase has **three SQLite databases**, **31 Python data models** (dataclasses + Pydantic), **one YAML config schema**, **one YAML watchlist schema**, **one markdown frontmatter schema** (vault notes), and **one YAML character profile schema**.
 
 No formal ORM, no Pydantic-backed database layer. `pulse.db` and `meta.db` use hand-written SQL + dataclasses with no migration runner. `sable.db` uses `sable db migrate` (`sable/db/migrations/001_initial.sql`, extended by 002–006) via `ensure_schema()`. SableTracking's `_apply_pending_migrations()` also applies these migrations on sync startup.
 
@@ -86,6 +86,8 @@ Watchlist tweet cache and format-trend intelligence.
 | `format_baselines` | 7d/30d aggregate lift per format bucket per org |
 | `topic_signals` | Top terms extracted from high-lift tweets per scan |
 | `schema_version` | Single-row version tracker |
+| `lexicon_terms` | Org-scoped glossary of community-specific terminology with LSR scores |
+| `author_cadence` | Per-author silence gradient signals (volume/engagement/format regression) |
 
 #### scanned_tweets (the big one)
 ```sql
@@ -148,6 +150,36 @@ mention_count, unique_authors INTEGER,
 avg_lift REAL,
 prev_scan_mentions INTEGER,
 acceleration REAL DEFAULT 0.0
+```
+
+#### lexicon_terms
+```sql
+org TEXT NOT NULL,
+term TEXT NOT NULL,
+category TEXT,
+gloss TEXT,
+lsr REAL,
+updated_at TEXT,
+UNIQUE(org, term)
+```
+Index: `idx_lexicon_terms_org ON lexicon_terms(org)`
+
+#### author_cadence
+```sql
+author_handle TEXT NOT NULL,
+org TEXT NOT NULL,
+computed_at TEXT NOT NULL,
+posts_recent_half INTEGER,
+posts_prior_half INTEGER,
+median_lift_recent REAL,
+median_lift_prior REAL,
+vol_drop REAL,
+eng_drop REAL,
+fmt_reg REAL,
+silence_gradient REAL,
+insufficient_data TEXT,
+window_days INTEGER,
+UNIQUE(author_handle, org)
 ```
 
 ---
@@ -568,6 +600,7 @@ topic_suggestion: str           # Claude-suggested topic for this slot
 action: str                     # "post_ready" | "create"
 vault_note_id: Optional[str]    # set when action == "post_ready"
 rationale: str                  # Claude's reasoning for this slot
+churn_targets: list[str]        # handles of at-risk members this content could re-engage (default [])
 ```
 
 **`CalendarDay`**
@@ -587,6 +620,98 @@ vault_items_scheduled: int      # count of "post_ready" slots
 creation_tasks: int             # count of "create" slots
 generated_at: str               # ISO datetime
 ```
+
+---
+
+### Amplifiers — `sable/pulse/meta/amplifiers.py`
+
+#### AmplifierRow (dataclass)
+```
+author: str
+rt_v: float                     # reposts / days_active
+rpr: float                      # replies / total_engagement
+qtr: float                      # quotes / total_tweets
+amp_score: float                # weighted composite of percentile-ranked signals
+rank: int
+```
+
+Default weights: `W_RT_V = 0.40`, `W_RPR = 0.35`, `W_QTR = 0.25` (overridable via `config pulse_meta.amplifier_weights`).
+
+---
+
+### Lexicon — `sable/lexicon/scanner.py`
+
+No Python model class — `scan_lexicon()` writes directly to the `lexicon_terms` table.
+
+**Constants:**
+- `MIN_AUTHORS = 10` — minimum unique authors required to produce a lexicon scan
+- `MIN_TWEETS = 50` — minimum tweets required to produce a lexicon scan
+
+---
+
+### Narrative — `sable/narrative/models.py`
+
+#### NarrativeBeat (dataclass)
+```
+name: str
+keywords: list[str]
+started_at: str                 # ISO date, optional (default "")
+```
+
+#### UptakeResult (dataclass)
+```
+beat_name: str
+unique_authors: int
+total_authors: int
+uptake_score: float             # unique_authors / total_authors
+uptake_velocity: float          # unique_authors / days_since_start (0 if no start date)
+matching_tweets: int
+keywords_matched: list[str]     # default []
+```
+
+---
+
+### Style — `sable/style/`
+
+No dataclasses. Functions return plain dicts.
+
+**`sable/style/fingerprint.py`** — `fingerprint_managed()` and `fingerprint_watchlist()` return `dict[str, float]` mapping coarse bucket to share. Uses `_COARSE_MAP` to collapse fine-grained format buckets into `text`, `clip`, `image`, `other`. Constant: `MIN_POSTS = 10`.
+
+**`sable/style/delta.py`** — `compute_delta()` returns `dict[str, float] | None` (per-bucket gap: watchlist share minus managed share).
+
+---
+
+### Cadence — `sable/cadence/`
+
+No dataclasses. `compute_silence_gradient()` returns `list[dict]` sorted by `silence_gradient` descending.
+
+**`sable/cadence/signals.py`** — Individual signal functions:
+- `compute_volume_drop(recent, prior)` → `(score, insufficient)`
+- `compute_engagement_drop(median_recent, median_prior, recent_count, prior_count)` → `(score, insufficient)`
+- `compute_format_regression(format_counts)` → `(score, insufficient)`
+
+Constant: `MIN_ROWS_PER_HALF = 5`
+
+**`sable/cadence/combine.py`** — Combines signals with weighted average and proportional redistribution when signals are insufficient.
+
+Constants: `W_VOL = 0.40`, `W_ENG = 0.35`, `W_FMT = 0.25`, `MIN_WINDOW_DAYS = 6`
+
+---
+
+### Churn — `sable/churn/interventions.py`
+
+#### InterventionResult (dataclass)
+```
+handle: str
+interest_tags: list[str]        # default []
+role_recommendation: str        # default ""
+spotlight_suggestion: str       # default ""
+engagement_prompts: list[str]   # default []
+urgency: str                    # "medium" (default) | "high" | "low"
+error: str | None               # None unless Claude call failed
+```
+
+Constant: `SOFT_CAP = 50` — max at-risk members per call (override with `--force`).
 
 ---
 

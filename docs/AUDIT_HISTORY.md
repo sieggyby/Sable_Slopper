@@ -195,6 +195,8 @@ Schema v5 → v6. Write path owned by Cult Grader's `platform_sync.py`.
 | 2026-04-02 (AUDIT-1–8 complete) | 620 | 0 | 0 |
 | 2026-04-02 (Codex hardening) | 625 | 0 | 0 |
 | 2026-04-02 (SocialData hardening) | 634 | 0 | 0 |
+| 2026-04-03 (Community Intelligence) | 798 | 0 | 0 |
+| 2026-04-03 (Phase 2 sable serve) | 828 | 0 | 0 |
 
 ---
 
@@ -309,6 +311,12 @@ Claude calls, deliver signal the operator can act on immediately.
 | FEATURE-16 Silence Gradient | Standalone (feeds CHURN) | 16–20 |
 
 Full specs and implementation plans in `TODO.md` § "Community Intelligence Features."
+
+### Community Intelligence Features (2026-04-03)
+
+10 features shipped in one session: Amplifiers, Lexicon, Voice Check, Narrative Velocity,
+Style Delta, Silence Gradient, Bridge Nodes, Community Language, Churn Playbook, Calendar
+Churn Integration. 164 new tests. Adversarial QA gating per phase.
 
 ---
 

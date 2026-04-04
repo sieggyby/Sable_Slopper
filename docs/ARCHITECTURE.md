@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Sable Slopper is a CLI toolkit with 16 subsystems sharing a common config layer, three SQLite databases, and three external API integrations.
+Sable Slopper is a CLI toolkit with 22 subsystems sharing a common config layer, three SQLite databases, and three external API integrations.
 
 ---
 
@@ -42,6 +42,40 @@ sable/
 ├── face/                ← face swap via Replicate
 ├── character_explainer/ ← character explainer videos (TTS + brainrot)
 ├── wojak/               ← wojak meme generation
+│
+├── lexicon/             ← community lexicon tracking
+│   ├── scanner.py       ← term discovery + frequency analysis
+│   ├── store.py         ← lexicon persistence layer
+│   ├── writer.py        ← lexicon output rendering
+│   └── cli.py           ← sable lexicon group
+│
+├── narrative/           ← narrative velocity scoring
+│   ├── tracker.py       ← narrative arc tracking
+│   ├── models.py        ← narrative data models
+│   └── cli.py           ← sable narrative group
+│
+├── style/               ← style gap analysis
+│   ├── fingerprint.py   ← style fingerprint extraction
+│   ├── delta.py         ← style delta computation
+│   ├── report.py        ← style gap report rendering
+│   └── cli.py           ← sable style group
+│
+├── cadence/             ← silence gradient / pre-churn signals
+│   ├── signals.py       ← cadence signal detection
+│   ├── combine.py       ← signal aggregation
+│   ├── store.py         ← cadence persistence layer
+│   └── cli.py           ← sable cadence group
+│
+├── churn/               ← churn intervention playbooks
+│   ├── interventions.py ← intervention strategy engine
+│   ├── prompts.py       ← intervention prompt templates
+│   └── cli.py           ← sable churn group
+│
+├── serve/               ← FastAPI backend (Phase 2)
+│   ├── app.py           ← app factory
+│   ├── auth.py          ← Bearer token auth
+│   ├── deps.py          ← DB connection helpers
+│   └── routes/          ← vault, pulse, meta endpoints
 │
 ├── pulse/               ← performance tracking + attribution
 │   ├── cli.py           ← sable pulse group (track, report, recommend, export, trends, account, attribution, link, meta)
@@ -109,7 +143,7 @@ Three SQLite databases stored under `$SABLE_HOME/` (default `~/.sable/`). Note: 
 | File | Contains | Written by |
 |------|---------|-----------|
 | `pulse.db` | Tweet performance data, posting log, roster accounts | `sable pulse track`, `sable pulse log`, `sable roster` |
-| `meta.db` | Watchlist tweet cache, per-author baselines, incremental scan cursors, format baseline history | `sable pulse meta scan` |
+| `meta.db` | Watchlist tweet cache, per-author baselines, incremental scan cursors, format baseline history, lexicon_terms, author_cadence | `sable pulse meta scan`, `sable lexicon`, `sable cadence` |
 | `sable.db` | Orgs, entities, handles, tags, merge candidates, jobs, cost events, artifacts, sync_runs, diagnostic_runs, content_items, discord_pulse_runs | `sable/platform/` modules; SableTracking `app/platform_sync.py` (external) |
 
 `pulse.db` and `meta.db` do not share tables; `pulse meta` reads roster data from `pulse.db` for org membership but writes only to `meta.db`. `sable.db` is entirely separate and written only through `sable/platform/`. External tools (SableTracking's `app/platform_sync.py`) write via the same `sable/platform/` helpers — they never write raw SQL.
@@ -120,7 +154,7 @@ Three SQLite databases stored under `$SABLE_HOME/` (default `~/.sable/`). Note: 
 
 | API | Used by | Key | Notes |
 |-----|--------|-----|-------|
-| Anthropic (Claude) | `clip`, `meme`, `pulse recommend`, `pulse meta`, `vault suggest`, `vault search`, `character-explainer`, `calendar` | `ANTHROPIC_API_KEY` | Core intelligence layer |
+| Anthropic (Claude) | `clip`, `meme`, `pulse recommend`, `pulse meta`, `vault suggest`, `vault search`, `character-explainer`, `calendar`, `advise`, `write`, `score`, `diagnose`, `churn` | `ANTHROPIC_API_KEY` | Core intelligence layer |
 | SocialData | `pulse track`, `pulse trends`, `pulse meta scan` | `SOCIALDATA_API_KEY` | Twitter/X data provider; $0.002/request |
 | Replicate | `face` | `REPLICATE_API_TOKEN` | Hosted face-swap model inference |
 | ElevenLabs | `character-explainer` (elevenlabs backend) | `ELEVENLABS_API_KEY` | Hosted TTS; voice ID set per-character in profile.yaml |
@@ -238,8 +272,8 @@ DB access for pulse/meta is direct via `sable/pulse/db.py` and `sable/pulse/meta
 
 ---
 
-## Phase 2+ Additions (Not Yet Built)
+## Phase 2+ Additions
 
-- `sable/serve/` — FastAPI app wrapping vault + pulse functions (see `docs/ROADMAP.md`)
+- `sable/serve/` — FastAPI read-only API (Phase 2, complete). Bearer token auth, 7 endpoints. See `docs/COMMANDS.md` § serve.
 - `sable/vault/permissions.py` — RBAC implementation (currently a stub; see `docs/ROLES.md`)
 - Postgres backend replacing local SQLite (Phase 3)

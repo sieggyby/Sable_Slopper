@@ -29,12 +29,13 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 ## Current Phase
 
 **Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, and more.
+All community intelligence features are shipped (FEATURE-10 through FEATURE-16, CHURN-1, CHURN-2).
 
-**Phase 2 (local web UI) is planned but not started.**
-- Entry point: `sable serve` → FastAPI app in `sable/serve/`
-- Cloudflare Tunnel, role-based access (see `docs/ROLES.md`)
-- `sable/vault/permissions.py` is a stub waiting for Phase 2
-- Full plan in `docs/ROADMAP.md` and `TODO.md`
+**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Bearer token auth, 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. 30 new tests in `tests/serve/`. Test count: 828.
+
+**Remaining Phase 2 work:**
+- Cloudflare Tunnel deployment (see `docs/ROADMAP.md`)
+- `sable/vault/permissions.py` — RBAC implementation (currently a stub; see `docs/ROLES.md`)
 
 Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
 
@@ -50,7 +51,8 @@ Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
 
 - **`pulse.db` and `meta.db` schemas are embedded Python strings, not migration files.**
   Each module (`sable/pulse/db.py`, `sable/pulse/meta/db.py`) holds a `_SCHEMA` string
-  applied via `CREATE TABLE IF NOT EXISTS` on every `migrate()` call. There are no versioned
+  applied via `CREATE TABLE IF NOT EXISTS` on every `migrate()` call. `meta.db`'s `_SCHEMA`
+  now also includes `lexicon_terms` and `author_cadence` tables. There are no versioned
   migration files for these two databases — `sable db migrate` only covers `sable.db`.
   Schema changes to pulse/meta require editing the `_SCHEMA` string directly.
 
@@ -64,6 +66,9 @@ Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
 - **`sable.db` is the platform cross-tool store.** Entities, tags, merge candidates, jobs,
   artifacts, cost events, diagnostic runs, and sync runs live here. `sable/platform/`
   modules are the only writers. All CLI handlers catch `SableError` and call `sys.exit(1)`.
+  `diagnostic_runs` now has language columns (`language_arc_phase`,
+  `emergent_cultural_terms_json`, `mantra_candidates_json`) queried by `--community-voice`,
+  but these columns require a future migration to exist in the table.
 
 - **Vault notes are raw dicts.** Vault notes are Obsidian-compatible markdown files.
   Frontmatter is read as raw dicts — no typed `ContentItem` class wraps them.
@@ -77,6 +82,13 @@ Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
 
 - **SocialData is the Twitter data provider** (`$0.002/request`). Not the Twitter API.
   Cost guardrail: soft warning at $3/run, monthly ceiling ~$200.
+
+- **Five community intelligence modules** added for FEATURE-10 through FEATURE-16:
+  - `sable/lexicon/` — community vocabulary extraction (reads meta.db)
+  - `sable/narrative/` — narrative arc keyword tracking (reads meta.db)
+  - `sable/style/` — posting style gap analysis (reads pulse.db + meta.db)
+  - `sable/cadence/` — pre-churn silence signals (reads meta.db, writes author_cadence)
+  - `sable/churn/` — intervention playbook generation (Claude calls, reads sable.db for budget)
 
 ---
 

@@ -214,7 +214,7 @@ sable wojak scene render SPEC_YAML --account HANDLE [--output PATH]
 Claude-generated posting schedule with vault inventory + trend alignment.
 
 ```
-sable calendar HANDLE [--org ORG] [--days N] [--formats-target N] [--save]
+sable calendar HANDLE [--org ORG] [--days N] [--formats-target N] [--save] [--churn-input PATH] [--prioritize-churn]
 ```
 
 | Flag | Default | Description |
@@ -223,6 +223,8 @@ sable calendar HANDLE [--org ORG] [--days N] [--formats-target N] [--save]
 | `--days` | 7 | Planning horizon in days |
 | `--formats-target` | 4 | Unique format types to target |
 | `--save` | — | Save to `~/.sable/playbooks/calendar_{handle}_{date}.md` |
+| `--churn-input PATH` | — | Path to at-risk members JSON for re-engagement slot injection |
+| `--prioritize-churn` | — | Remove 30% cap on churn-annotated slots |
 
 ---
 
@@ -258,6 +260,10 @@ sable write HANDLE [options]
 | `--variants N` | 3 | Number of variants to generate |
 | `--org ORG` | roster org | Org context for trend data |
 | `--score` | — | Score each variant's hook against recent high-performing patterns |
+| `--lexicon` | — | Inject community vocabulary from lexicon into prompt |
+| `--voice-check` | — | Use full voice corpus for richer draft scoring (implies `--score`) |
+| `--watchlist-wire` | — | Inject top niche topics from meta.db into prompt |
+| `--no-anatomy` | — | Skip viral anatomy pattern injection |
 
 ---
 
@@ -282,7 +288,7 @@ sable score HANDLE --text "draft tweet" [--format BUCKET] [--org ORG]
 Multi-stage strategic brief: profile → pulse → vault → recommendations.
 
 ```
-sable advise HANDLE [--cheap] [--force] [--dry-run] [--export]
+sable advise HANDLE [--cheap] [--force] [--dry-run] [--export] [--bridge-aware] [--community-voice] [--churn-input PATH]
 ```
 
 | Flag | Description |
@@ -291,6 +297,9 @@ sable advise HANDLE [--cheap] [--force] [--dry-run] [--export]
 | `--force` | Force regeneration even if cached |
 | `--dry-run` | Estimate cost without generating |
 | `--export` | Export brief to `./output/advise_<org>_<YYYY-MM-DD>.md` |
+| `--bridge-aware` | Inject bridge node activity into the brief |
+| `--community-voice` | Inject CultGrader community language data into the brief |
+| `--churn-input PATH` | Path to at-risk members JSON to fold into the brief |
 
 ---
 
@@ -333,6 +342,41 @@ Sync SableTracking data into sable.db. Delegates to SableTracking's `platform_sy
 ```
 sable tracking sync ORG_ID
 ```
+
+---
+
+## serve
+
+Read-only API server exposing pulse, meta, and vault data over HTTP. No Claude calls, no cost.
+
+```
+sable serve [--host HOST] [--port PORT] [--reload]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `127.0.0.1` | Bind address |
+| `--port` | `8000` | Bind port |
+| `--reload` | — | Auto-reload on code changes (dev mode) |
+
+Optional dependency: `pip install -e ".[serve]"`
+
+### Authentication
+
+All `/api/` endpoints require a Bearer token configured via `serve.token` in `config.yaml`. The `/health` endpoint is unauthenticated.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check (no auth) |
+| GET | `/api/pulse/performance/{org}` | Pulse performance summary for org |
+| GET | `/api/pulse/posting-log/{org}` | Posting log for org |
+| GET | `/api/meta/topics/{org}` | Topic signals for org |
+| GET | `/api/meta/baselines/{org}` | Format baselines for org |
+| GET | `/api/meta/watchlist/{org}` | Watchlist entries for org |
+| GET | `/api/vault/inventory/{org}` | Vault inventory for org |
+| GET | `/api/vault/search/{org}?q=...` | Vault search (query param `q`) |
 
 ---
 
@@ -404,3 +448,107 @@ Resume a paused or failed job from its last checkpoint.
 ```
 sable resume JOB_ID [--force]
 ```
+
+---
+
+## lexicon
+
+Community vocabulary extraction and management.
+
+```
+sable lexicon scan --org ORG [--days N] [--top N] [--no-interpret] [--dry-run]
+sable lexicon list --org ORG
+sable lexicon add --org ORG --term TERM [--gloss GLOSS]
+sable lexicon remove TERM --org ORG
+```
+
+### lexicon scan flags
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--org` | required | Org to scan |
+| `--days` | 14 | Look-back window in days |
+| `--top` | 20 | Max terms to extract |
+| `--no-interpret` | — | Skip Claude classification (extraction only) |
+| `--dry-run` | — | Show corpus stats without scanning or writing |
+
+### lexicon add flags
+| Flag | Description |
+|------|-------------|
+| `--org` | Org to add to (required) |
+| `--term` | Term to add (required) |
+| `--gloss` | Definition/explanation |
+
+---
+
+## narrative
+
+Narrative velocity — keyword spread scoring for narrative arcs.
+
+```
+sable narrative score --org ORG [--beats PATH] [--days N] [--output PATH]
+sable narrative beats edit --org ORG
+```
+
+### narrative score flags
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--org` | required | Org to score |
+| `--beats` | `~/.sable/{org}/narrative_beats.yaml` | Path to narrative_beats.yaml |
+| `--days` | 14 | Look-back window in days |
+| `--output` | — | Write JSON report to file |
+
+### narrative beats edit
+Opens the narrative beats YAML in `$EDITOR`. Creates a template file if none exists.
+
+---
+
+## style-delta
+
+Quantitative posting style gap analysis vs watchlist top performers.
+
+```
+sable style-delta --handle HANDLE --org ORG [--output PATH]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--handle` | Managed account handle (required) |
+| `--org` | Org for watchlist comparison (required) |
+| `--output` | Write markdown report to file |
+
+---
+
+## silence-gradient
+
+Pre-decay cadence signals from watchlist data. Detects community members going quiet before full churn.
+
+```
+sable silence-gradient --org ORG [--top N] [--window N] [--include-insufficient] [--output PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--org` | required | Org to analyze |
+| `--top` | 20 | Show top N authors |
+| `--window` | 30 | Window in days (must be even, >= 6) |
+| `--include-insufficient` | — | Include authors with some insufficient signals |
+| `--output` | — | Write JSON report to file |
+
+---
+
+## churn
+
+Churn detection and intervention tools.
+
+```
+sable churn intervene --org ORG --input PATH [--output PATH] [--force] [--dry-run]
+```
+
+### churn intervene flags
+| Flag | Description |
+|------|-------------|
+| `--org` | Org ID (required) |
+| `--input` | Path to at-risk members JSON file (required) |
+| `--output` | Write playbook JSON to file |
+| `--force` | Allow >50 members (bypasses soft cap) |
+| `--dry-run` | Estimate cost without generating |

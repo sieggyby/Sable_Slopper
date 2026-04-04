@@ -134,6 +134,87 @@ Per-org caps can override `max_ai_usd_per_org_per_week` via `orgs.config_json` i
 
 ---
 
+## `pulse_meta.amplifier_weights` Block
+
+Nested under `pulse_meta:` → `amplifier_weights:`. Controls how the three amplifier signals are weighted when computing the composite `amp_score` in `sable pulse meta amplifiers`.
+
+```yaml
+pulse_meta:
+  amplifier_weights:
+    rt_v: 0.40    # repost velocity (reposts / days_active)
+    rpr: 0.35     # reply proportion (replies / total_engagement)
+    qtr: 0.25     # quote-tweet ratio (quotes / total_tweets)
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `rt_v` | float | `0.40` | Weight for repost velocity signal |
+| `rpr` | float | `0.35` | Weight for reply proportion signal |
+| `qtr` | float | `0.25` | Weight for quote-tweet ratio signal |
+
+Weights do not need to sum to 1.0 but are used directly in the weighted sum, so keeping them normalized is recommended. Each signal is percentile-ranked within the org's watchlist before weighting.
+
+---
+
+## `serve` Block
+
+All keys live under `serve:` in `config.yaml`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `token` | string | — | Bearer token required for all `/api/` endpoints. Set before running `sable serve` |
+
+```yaml
+serve:
+  token: "your-secret-token-here"
+```
+
+---
+
+## Voice Check Keys (top-level)
+
+These are top-level keys in `config.yaml` (not nested under any block). They control how much context the `sable write` voice scorer loads when assembling a voice corpus for tone matching.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `voice_check_max_notes` | int | `10` | Maximum number of recent vault notes (posted by the account) to include in the voice corpus |
+| `voice_check_max_tokens_per_note` | int | `500` | Approximate token cap per individual vault note (enforced as `value * 4` characters) |
+| `voice_check_max_total_tokens` | int | `4000` | Approximate token cap for the entire assembled voice corpus (enforced as `value * 4` characters) |
+
+```yaml
+voice_check_max_notes: 10
+voice_check_max_tokens_per_note: 500
+voice_check_max_total_tokens: 4000
+```
+
+Raise these if voice scoring is missing nuance from longer-form content. Lower them to reduce prompt size and API cost per `sable write` call.
+
+---
+
+## `serve` — Example in Full Config
+
+```yaml
+serve:
+  token: "your-secret-token-here"
+```
+
+---
+
+## Cadence / Silence Gradient Constants
+
+The silence gradient scorer (`sable/cadence/combine.py`) uses hardcoded constants — these are **not configurable** via `config.yaml` today:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `W_VOL` | `0.40` | Weight for volume-drop signal |
+| `W_ENG` | `0.35` | Weight for engagement-drop signal |
+| `W_FMT` | `0.25` | Weight for format-regression signal |
+| `MIN_WINDOW_DAYS` | `6` | Minimum `window_days` parameter (must be even, split into two halves) |
+
+If a signal has insufficient data for a given author, its weight is redistributed proportionally across the remaining signals.
+
+---
+
 ## Example Annotated config.yaml
 
 ```yaml
@@ -180,4 +261,15 @@ pulse_meta:
     quotes: 25.0
     bookmarks: 10.0
     video_views: 6.0
+
+  # Amplifier weights (override defaults)
+  amplifier_weights:
+    rt_v: 0.40
+    rpr: 0.35
+    qtr: 0.25
+
+# Voice check caps
+voice_check_max_notes: 10
+voice_check_max_tokens_per_note: 500
+voice_check_max_total_tokens: 4000
 ```
