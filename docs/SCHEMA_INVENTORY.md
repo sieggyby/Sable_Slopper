@@ -90,6 +90,7 @@ Watchlist tweet cache and format-trend intelligence.
 | `schema_version` | Single-row version tracker |
 | `lexicon_terms` | Org-scoped glossary of community-specific terminology with LSR scores |
 | `author_cadence` | Per-author silence gradient signals (volume/engagement/format regression) |
+| `scan_checkpoints` | Per-author completion state within a scan run (resume support) |
 
 #### scanned_tweets (the big one)
 ```sql
@@ -153,6 +154,15 @@ avg_lift REAL,
 prev_scan_mentions INTEGER,
 acceleration REAL DEFAULT 0.0
 ```
+
+#### scan_checkpoints
+```sql
+scan_id INTEGER NOT NULL,
+author_handle TEXT NOT NULL,
+completed_at TEXT,
+UNIQUE(scan_id, author_handle)
+```
+Per-author completion tracking within a scan run. Used by `--resume SCAN_ID` to skip already-processed authors.
 
 #### lexicon_terms
 ```sql

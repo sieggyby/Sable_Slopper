@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 import anthropic
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,9 @@ from sable.roster.models import Account
 from sable.roster.profiles import load_profiles, format_profiles_for_prompt
 from sable.shared.pricing import compute_cost as _compute_cost_pricing
 
+_RETRYABLE_STATUS = {429, 500, 502, 503}
+_MAX_RETRIES = 3
+_INITIAL_BACKOFF = 1.0
 
 _client: Optional[anthropic.Anthropic] = None
 
@@ -29,7 +34,11 @@ def get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
         api_key = cfg.require_key("anthropic_api_key")
-        _client = anthropic.Anthropic(api_key=api_key)
+        _client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(300.0, connect=10.0),
+            max_retries=0,  # disable SDK retry; _call_with_retry handles retries
+        )
     return _client
 
 
@@ -94,6 +103,35 @@ def _compute_cost(usage, model: str) -> float:
     return _compute_cost_pricing(input_tokens, output_tokens, model)
 
 
+def _call_with_retry(client: anthropic.Anthropic, kwargs: dict):
+    """Call client.messages.create with retry on transient errors."""
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return client.messages.create(**kwargs)
+        except anthropic.APIStatusError as e:
+            if e.status_code in _RETRYABLE_STATUS:
+                last_exc = e
+                delay = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.warning(
+                    "Anthropic API %d (attempt %d/%d), retrying in %.1fs",
+                    e.status_code, attempt + 1, _MAX_RETRIES, delay,
+                )
+                time.sleep(delay)
+                continue
+            raise
+        except anthropic.APIConnectionError as e:
+            last_exc = e
+            delay = _INITIAL_BACKOFF * (2 ** attempt)
+            logger.warning(
+                "Anthropic connection error (attempt %d/%d), retrying in %.1fs",
+                attempt + 1, _MAX_RETRIES, delay,
+            )
+            time.sleep(delay)
+            continue
+    raise last_exc  # type: ignore[misc]
+
+
 def call_claude(
     prompt: str,
     system: str = "",
@@ -150,7 +188,7 @@ def call_claude_with_usage(
         budget_org_id = org_id
 
     try:
-        response = client.messages.create(**kwargs)
+        response = _call_with_retry(client, kwargs)
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "input_tokens", 0) or 0
         output_tokens = getattr(usage, "output_tokens", 0) or 0

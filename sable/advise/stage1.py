@@ -15,6 +15,49 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# SS-20: TrackingMetadata contract validation
+try:
+    from sable_platform.contracts.tracking import TrackingMetadata
+    _HAS_TRACKING_CONTRACT = True
+except ImportError:
+    _HAS_TRACKING_CONTRACT = False
+
+_KNOWN_SCHEMA_VERSIONS = {1}
+
+
+class _MetaFallback:
+    """Attribute-access wrapper over a raw metadata dict."""
+
+    def __init__(self, data: dict) -> None:
+        self._data = data
+
+    def __getattr__(self, name: str) -> Any:
+        return self._data.get(name)
+
+
+def _validate_tracking_meta(meta: dict) -> Any:
+    """Validate metadata_json against TrackingMetadata contract.
+
+    Returns a validated TrackingMetadata instance (typed field access).
+    Falls back to a plain namespace if sable_platform is not installed.
+    """
+    if not _HAS_TRACKING_CONTRACT:
+        return _MetaFallback(meta)
+
+    try:
+        validated = TrackingMetadata.model_validate(meta)
+        if validated.schema_version not in _KNOWN_SCHEMA_VERSIONS:
+            logger.warning(
+                "TrackingMetadata schema_version %d is unknown (known: %s) — "
+                "using anyway with forward compatibility",
+                validated.schema_version, _KNOWN_SCHEMA_VERSIONS,
+            )
+        return validated
+    except Exception as e:
+        logger.warning("TrackingMetadata validation failed, using raw dict: %s", e)
+        return _MetaFallback(meta)
+
+
 def _open_db_readonly(path: Path) -> Optional[sqlite3.Connection]:
     """Open a SQLite database read-only. Returns None if unavailable."""
     try:
@@ -278,12 +321,19 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                 logger.warning("stage1 tracker metadata_json parse failed (row skipped): %s", e, exc_info=True)
                 meta = {}
             if meta.get("source_tool") == "sable_tracking":
+                # Validate against TrackingMetadata contract (SS-20)
+                validated = _validate_tracking_meta(meta)
                 items.append({
                     "content_type": row["content_type"] or "unknown",
                     "body": row["body"] or "",
                     "created_at": row["created_at"] or "",
                     "source_time": row["source_time"] or "",
                     "entity_id": row["entity_id"],
+                    "format_type": validated.format_type,
+                    "intent_type": validated.intent_type,
+                    "quality_score": validated.quality_score,
+                    "engagement_score": validated.engagement_score,
+                    "is_reusable_template": validated.is_reusable_template,
                 })
         result["content_items"] = items
     except Exception as e:

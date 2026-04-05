@@ -62,7 +62,7 @@ def generate_explainer(
         original_script_text = script.full_text
         tts_text = apply_phonetic_corrections(original_script_text, corrections) if corrections else original_script_text
 
-        tts_result = tts_engine.synthesize(tts_text, character, str(tmp_dir), original_text=original_script_text)
+        tts_result = tts_engine.synthesize(tts_text, character, str(tmp_dir), original_text=original_script_text, org_id=org_id)
 
         # Resolve background video now that we know audio duration and have a tmp dir
         bg_video = _resolve_bg_video(config.background_video_path, tts_result.duration_s, tmp_dir)

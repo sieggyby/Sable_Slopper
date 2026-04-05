@@ -118,11 +118,11 @@ def generate_advise(
         cap = float(cfg.get("platform", {}).get("cost_caps", {}).get("max_ai_usd_per_strategy_brief", 0.20))
         print(f"Estimated cost: ~${cap:.2f}. No artifact generated.")
         job_id = create_job(conn, org_id, "advise", config={"handle": normalized_handle})
-        conn.execute(
-            "UPDATE jobs SET status='cancelled', completed_at=datetime('now') WHERE job_id=?",
-            (job_id,)
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET status='cancelled', completed_at=datetime('now') WHERE job_id=?",
+                (job_id,)
+            )
         return ""
 
     # Check budget
@@ -158,11 +158,11 @@ def generate_advise(
     except Exception as e:
         _err = redact_error(str(e))
         fail_step(conn, s1_step, _err)
-        conn.execute(
-            "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (_err, job_id)
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
+                (_err, job_id)
+            )
         raise
 
     # Stage 2: AI synthesis
@@ -231,15 +231,23 @@ def generate_advise(
                 system_prompt, summary_text, model=model, max_tokens=1500, org_id=org_id
             )
 
+        if cost_usd > 0 and org_id:
+            try:
+                log_cost(conn, org_id, "slopper_advise", cost_usd, model=model,
+                         input_tokens=input_tokens, output_tokens=output_tokens)
+            except Exception as _lc_err:
+                import logging as _logging
+                _logging.getLogger(__name__).warning("Failed to log advise cost: %s", _lc_err)
+
         complete_step(conn, s2_step)
     except Exception as e:
         _err = redact_error(str(e))
         fail_step(conn, s2_step, _err)
-        conn.execute(
-            "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (_err, job_id)
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
+                (_err, job_id)
+            )
         raise
 
     # --- Deterministic data caveats block ---
@@ -307,16 +315,16 @@ def generate_advise(
             "input_refs_json": json.dumps({"handle": normalized_handle}),
             "cost_usd": cost_usd,
         })
-        conn.execute(
-            """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale, degraded)
-               VALUES (?, ?, 'twitter_strategy_brief', ?, ?, ?, ?)""",
-            (org_id, job_id, str(out_path), meta, int(stale), int(degraded))
-        )
-        conn.execute(
-            "UPDATE jobs SET status='completed', completed_at=datetime('now') WHERE job_id=?",
-            (job_id,)
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale, degraded)
+                   VALUES (?, ?, 'twitter_strategy_brief', ?, ?, ?, ?)""",
+                (org_id, job_id, str(out_path), meta, int(stale), int(degraded))
+            )
+            conn.execute(
+                "UPDATE jobs SET status='completed', completed_at=datetime('now') WHERE job_id=?",
+                (job_id,)
+            )
     except Exception:
         # Restore prior state
         if prior_existed:

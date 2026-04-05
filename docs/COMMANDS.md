@@ -2,6 +2,13 @@
 
 Full reference for every `sable` command and flag. All commands run via `sable <command> [options]`.
 
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--json-log` | Emit structured JSON log lines instead of human-readable format. Hidden flag — intended for machine consumption (log aggregators, production monitoring). |
+| `--version` | Show version and exit |
+
 ---
 
 ## roster
@@ -392,7 +399,21 @@ Optional dependency: `pip install -e ".[serve]"`
 
 ### Authentication
 
-All `/api/` endpoints require a Bearer token configured via `serve.token` in `config.yaml`. The `/health` endpoint is unauthenticated.
+All `/api/` endpoints require a Bearer token. The `/health` endpoint is unauthenticated.
+
+Tokens are configured in `config.yaml` under `serve:`. Named tokens (preferred) provide an audit trail — the client name is logged on every request:
+
+```yaml
+serve:
+  tokens:
+    sableweb: "token-for-web"
+    debug: "token-for-dev"
+  token: "legacy-fallback"   # checked only if no named token matches
+```
+
+### Rate Limiting
+
+All `/api/` endpoints are rate-limited (default 60 RPM, configurable via `serve.rate_limit_rpm`). Returns 429 + `Retry-After` header when exceeded. `/health` is exempt.
 
 ### Endpoints
 

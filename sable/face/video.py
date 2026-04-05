@@ -1,6 +1,7 @@
 """Frame extraction, parallel face swap, video reassembly."""
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -12,6 +13,14 @@ from sable.shared.ffmpeg import run as ffmpeg_run, require_ffmpeg, get_duration
 from sable.face.swapper import swap_image
 from sable.face.optimize import filter_frames_with_faces, dedup_frames
 from sable.face.safety import log_swap
+
+logger = logging.getLogger(__name__)
+
+# Cost cap: 450 frames * $0.01/frame = $4.50 max Replicate spend per video
+_MAX_FRAMES = 450
+
+
+from sable.shared.terminal import is_tty as _is_tty
 
 
 def extract_frames(
@@ -67,6 +76,7 @@ def swap_video(
     max_workers: int = 4,
     use_face_filter: bool = True,
     use_dedup: bool = True,
+    org_id: str | None = None,
 ) -> dict:
     """
     Full video face swap pipeline.
@@ -81,7 +91,7 @@ def swap_video(
     if not use_frame_by_frame:
         # Native video model (faster, lower quality)
         result_path, model_used = swap_image(
-            video_path, reference_path, output_path
+            video_path, reference_path, output_path, org_id=org_id
         )
         log_swap(reference_name, str(video_path), str(output_path), model=model_used)
         return {"output": str(output_path), "strategy": "native", "model": model_used}
@@ -103,21 +113,41 @@ def swap_video(
         if use_dedup:
             frames = dedup_frames(frames)
 
+        if len(frames) > _MAX_FRAMES:
+            logger.warning(
+                "Capping frame count from %d to %d (cost limit $%.2f)",
+                len(frames), _MAX_FRAMES, _MAX_FRAMES * 0.01,
+            )
+            frames = frames[:_MAX_FRAMES]
+
         # Parallel swap
         errors = []
 
         def _swap_frame(frame: Path) -> Path:
             dest = swapped_dir / frame.name
-            swap_image(frame, reference_path, dest)
+            swap_image(frame, reference_path, dest, org_id=org_id)
             return dest
+
+        _use_progress = _is_tty()
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {pool.submit(_swap_frame, f): f for f in frames}
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    errors.append(str(e))
+            if _use_progress:
+                from rich.progress import Progress
+                with Progress() as progress:
+                    task = progress.add_task("Swapping frames", total=len(frames))
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            errors.append(str(e))
+                        progress.advance(task)
+            else:
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        errors.append(str(e))
 
         # Copy non-swapped frames as-is (fill gaps)
         all_frame_names = sorted(f.name for f in frames_dir.glob("frame_*.png"))

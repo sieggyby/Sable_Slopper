@@ -9,8 +9,12 @@ console = Console()
 
 @click.group()
 @click.version_option(package_name="sable")
-def main():
+@click.option("--json-log", is_flag=True, default=False, hidden=True,
+              help="Emit structured JSON logs (for log aggregation).")
+def main(json_log: bool):
     """Sable content production toolkit for crypto Twitter."""
+    from sable.shared.logging import configure_logging
+    configure_logging(json_log=json_log)
 
 
 # ---------------------------------------------------------------------------

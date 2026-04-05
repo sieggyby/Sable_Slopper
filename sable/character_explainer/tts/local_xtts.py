@@ -23,6 +23,7 @@ class LocalXTTSEngine(TTSEngine):
         character: "CharacterProfile",
         output_dir: str,
         original_text: Optional[str] = None,
+        org_id: Optional[str] = None,
     ) -> TTSResult:
         # Lazy imports — avoids error if f5-tts / soundfile not installed
         try:

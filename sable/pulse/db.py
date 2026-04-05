@@ -6,7 +6,15 @@ from pathlib import Path
 
 from sable.shared.paths import pulse_db_path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Keyed by target version: callable(conn) that applies ALTERs for version N-1 → N.
+# Version 1→2: is_thread and thread_length columns were added to CREATE TABLE
+#               without a version bump. No ALTER needed (columns exist via CREATE),
+#               but version now tracked.
+_MIGRATIONS: dict[int, list[str]] = {
+    # 2: []  — columns already in CREATE TABLE, version catch-up only
+}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -71,12 +79,34 @@ def get_conn() -> sqlite3.Connection:
 
 def migrate() -> None:
     """Initialize or migrate the pulse database."""
+    import logging
+    _logger = logging.getLogger(__name__)
+
     conn = get_conn()
     with conn:
         conn.executescript(_SCHEMA)
-        version = conn.execute("SELECT version FROM schema_version").fetchone()
-        if version is None:
+        version_row = conn.execute("SELECT version FROM schema_version").fetchone()
+        if version_row is None:
             conn.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
+            _logger.info("pulse.db initialized at schema version %d", SCHEMA_VERSION)
+        else:
+            current = version_row[0] if not hasattr(version_row, "keys") else version_row["version"]
+            if current < SCHEMA_VERSION:
+                for target_v in range(current + 1, SCHEMA_VERSION + 1):
+                    stmts = _MIGRATIONS.get(target_v, [])
+                    for stmt in stmts:
+                        conn.execute(stmt)
+                    _logger.info("pulse.db migrated %d → %d", target_v - 1, target_v)
+                conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+                _logger.info(
+                    "pulse.db schema version %d → %d",
+                    current, SCHEMA_VERSION,
+                )
+            elif current > SCHEMA_VERSION:
+                _logger.warning(
+                    "pulse.db version %d is ahead of code version %d — skipping migration",
+                    current, SCHEMA_VERSION,
+                )
     conn.close()
 
 

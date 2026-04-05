@@ -162,12 +162,24 @@ All keys live under `serve:` in `config.yaml`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `token` | string | — | Bearer token required for all `/api/` endpoints. Set before running `sable serve` |
+| `token` | string | — | Legacy single bearer token for all `/api/` endpoints. Fallback when `tokens` is not set |
+| `tokens` | dict | — | Named tokens (preferred). Keys are client names, values are tokens. Provides audit trail via `client_name` logging |
+| `rate_limit_rpm` | int | `60` | Max requests per minute per path prefix. Returns 429 + Retry-After when exceeded |
 
 ```yaml
+# Preferred: named tokens (audit trail via client_name logging)
+serve:
+  tokens:
+    sableweb: "token-for-web-frontend"
+    debug: "token-for-dev-testing"
+  rate_limit_rpm: 60
+
+# Legacy: single token (still supported as fallback)
 serve:
   token: "your-secret-token-here"
 ```
+
+Named tokens are checked first via HMAC constant-time comparison. If none match, the legacy `token` is tried as fallback. The authenticated client name is logged on every request.
 
 ---
 
@@ -195,7 +207,10 @@ Raise these if voice scoring is missing nuance from longer-form content. Lower t
 
 ```yaml
 serve:
-  token: "your-secret-token-here"
+  tokens:
+    sableweb: "token-for-web-frontend"
+    debug: "token-for-dev-testing"
+  rate_limit_rpm: 60
 ```
 
 ---

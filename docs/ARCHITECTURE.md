@@ -75,8 +75,9 @@ sable/
 │   └── cli.py           ← sable churn group
 │
 ├── serve/               ← FastAPI backend (Phase 2)
-│   ├── app.py           ← app factory
-│   ├── auth.py          ← Bearer token auth
+│   ├── app.py           ← app factory + rate limit middleware
+│   ├── auth.py          ← Bearer token auth (named tokens + legacy fallback)
+│   ├── rate_limit.py    ← sliding-window rate limiter (60 RPM default)
 │   ├── deps.py          ← DB connection helpers
 │   └── routes/          ← vault, pulse, meta endpoints
 │
@@ -269,6 +270,11 @@ meta.db  (format baselines for meta-informed classification)
 |-----------|------|--------|
 | Config loading | `sable/config.py` | Everything |
 | Path resolution | `sable/shared/paths.py` | Everything that touches `SABLE_HOME` or `SABLE_WORKSPACE` |
+| Structured logging | `sable/shared/logging.py` | CLI (`--json-log`), serve middleware |
+| TTY detection | `sable/shared/terminal.py` | `face/video.py`, `pulse/meta/scanner.py` (progress bars) |
+| SocialData client | `sable/shared/socialdata.py` | `pulse track`, `pulse meta scan`, `vault suggest` |
+| Cost helpers | `sable/shared/pricing.py` | All Claude/Replicate/ElevenLabs call sites |
+| Atomic file writes | `sable/shared/files.py` | Vault, advise, clip meta output |
 | Brainrot library | `sable/clip/brainrot.py` | `clip`, `character-explainer` |
 | `sable.db` connection | `sable/platform/db.py` | `sable/platform/` CLI commands |
 

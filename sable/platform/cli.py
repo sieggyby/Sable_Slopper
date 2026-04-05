@@ -33,14 +33,14 @@ def org_create(org_id, name, discord_server_id, twitter_handle):
         existing = conn.execute("SELECT 1 FROM orgs WHERE org_id=?", (org_id,)).fetchone()
         if existing:
             raise SableError(ORG_EXISTS, f"Org '{org_id}' already exists")
-        conn.execute(
-            """
-            INSERT INTO orgs (org_id, display_name, discord_server_id, twitter_handle)
-            VALUES (?, ?, ?, ?)
-            """,
-            (org_id, name, discord_server_id, twitter_handle),
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO orgs (org_id, display_name, discord_server_id, twitter_handle)
+                VALUES (?, ?, ?, ?)
+                """,
+                (org_id, name, discord_server_id, twitter_handle),
+            )
         click.echo(f"Created org '{org_id}' ({name})")
     except SableError as e:
         click.echo(str(e), err=True)
@@ -170,11 +170,11 @@ def org_set_config(org_id, key, value):
             raise SableError(ORG_NOT_FOUND, f"Org '{org_id}' not found")
         cfg = json.loads(row["config_json"] or "{}")
         cfg[key] = value
-        conn.execute(
-            "UPDATE orgs SET config_json=?, updated_at=datetime('now') WHERE org_id=?",
-            (json.dumps(cfg), org_id),
-        )
-        conn.commit()
+        with conn:
+            conn.execute(
+                "UPDATE orgs SET config_json=?, updated_at=datetime('now') WHERE org_id=?",
+                (json.dumps(cfg), org_id),
+            )
         click.echo(f"Set {key}={value!r} on org '{org_id}'")
     except SableError as e:
         click.echo(str(e), err=True)
@@ -350,12 +350,22 @@ def db_group():
 
 @db_group.command("migrate")
 def db_migrate():
-    """Apply pending migrations to sable.db."""
+    """Apply pending migrations to sable.db, pulse.db, and meta.db."""
     from sable.platform.db import get_db
 
     conn = get_db()
     row = conn.execute("SELECT version FROM schema_version").fetchone()
-    click.echo(f"sable.db is at schema version {row['version']}")
+    click.echo(f"sable.db  → schema version {row['version']}")
+
+    # pulse.db
+    from sable.pulse.db import migrate as pulse_migrate, SCHEMA_VERSION as pulse_v
+    pulse_migrate()
+    click.echo(f"pulse.db  → schema version {pulse_v}")
+
+    # meta.db
+    from sable.pulse.meta.db import migrate as meta_migrate, SCHEMA_VERSION as meta_v
+    meta_migrate()
+    click.echo(f"meta.db   → schema version {meta_v}")
 
 
 @db_group.command("status")

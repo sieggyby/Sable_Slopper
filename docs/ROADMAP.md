@@ -45,7 +45,7 @@ Implemented in SableTracking (not in this repo directly):
 
 ## Phase 2 — FastAPI Backend (consumed by SableWeb)
 
-**Status: Complete** — `sable serve` + all Phase 2 CLI features are shipped. Remaining: Cloudflare Tunnel deployment (belongs to SableWeb), `vault/permissions.py` RBAC stub (see `docs/ROLES.md`).
+**Status: Complete** — `sable serve` + all Phase 2 CLI and hardening features shipped (SS-1 through SS-21, 1038 tests). Quick Cloudflare Tunnel validated 2026-04-04. Remaining: stable production URL (cheap domain, ~$10/yr), `vault/permissions.py` RBAC stub (see `docs/ROLES.md`).
 
 **Target: Expose vault and pulse data to SableWeb's `/ops` surface via a read API**
 
@@ -56,7 +56,8 @@ SableWeb (Next.js, separate repo) is the single web UI for both operators and cl
 - `sable/serve/routes/vault.py` — vault inventory, content browser, search, assign
 - `sable/serve/routes/pulse.py` — posting log, pulse snapshots, format performance
 - `sable/serve/routes/meta.py` — topic signals, watchlist, format baselines
-- `sable/serve/auth.py` — token auth middleware (SableWeb authenticates users; this layer validates service-to-service tokens)
+- `sable/serve/auth.py` — named token auth with audit trail (SS-17); SableWeb authenticates users, this layer validates service-to-service tokens
+- `sable/serve/rate_limit.py` — sliding-window rate limiter, 60 RPM default (SS-15)
 - `sable/vault/permissions.py` — role check implementation (currently stub; roles defined in `docs/ROLES.md`)
 
 **What moves to SableWeb `/ops` (not built here):**
@@ -75,7 +76,7 @@ SableWeb (Next.js, separate repo) is the single web UI for both operators and cl
 - Cost logging decoupled from budget gating — `budget_check=False` parameter on `call_claude_with_usage()` lets write/score/clip log costs without triggering budget hard gates (P1-2)
 - Pulse freshness sync to `sync_runs` — pulse track/meta/recommend record sync metadata for SableWeb freshness display (P1-3)
 
-**Deployment:** Cloudflare Tunnel belongs to SableWeb's deployment story, not this repo. `sable serve` runs as a local or Railway service; SableWeb proxies to it.
+**Deployment:** `cloudflared` quick tunnel validated 2026-04-04 (temporary URL, no domain). Production setup needs a ~$10/yr domain via Cloudflare Registrar for a stable URL. SableWeb deploys to Vercel free tier. See `TODO.md` § SS-2 for full setup steps.
 
 ---
 

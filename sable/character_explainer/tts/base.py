@@ -24,4 +24,5 @@ class TTSEngine(ABC):
         character: "CharacterProfile",
         output_dir: str,
         original_text: Optional[str] = None,
+        org_id: Optional[str] = None,
     ) -> TTSResult: ...

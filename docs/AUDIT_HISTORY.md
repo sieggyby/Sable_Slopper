@@ -207,6 +207,8 @@ Schema v5 → v6. Write path owned by Cult Grader's `platform_sync.py`.
 | 2026-04-04 (cost observability + stale test schemas) | 899 | 0 | 0 |
 | 2026-04-04 (brainrot theme matching) | 905 | 0 | 0 |
 | 2026-04-04 (SocialData hardening: cost breakdown, logging, cursor cycling, checkpoint/resume) | 921 | 0 | 0 |
+| 2026-04-04 (Production hardening Phase 1: SS-1, SS-3–SS-14) | 1008 | 0 | 2 pre-existing |
+| 2026-04-04 (Production hardening Phase 2: SS-15–SS-21 + QA) | 1038 | 0 | 2 pre-existing |
 
 ---
 
@@ -343,3 +345,79 @@ Useful meta-priorities carried over conceptually:
 - Cost burst / concurrency control as first-class hardening
 - Secret leakage via logs/errors deserves scrutiny
 - Partial-run recovery wired into operator workflows
+
+---
+
+## Production Infrastructure (2026-04-04 suite audit)
+
+### SS-1: CI/CD pipeline [S] ✓
+
+**File:** `.github/workflows/ci.yml`
+
+GitHub Actions on PR and push to main: `pip install -e ".[dev]"` → `ruff check .` → `mypy sable` → `pytest -q`. Cache pip deps.
+
+### SS-3: API contract documentation [S] ✓
+
+**File:** `docs/API_REFERENCE.md`
+
+All 7 endpoints + /health documented with paths, params, response shapes, field types, and SableWeb integration notes.
+
+---
+
+## Production Hardening Phase 1 (2026-04-04 production audit)
+
+12-dimension audit scored Slopper at 5.2/10. All items below completed 2026-04-04.
+
+### P0 — Critical
+
+- **SS-4: Anthropic client timeout + retry [M]** — `httpx.Timeout(300s, connect=10s)`, `max_retries=0` (SDK retry disabled), `_call_with_retry()` with 3 attempts, exp backoff, retry on 429/500/502/503. Tests added.
+- **SS-5: Replicate timeout + retry [M]** — `predictions.create()` + polling with 300s timeout. Retry on 429/502/503. Prediction ID logged.
+- **SS-6: Replicate cost logging [M]** — `_log_replicate_cost()` helper, `--org` flag on face CLI, org_id threaded through swap_image/swap_video. $0.01/image estimate. Frame count capped at 450 ($4.50 max per video).
+- **SS-7: ElevenLabs cost logging [M]** — `_log_elevenlabs_cost()` helper, `org_id` added to TTSEngine interface and all implementations. $0.30/1K chars estimate. Cost logged after synthesis.
+- **SS-8: DB transaction wrapping [S]** — All `conn.commit()` calls in generate.py (4 sites), artifacts.py, cli.py (org_create, org_set_config) wrapped in `with conn:` context manager.
+- **SS-12: Advise brief cost logging [S]** — `log_cost(conn, org_id, "slopper_advise", cost_usd, model=model_name)` added after synthesis. Non-fatal on logging failure.
+
+### P1 — High
+
+- **SS-9: Test coverage for meme/ [L]** — Added tests/meme/test_templates.py, test_fonts.py, test_bank.py, test_meme_renderer.py, test_meme_cli.py. ~15 new tests.
+- **SS-10: Test coverage for character_explainer/ [L]** — Added tests/character_explainer/ with test_config.py, test_tts_elevenlabs.py, test_tts_local.py, test_pipeline.py, test_cli.py, test_phonetics.py, test_subtitles.py. ~20 new tests.
+- **SS-11: meta.db SCHEMA_VERSION drift [S]** — `SCHEMA_VERSION` bumped to 5. `migrate()` checks current vs expected, logs version transitions. `_MIGRATIONS` dict in place for future ALTER statements.
+- **P1-2: budget_check parameter [M]** — Pre-existing. `budget_check: bool = True` already implemented in api.py and wired into all callers.
+- **P2-4: Content performance outcomes [M]** — Pre-existing. `sable/pulse/outcomes.py` with `sync_content_outcomes()`.
+- **P2-6: Vault content as platform artifacts [M]** — Pre-existing. `register_content_artifact()` in sable/platform/artifacts.py.
+
+### P2 — Medium
+
+- **SS-13: Schema versioning for pulse.db/meta.db [L]** — Both DBs have `schema_version` table, `_MIGRATIONS` dict, version check/update in `migrate()`. `sable db migrate` extended to cover all three DBs. Tests in test_schema_versioning.py.
+- **SS-14: ElevenLabs retry logic [S]** — `_post_with_retry()` with 3 attempts, exp backoff on 429/500/502/503. Timeout retries included.
+
+---
+
+## Production Hardening Phase 2 (2026-04-04 multi-dimensional assessment)
+
+### P0 — API Hardening
+
+- **SS-15: Rate limiting on `sable serve` endpoints [M]** — In-process sliding-window rate limiter in `sable/serve/rate_limit.py`. Default 60 RPM, configurable via `serve.rate_limit_rpm`. Returns 429 + Retry-After. Path-param normalization prevents key-space inflation. Deque for O(1) eviction, max-keys cap (100). Middleware in `app.py` skips `/health`. 6 tests.
+- **SS-16: `/health` endpoint dependency checks [S]** — `/health` now returns `{"status": "ok"|"degraded", "checks": {"pulse_db": bool, "meta_db": bool, "vault": bool}}`. Read-only checks (SQLite `?mode=ro`, no directory creation). HTTP 200 for both ok and degraded.
+- **SS-17: Per-client token audit trail [M]** — `_resolve_token()` in `auth.py` checks named tokens (`serve.tokens`) first, falls back to legacy `serve.token`. Logs `client_name` on every authenticated request via `request.state.client_name`. `get_serve_cfg()` extracted as shared config resolver. 4 contract tests.
+
+### P1 — Observability
+
+- **SS-18: Structured JSON logging [M]** — `sable/shared/logging.py` with `StructuredFormatter` (JSON lines). `--json-log` flag on CLI main group. `configure_logging()` called unconditionally. Extra fields: `client_name`, `org_id`, `call_type`, `cost_usd`, `model`. 4 tests.
+- **SS-19: Progress indicators for long operations [S]** — Rich progress bars on: (1) frame-by-frame video swap (`video.py`), (2) meta scan author iteration (`scanner.py`). TTY-only via shared `sable/shared/terminal.py:is_tty()`. Progress stopped cleanly on BalanceExhaustedError.
+
+### P2 — Cross-Suite Integration
+
+- **SS-20: Adopt TrackingMetadata contract from SablePlatform [S]** — `stage1.py` imports `TrackingMetadata` from `sable_platform.contracts.tracking`, validates parsed `metadata_json` via `model_validate()`, logs warning on unknown `schema_version`, uses typed field access. 5 integration tests in `tests/integration/test_tracking_metadata.py`.
+- **SS-21: Cross-repo integration test contract [M]** — `tests/integration/test_contracts.py` with contract tests: health response shape (SS-16 spec), pulse performance/posting-log shapes, meta topics/baselines/watchlist shapes, vault inventory/search shapes, auth named + legacy + rejection, TrackingMetadata 17-field enumeration. ~15 tests.
+
+### QA Audit Loop
+
+2 adversarial QA rounds using AGENTS.md lens. Round 1 found 7 issues (2 Tier 1, 2 Tier 2, 3 Tier 3):
+- Tier 1: Rate limiter unbounded memory (switched to deque + path normalization + max-keys cap), scanner progress leak on BalanceExhaustedError (added explicit stop before raise)
+- Tier 2: Duplicated `_is_tty()` (extracted to `sable/shared/terminal.py`), duplicated serve config resolution (extracted `get_serve_cfg()` in auth.py)
+- Tier 3: 3 minor doc/naming items
+
+Round 2 confirmed all clean — 0 findings.
+
+### Validation at completion: 1038 tests, ruff 0, mypy 2 (pre-existing)

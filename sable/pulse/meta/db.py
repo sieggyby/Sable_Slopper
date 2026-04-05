@@ -7,7 +7,17 @@ from typing import Optional
 
 from sable.shared.paths import meta_db_path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 5
+
+# Keyed by target version: list of SQL statements for version N-1 → N.
+# Versions 1→5 are all covered by CREATE TABLE IF NOT EXISTS in _SCHEMA.
+# Future migrations add ALTER TABLE statements here.
+_MIGRATIONS: dict[int, list[str]] = {
+    # 2: []  — hook_pattern_cache + viral_anatomies (in CREATE TABLE)
+    # 3: []  — lexicon_terms (in CREATE TABLE)
+    # 4: []  — scan_checkpoints (in CREATE TABLE)
+    # 5: []  — author_cadence (in CREATE TABLE)
+}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -181,14 +191,38 @@ def get_conn() -> sqlite3.Connection:
 
 def migrate() -> None:
     """Initialize or migrate the meta database."""
+    import logging
+    _logger = logging.getLogger(__name__)
+
     conn = get_conn()
     conn.execute("DROP INDEX IF EXISTS idx_format_baselines_key")
     conn.commit()
     with conn:
         conn.executescript(_SCHEMA)
-        version = conn.execute("SELECT version FROM schema_version").fetchone()
-        if version is None:
+        version_row = conn.execute("SELECT version FROM schema_version").fetchone()
+        if version_row is None:
             conn.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
+            _logger.info("meta.db initialized at schema version %d", SCHEMA_VERSION)
+        else:
+            current = version_row["version"]
+            if current < SCHEMA_VERSION:
+                for target_v in range(current + 1, SCHEMA_VERSION + 1):
+                    stmts = _MIGRATIONS.get(target_v, [])
+                    for stmt in stmts:
+                        conn.execute(stmt)
+                    _logger.info("meta.db migrated %d → %d", target_v - 1, target_v)
+                conn.execute(
+                    "UPDATE schema_version SET version = ?", (SCHEMA_VERSION,)
+                )
+                _logger.info(
+                    "meta.db schema version %d → %d",
+                    current, SCHEMA_VERSION,
+                )
+            elif current > SCHEMA_VERSION:
+                _logger.warning(
+                    "meta.db version %d is ahead of code version %d — skipping migration",
+                    current, SCHEMA_VERSION,
+                )
     conn.close()
 
 

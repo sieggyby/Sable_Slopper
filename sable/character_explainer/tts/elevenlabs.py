@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -11,10 +13,53 @@ import httpx
 
 from sable.character_explainer.tts.base import TTSEngine, TTSResult
 
+logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 3
+_INITIAL_BACKOFF = 1.0
+_RETRYABLE_STATUS = {429, 500, 502, 503}
+
 if TYPE_CHECKING:
     from sable.character_explainer.config import CharacterProfile
 
 _API_BASE = "https://api.elevenlabs.io/v1"
+
+
+def _post_with_retry(url: str, payload: dict, api_key: str) -> httpx.Response:
+    """POST to ElevenLabs with retry on transient errors."""
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            response = httpx.post(
+                url,
+                json=payload,
+                headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+                timeout=60.0,
+            )
+            if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES - 1:
+                delay = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.warning(
+                    "ElevenLabs %d (attempt %d/%d), retrying in %.1fs",
+                    response.status_code, attempt + 1, _MAX_RETRIES, delay,
+                )
+                time.sleep(delay)
+                continue
+            response.raise_for_status()
+            return response
+        except httpx.HTTPStatusError:
+            raise
+        except httpx.TimeoutException as e:
+            last_exc = e
+            if attempt < _MAX_RETRIES - 1:
+                delay = _INITIAL_BACKOFF * (2 ** attempt)
+                logger.warning(
+                    "ElevenLabs timeout (attempt %d/%d), retrying in %.1fs",
+                    attempt + 1, _MAX_RETRIES, delay,
+                )
+                time.sleep(delay)
+                continue
+            raise
+    raise last_exc  # type: ignore[misc]
 
 
 class ElevenLabsEngine(TTSEngine):
@@ -24,6 +69,7 @@ class ElevenLabsEngine(TTSEngine):
         character: "CharacterProfile",
         output_dir: str,
         original_text: Optional[str] = None,
+        org_id: Optional[str] = None,
     ) -> TTSResult:
         api_key = os.environ.get("ELEVENLABS_API_KEY", "")
         if not api_key:
@@ -52,14 +98,13 @@ class ElevenLabsEngine(TTSEngine):
             },
         }
 
-        response = httpx.post(
-            url,
-            json=payload,
-            headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-            timeout=60.0,
-        )
-        response.raise_for_status()
+        response = _post_with_retry(url, payload, api_key)
         data = response.json()
+
+        # Log cost: ElevenLabs Turbo v2 ~$0.30/1K chars
+        char_count = len(text)
+        estimated_cost = char_count * 0.30 / 1000
+        _log_elevenlabs_cost(org_id, estimated_cost, char_count)
 
         # Decode base64 audio
         audio_b64 = data.get("audio_base64", "")
@@ -124,3 +169,21 @@ def _alignment_to_words(alignment: dict) -> list[dict]:
             words.append({"start": current_start, "end": current_end, "text": word})
 
     return words
+
+
+def _log_elevenlabs_cost(
+    org_id: str | None, estimated_cost: float, char_count: int
+) -> None:
+    """Log ElevenLabs TTS cost to sable.db. Non-fatal."""
+    if not org_id:
+        return
+    try:
+        from sable.platform.db import get_db
+        from sable.platform.cost import log_cost
+        conn = get_db()
+        try:
+            log_cost(conn, org_id, "elevenlabs_tts", estimated_cost, model="elevenlabs")
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("Failed to log ElevenLabs cost for org %s: %s", org_id, e)

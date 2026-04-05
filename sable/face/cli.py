@@ -28,8 +28,9 @@ def face_group():
 @click.option("--quality", default="medium", type=click.Choice(["low", "medium", "high"]))
 @click.option("--max-cost", default=None, type=float, help="Abort if estimated cost exceeds this (USD)")
 @click.option("--dry-run", is_flag=True)
+@click.option("--org", default=None, help="Org slug for cost logging")
 @click.option("--skip-consent-check", is_flag=True, hidden=True)
-def face_swap(target, account, reference, output, quality, max_cost, dry_run, skip_consent_check):
+def face_swap(target, account, reference, output, quality, max_cost, dry_run, skip_consent_check, org):
     """Swap face in target image or video."""
     from sable.roster.manager import require_account
     from sable.face.library import get_reference
@@ -96,15 +97,17 @@ def face_swap(target, account, reference, output, quality, max_cost, dry_run, sk
         output = str(out_dir / f"swap_{int(time.time())}{suffix}")
 
     ref_image = ref["path"]
+    resolved_org = org or acc.org or None
 
     with console.status("Running face swap..."):
         if is_video:
             meta = swap_video(
                 target_path, ref_image, output,
                 reference_name=ref_name, quality=quality,
+                org_id=resolved_org,
             )
         else:
-            out_path, model = swap_image(target_path, ref_image, output)
+            out_path, model = swap_image(target_path, ref_image, output, org_id=resolved_org)
             meta = {"output": out_path, "model": model}
 
     console.print(f"\n[green]✓ Done:[/green] {meta['output']}")
