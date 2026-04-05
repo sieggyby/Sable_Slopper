@@ -77,20 +77,59 @@ def test_normalise_tweet_missing_all_engagement_fields_returns_none():
     assert result is None
 
 
-def test_normalise_tweet_partial_engagement_fields_accepted():
-    """If at least one core engagement counter is present, accept the tweet."""
+def test_normalise_tweet_partial_engagement_fields_rejected():
+    """Missing any core engagement counter rejects the tweet (no silent zero-fill)."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    # Missing reply_count + retweet_count
+    raw = _valid_raw_tweet()
+    del raw["reply_count"]
+    del raw["retweet_count"]
+    assert _normalise_tweet(raw, "@testuser") is None
+
+
+def test_normalise_tweet_missing_only_favorite_count_rejected():
+    """Missing only favorite_count rejects the tweet."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    raw = _valid_raw_tweet()
+    del raw["favorite_count"]
+    assert _normalise_tweet(raw, "@testuser") is None
+
+
+def test_normalise_tweet_missing_only_reply_count_rejected():
+    """Missing only reply_count rejects the tweet."""
     from sable.pulse.meta.scanner import _normalise_tweet
 
     raw = _valid_raw_tweet()
     del raw["reply_count"]
+    assert _normalise_tweet(raw, "@testuser") is None
+
+
+def test_normalise_tweet_missing_only_retweet_count_rejected():
+    """Missing only retweet_count rejects the tweet."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    raw = _valid_raw_tweet()
     del raw["retweet_count"]
-    # favorite_count still present
-    result = _normalise_tweet(raw, "@testuser")
-    assert result is not None
-    assert result["likes"] == 10
-    # Missing fields default to 0
-    assert result["replies"] == 0
-    assert result["reposts"] == 0
+    assert _normalise_tweet(raw, "@testuser") is None
+
+
+def test_mixed_batch_partial_core_counters_excluded():
+    """Tweets with partial core counters do not enter the normal analytics path."""
+    from sable.pulse.meta.scanner import _normalise_tweet
+
+    good = _valid_raw_tweet(id_str="111")
+    partial1 = _valid_raw_tweet(id_str="222")
+    del partial1["favorite_count"]
+    partial2 = _valid_raw_tweet(id_str="333")
+    del partial2["reply_count"]
+    good2 = _valid_raw_tweet(id_str="444")
+
+    results = [_normalise_tweet(t, "@user") for t in [good, partial1, partial2, good2]]
+    valid = [r for r in results if r is not None]
+    assert len(valid) == 2
+    assert {r["tweet_id"] for r in valid} == {"111", "444"}
 
 
 def test_normalise_tweet_zero_engagement_accepted():
@@ -138,26 +177,52 @@ def test_mixed_batch_skips_malformed():
     assert {r["tweet_id"] for r in valid} == {"111", "222"}
 
 
-def test_scanner_warns_on_skipped_malformed_tweets(capsys):
-    """The scanner batch path emits a warning when tweets are skipped."""
-    from sable.pulse.meta.scanner import _normalise_tweet, console_warn
+def test_scanner_batch_warns_on_skipped_malformed_tweets(capsys):
+    """Scanner.run emits a warning when malformed tweets are skipped in a batch."""
+    from unittest.mock import MagicMock, patch, AsyncMock
+    from sable.pulse.meta.scanner import Scanner
 
     good = _valid_raw_tweet(id_str="111")
     bad = _valid_raw_tweet(id_str="222")
-    # Remove all core engagement fields to trigger rejection
     del bad["favorite_count"]
     del bad["reply_count"]
     del bad["retweet_count"]
 
-    raw_tweets = [good, bad]
-    normalised_raw = [_normalise_tweet(t, "@user") for t in raw_tweets]
-    normalised = [t for t in normalised_raw if t is not None]
-    skipped = len(normalised_raw) - len(normalised)
+    # Stub DB
+    mock_db = MagicMock()
+    mock_db.get_completed_authors.return_value = set()
+    mock_db.get_author_profile.return_value = None
+    mock_db.get_author_tweets.return_value = []
+    mock_db.upsert_tweet.return_value = True
+    mock_db.upsert_author_profile.return_value = None
+    mock_db.checkpoint_author.return_value = None
 
-    assert skipped == 1
-    assert len(normalised) == 1
+    # Stub classify + normalize
+    mock_lift = MagicMock()
+    for attr in ("author_median_likes", "author_median_replies",
+                 "author_median_reposts", "author_median_quotes",
+                 "author_median_total", "author_median_same_format",
+                 "likes_lift", "replies_lift", "reposts_lift",
+                 "quotes_lift", "total_lift", "format_lift",
+                 "format_lift_reliable"):
+        setattr(mock_lift, attr, 0.0)
+    mock_lift.author_quality = MagicMock(grade="C", weight=0.5)
 
-    # Verify warning path works
-    console_warn(f"Skipped {skipped} malformed tweet(s) for @user")
+    scanner = Scanner(
+        org="testorg",
+        watchlist=[{"handle": "@user"}],
+        db=mock_db,
+        max_cost=10.0,
+    )
+
+    async def fake_fetch(handle, **kw):
+        return [good, bad], 1
+
+    with patch("sable.pulse.meta.scanner._fetch_author_tweets_async", side_effect=fake_fetch), \
+         patch("sable.pulse.meta.fingerprint.classify_tweet", return_value=("text", {})), \
+         patch("sable.pulse.meta.normalize.compute_author_lift", return_value=mock_lift):
+        result = scanner.run(scan_id=1)
+
+    assert result["tweets_collected"] == 1
     captured = capsys.readouterr()
     assert "Skipped 1 malformed" in captured.err

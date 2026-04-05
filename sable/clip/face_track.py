@@ -163,7 +163,8 @@ def _compute_motion_offset(
             continue
 
         flow = cv2.calcOpticalFlowFarneback(
-            prev_gray, gray, None,
+            prev_gray, gray,
+            np.zeros((*prev_gray.shape, 2), dtype=np.float32),
             pyr_scale=0.5, levels=3, winsize=15,
             iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
         )

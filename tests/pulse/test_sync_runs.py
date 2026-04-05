@@ -166,7 +166,6 @@ def test_pulse_track_sync_failure_nonfatal():
 def test_meta_scan_writes_sync_run(sable_conn):
     """pulse meta scan records a sync_runs row with sync_type='pulse_meta_scan'."""
     from sable.pulse.meta.cli import meta_group
-    from sable.pulse.meta import db as real_meta_db
 
     scan_result = {
         "tweets_collected": 100,
@@ -184,7 +183,10 @@ def test_meta_scan_writes_sync_run(sable_conn):
     mock_meta_db.get_scan_runs.return_value = [1, 2, 3]
 
     runner = CliRunner()
-    with patch.dict("sys.modules", {"sable.pulse.meta.db": mock_meta_db}), \
+    with patch("sable.pulse.meta.db.migrate", mock_meta_db.migrate), \
+         patch("sable.pulse.meta.db.create_scan_run", mock_meta_db.create_scan_run), \
+         patch("sable.pulse.meta.db.get_scan_runs", mock_meta_db.get_scan_runs), \
+         patch("sable.pulse.meta.db.complete_scan_run", mock_meta_db.complete_scan_run), \
          patch("sable.pulse.meta.watchlist.list_watchlist", return_value=["@alice", "@bob"]), \
          patch("sable.pulse.meta.scanner.Scanner", mock_scanner), \
          patch("sable.platform.db.get_db", return_value=wrapper), \
@@ -227,7 +229,10 @@ def test_meta_scan_sync_failure_nonfatal():
         raise sqlite3.OperationalError("sable.db locked")
 
     runner = CliRunner()
-    with patch.dict("sys.modules", {"sable.pulse.meta.db": mock_meta_db}), \
+    with patch("sable.pulse.meta.db.migrate", mock_meta_db.migrate), \
+         patch("sable.pulse.meta.db.create_scan_run", mock_meta_db.create_scan_run), \
+         patch("sable.pulse.meta.db.get_scan_runs", mock_meta_db.get_scan_runs), \
+         patch("sable.pulse.meta.db.complete_scan_run", mock_meta_db.complete_scan_run), \
          patch("sable.pulse.meta.watchlist.list_watchlist", return_value=["@alice"]), \
          patch("sable.pulse.meta.scanner.Scanner", mock_scanner), \
          patch("sable.platform.db.get_db", side_effect=failing_get_db), \

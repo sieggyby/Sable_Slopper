@@ -11,6 +11,9 @@ from sable.shared.socialdata import socialdata_get_async, BalanceExhaustedError
 _COST_PER_REQUEST = 0.002  # rough estimate per API call
 _MAX_TWEET_PAGES = 32      # 32 pages × 100 tweets = 3200 tweet ceiling
 
+
+from sable.shared.terminal import is_tty as _is_tty
+
 _CORE_ENGAGEMENT_KEYS = ("favorite_count", "retweet_count", "reply_count")
 
 
@@ -28,7 +31,7 @@ def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
     """Normalise a raw SocialData tweet into our internal format.
 
     Returns None if the tweet is malformed (missing id, unparseable date,
-    or no core engagement fields present).
+    or any core engagement counter missing/non-numeric).
     """
     user = raw.get("user", {})
     tweet_id = str(raw.get("id_str") or raw.get("id") or "")
@@ -43,17 +46,16 @@ def _normalise_tweet(raw: dict, author_handle: str) -> Optional[dict]:
     if posted_at is None:
         return None
 
-    # Validate engagement fields: at least one core counter must be present,
-    # and every present core counter must be coercible to int.  A provider
-    # drift that drops or retypes a single field should not silently zero-fill.
-    if not any(k in raw for k in _CORE_ENGAGEMENT_KEYS):
-        return None
+    # All three core counters must be present and coercible to int.
+    # Partial presence would silently produce synthetic zero-valued rows
+    # that corrupt lift/baseline analytics.
     for k in _CORE_ENGAGEMENT_KEYS:
-        if k in raw:
-            try:
-                int(raw[k])
-            except (TypeError, ValueError):
-                return None
+        if k not in raw:
+            return None
+        try:
+            int(raw[k])
+        except (TypeError, ValueError):
+            return None
 
     # Media detection
     extended = raw.get("extended_entities") or raw.get("entities") or {}
@@ -272,13 +274,27 @@ class Scanner:
         # Resume support: skip authors already checkpointed for this scan
         completed_authors = self.db.get_completed_authors(scan_id)
 
+        # Progress tracking (TTY only)
+        _show_progress = _is_tty() and len(self.watchlist) > 1
+        _progress_ctx = None
+        _progress_task = None
+        if _show_progress:
+            from rich.progress import Progress
+            _progress_ctx = Progress()
+            _progress_ctx.start()
+            _progress_task = _progress_ctx.add_task("Scanning authors", total=len(self.watchlist))
+
         # Process each watchlist account
         for entry in self.watchlist:
             handle = entry.get("handle", "")
             if not handle:
+                if _progress_ctx and _progress_task is not None:
+                    _progress_ctx.advance(_progress_task)
                 continue
 
             if handle in completed_authors:
+                if _progress_ctx and _progress_task is not None:
+                    _progress_ctx.advance(_progress_task)
                 continue
 
             # Get last seen tweet ID for incremental scan
@@ -306,10 +322,14 @@ class Scanner:
                 self._estimated_cost += fetch_cost
                 self._cost_fetch += fetch_cost
             except BalanceExhaustedError:
+                if _progress_ctx:
+                    _progress_ctx.stop()
                 raise  # 402 is fatal — propagate immediately
             except Exception as e:
                 console_warn(f"Failed to fetch {handle}: {e}")
                 self._failed_authors.append(handle)  # AR5-8
+                if _progress_ctx and _progress_task is not None:
+                    _progress_ctx.advance(_progress_task)
                 continue
 
             if estimated_cost > self.max_cost:
@@ -383,6 +403,12 @@ class Scanner:
 
             # Checkpoint: mark this author as processed for resume support
             self.db.checkpoint_author(scan_id, handle, tweets_collected=len(normalised) if normalised else 0)
+
+            if _progress_ctx and _progress_task is not None:
+                _progress_ctx.advance(_progress_task)
+
+        if _progress_ctx:
+            _progress_ctx.stop()
 
         # Deep mode: search by topic keywords
         outsider_results: dict[str, list] = {}

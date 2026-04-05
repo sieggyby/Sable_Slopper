@@ -31,10 +31,10 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 **Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, and more.
 All community intelligence features are shipped (FEATURE-10 through FEATURE-16, CHURN-1, CHURN-2).
 
-**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Bearer token auth, 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. 30 serve tests (require fastapi optional dep to collect). Test count: 891 core + 30 serve = 921.
+**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Test count: 1038.
 
 **Remaining Phase 2 work:**
-- Cloudflare Tunnel deployment (see `docs/ROADMAP.md`)
+- Cloudflare Tunnel deployment for stable URL (quick tunnel validated 2026-04-04; see TODO.md § SS-2)
 - `sable/vault/permissions.py` — RBAC implementation (currently a stub; see `docs/ROLES.md`)
 
 Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.

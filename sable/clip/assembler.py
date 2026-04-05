@@ -7,7 +7,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from sable.shared.ffmpeg import extract_clip, stack_videos, encode_clip_only, require_ffmpeg
 from sable.clip.brainrot import pick as pick_brainrot, loop_to_duration
@@ -132,7 +132,7 @@ def assemble_clip(
             from sable.clip.face_track import compute_face_offset
             crop_x_offset = compute_face_offset(
                 source_clip,
-                target_width=profile["width"],
+                target_width=cast(int, profile["width"]),
             )
             meta["crop_x_offset"] = crop_x_offset
 

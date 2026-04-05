@@ -4,7 +4,7 @@
 
 ## Validation Snapshot
 
-- `./.venv/bin/python -m pytest -q` → `921 passed`
+- `./.venv/bin/python -m pytest -q` → `1046 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -12,47 +12,23 @@
 
 ## Open Items
 
-### TRACK-METADATA: SableTracking metadata_json schema contract
+### SS-2: Expose `sable serve` for SableWeb [M]
 
-SableTracking writes 17 fields to `content_items.metadata_json` as an unversioned JSON blob. Slopper reads it in stage1.py via `meta.get("source_tool") == "sable_tracking"` with no schema validation. If SableTracking adds, renames, or removes a field, Slopper breaks silently.
+**Current:** `sable serve` (FastAPI, 7 endpoints + /health, bearer token auth) is production-ready. Quick tunnel validated 2026-04-04 via `cloudflared tunnel --url http://localhost:8420`. Remaining: stable production URL.
 
-**Upstream plan (SableTracking P7-1):** SablePlatform will publish a `TrackingMetadata(BaseModel)` contract in `sable_platform/contracts/tracking.py` with `schema_version: int`. SableTracking will use it to build metadata_json.
+**Plan (phased):**
 
-**Slopper action when contract lands:**
-1. Import `TrackingMetadata` from `sable_platform.contracts.tracking`
-2. In stage1.py where metadata_json is parsed (~line 276), validate against the contract: `TrackingMetadata.model_validate(meta)`
-3. Log warning (not error) for unknown `schema_version` — graceful forward compatibility
-4. Replace bare `meta.get("key")` calls with typed field access
+1. **Dev/testing (free, no domain) — VALIDATED:** `cloudflared tunnel --url http://localhost:8420` gives a temporary `https://xxxx.trycloudflare.com` URL. Good enough to validate the SableWeb → Slopper wiring end-to-end. URL changes on every restart — not for production.
 
-**Current 17 fields:** source_tool, url, canonical_author_handle, quality_score, audience_annotation, timing_annotation, grok_status, engagement_score, lexicon_adoption, emotional_valence, subsquad_signal, format_type, intent_type, topic_tags, review_status, outcome_type, is_reusable_template.
+2. **Production (free Cloudflare account + ~$10/yr domain):** Register a cheap domain via Cloudflare Registrar, create a named tunnel (`cloudflared tunnel create sable-serve`), point a subdomain (e.g., `slopper.yourdomain.com`) at `localhost:8420`. Stable URL, HTTPS, free tier covers everything. Existing bearer token auth (`serve.tokens.sableweb`) provides service-to-service security.
 
-**Status:** Waiting on SablePlatform to publish the contract. No action until then.
+3. **Hosting:** Runs on local Mac for now. `sable serve` must be running + `cloudflared tunnel run` must be running. For persistence: `cloudflared service install` registers a launchd service. Move to VPS in Phase 3.
 
----
+**Prerequisites:** `brew install cloudflared` (done), free Cloudflare account. Domain purchase only needed for step 2.
 
-## Production Infrastructure (from 2026-04-04 suite audit)
+**Consumer:** SableWeb content_performance, format_analysis, topic_trends, content_pipeline, vault sections. SableWeb itself deploys to Vercel free tier — see SableWeb TODO § SW-DEPLOY.
 
-### SS-1: CI/CD pipeline [S]
-
-**File:** New `.github/workflows/ci.yml`
-
-**Change:** GitHub Actions on PR and push to main: `pip install -e ".[dev]"` → `ruff check .` → `mypy sable` → `pytest -q`. Cache pip deps. 921 tests, currently manual-only.
-
-### SS-2: Cloudflare Tunnel deployment for `sable serve` [L]
-
-**Current:** `sable serve` (FastAPI, 7 endpoints + /health, bearer token auth) is production-ready code with no deployment story. This is THE critical blocker for SableWeb content pipeline — content performance, format intelligence, topic signals, and vault inventory sections all return null when `SLOPPER_URL` is not configured.
-
-**Change:** Set up Cloudflare Tunnel to expose `sable serve`. Configure service-to-service token auth at the Cloudflare level (on top of existing bearer token). Document the `SLOPPER_URL` and `SLOPPER_TOKEN` that SableWeb needs.
-
-**Consumer:** SableWeb content_performance, format_analysis, topic_trends, content_pipeline, vault sections.
-
-### SS-3: API contract documentation [S]
-
-**File:** New `docs/API_REFERENCE.md`
-
-**Current:** `sable serve` has 7 endpoints but no documented response shapes. SableWeb needs exact paths, params, and JSON response types to build the fetch layer.
-
-**Change:** Document each endpoint: path, HTTP method, query params, request body (if any), response JSON shape with field types. Include `/health` response shape so SableWeb's health endpoint can verify Slopper availability.
+**Coordinates with:** SableWeb SW-SLOPPER (wiring the fetch layer) and SW-DEPLOY (Vercel deployment).
 
 ---
 
@@ -60,7 +36,6 @@ SableTracking writes 17 fields to `content_items.metadata_json` as an unversione
 
 ### Phase 2 remaining
 
-- Cloudflare Tunnel deployment (belongs to SableWeb's deployment story)
 - `sable/vault/permissions.py` — RBAC implementation (currently a stub; see `docs/ROLES.md`)
 
 ### Phase 3 — VPS
