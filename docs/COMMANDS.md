@@ -78,6 +78,21 @@ sable clip process SOURCE --account HANDLE [options]
 | `--face-track` | — | Center crop on detected faces; falls back to motion tracking, then center |
 | `--org` | account org | Org slug for cost logging (logs Claude spend without budget gating) |
 
+### clip review
+
+Interactive triage queue for unreviewed clips. Scans workspace for clips with `_meta.json` / `.meta.json` that lack a `vault_note_id`, then presents each for approval, skip, or deletion.
+
+```
+sable clip review --org ORG
+```
+
+For each clip, shows: filename, duration, transcript excerpt (first 50 words), selection score. Actions:
+- **approve** — stamps `vault_note_id` in the meta file
+- **skip** — no changes
+- **delete** — moves clip + meta to a `_rejected/` subdirectory
+
+After all approvals, automatically runs `vault sync` for the org.
+
 ### clip brainrot
 ```
 sable clip brainrot add FILE --energy LEVEL [--tags TAGS]
@@ -381,6 +396,32 @@ sable tracking sync ORG_ID
 
 ---
 
+## weekly
+
+Automated weekly cycle: pulse track → meta scan → advise → calendar → vault sync. Designed to reduce operator time from ~4 hours/week to <1 hour/week per 5 accounts.
+
+```
+sable weekly run --org ORG
+sable weekly run --all [--dry-run] [--cost-estimate]
+sable weekly cron install
+```
+
+### weekly run flags
+| Flag | Description |
+|------|-------------|
+| `--org ORG` | Run weekly cycle for a single org |
+| `--all` | Discover all rostered orgs and run for each (mutually exclusive with `--org`) |
+| `--dry-run` | Print execution plan (orgs, accounts, steps) without running anything |
+| `--cost-estimate` | Estimate SocialData + Claude cost per org without running |
+
+Each step runs independently — a failure in one step (e.g. meta scan) does not prevent subsequent steps from running. Summary printed at end with per-step status, cost, and duration.
+
+### weekly cron install
+
+Generates a macOS launchd plist at `~/Library/LaunchAgents/com.sable.weekly.plist` that runs `sable weekly run --all` every Monday at 06:00. Prints activation instructions (`launchctl load`/`unload`).
+
+---
+
 ## serve
 
 Read-only API server exposing pulse, meta, and vault data over HTTP. No Claude calls, no cost.
@@ -427,6 +468,7 @@ All `/api/` endpoints are rate-limited (default 60 RPM, configurable via `serve.
 | GET | `/api/meta/watchlist/{org}` | Watchlist entries for org |
 | GET | `/api/vault/inventory/{org}` | Vault inventory for org |
 | GET | `/api/vault/search/{org}?q=...` | Vault search (query param `q`) |
+| GET | `/api/v1/cost/org/{org_id}/cost-forecast` | Cost forecast + budget status for org |
 
 ---
 

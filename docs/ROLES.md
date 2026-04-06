@@ -60,7 +60,7 @@ serve:
 - **Role definitions + permission matrix:** `sable/vault/permissions.py`
 - **Token resolution + enforcement:** `sable/serve/auth.py`
 - **Route-level checks:** Each route handler calls `require_org_access(request, org, Action.xxx)`
-- **Router-level auth:** `verify_token` is a FastAPI dependency on all route groups (vault, pulse, meta)
+- **Router-level auth:** `verify_token` is a FastAPI dependency on all route groups (vault, pulse, meta, cost)
 - **Health endpoint:** `/health` is unauthenticated (no token required)
 
 ## Security Notes

@@ -28,10 +28,11 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 
 ## Current Phase
 
-**Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, and more.
+**Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, weekly, and more.
 All community intelligence features are shipped (FEATURE-10 through FEATURE-16, CHURN-1, CHURN-2).
+Weekly automation shipped (2026-04-06): `sable weekly run` orchestrates the full weekly cycle (pulse track → meta scan → advise → calendar → vault sync) with `--all`, `--dry-run`, `--cost-estimate`. Clip review triage (`sable clip review`) and launchd scheduling (`sable weekly cron install`) also shipped.
 
-**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Codit audit remediation (all CRIT/HIGH/MED) complete. Test count: 1157.
+**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, vault, and cost data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 8 API endpoints + /health. Cost forecast endpoint (`GET /api/v1/cost/org/{org_id}/cost-forecast`) added 2026-04-06. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Codit audit remediation (all CRIT/HIGH/MED) complete. Test count: 1213.
 
 **Production URL:** `https://api.sable.tools` — Cloudflare named tunnel `sable-serve` → `localhost:8420`. Both `cloudflared` (system daemon) and `sable serve` (user agent) run as persistent launchd services.
 

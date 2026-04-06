@@ -88,6 +88,7 @@ from sable.narrative.cli import narrative_group
 from sable.style.cli import style_delta_command
 from sable.cadence.cli import silence_gradient_command
 from sable.churn.cli import churn_group
+from sable.weekly.cli import weekly_group
 
 main.add_command(roster_group)
 main.add_command(clip_group)
@@ -115,6 +116,7 @@ main.add_command(narrative_group)
 main.add_command(style_delta_command)
 main.add_command(silence_gradient_command)
 main.add_command(churn_group)
+main.add_command(weekly_group)
 
 
 @main.command("serve")

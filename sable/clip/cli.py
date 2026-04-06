@@ -324,3 +324,67 @@ def brainrot_trace(filename, search_dir):
         )
     console.print(table)
     console.print(f"\n[dim]{len(matches)} clip(s) found using '{basename}'[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# review
+# ---------------------------------------------------------------------------
+
+@clip_group.command("review")
+@click.option("--org", required=True, help="Org to review clips for.")
+def clip_review(org: str) -> None:
+    """Interactive triage queue for unreviewed clips."""
+    from sable.clip.review import find_unreviewed_clips, approve_clip, reject_clip
+
+    candidates = find_unreviewed_clips(org)
+
+    if not candidates:
+        console.print("[green]No unreviewed clips found.[/green]")
+        return
+
+    console.print(f"[bold]{len(candidates)} unreviewed clip(s):[/bold]\n")
+
+    approved_count = 0
+    deleted_count = 0
+    clip_counter = 0
+
+    for i, c in enumerate(candidates, 1):
+        score_str = f"{c.selection_score:.0f}/10" if c.selection_score is not None else "n/a"
+        console.print(f"[bold cyan]({i}/{len(candidates)})[/bold cyan] {c.clip_path.name}")
+        console.print(f"  Duration: {c.duration:.1f}s  |  Score: {score_str}")
+        if c.transcript_excerpt:
+            console.print(f"  Transcript: {c.transcript_excerpt[:200]}")
+
+        action = click.prompt(
+            "  Action", type=click.Choice(["a", "s", "d"]),
+            show_choices=True, default="s",
+        )
+
+        if action == "a":
+            clip_counter += 1
+            note_id = f"clip-review-{clip_counter:03d}"
+            approve_clip(c, note_id)
+            console.print(f"  [green]Approved → {note_id}[/green]")
+            approved_count += 1
+        elif action == "d":
+            reject_clip(c)
+            console.print("  [red]Deleted → _rejected/[/red]")
+            deleted_count += 1
+        else:
+            console.print("  [dim]Skipped[/dim]")
+
+    console.print(
+        f"\n[bold]Review complete:[/bold] "
+        f"{approved_count} approved, {deleted_count} deleted, "
+        f"{len(candidates) - approved_count - deleted_count} skipped"
+    )
+
+    if approved_count > 0:
+        console.print("[dim]Running vault sync...[/dim]")
+        try:
+            from sable.vault.platform_sync import platform_vault_sync
+            platform_vault_sync(org)
+            console.print("[green]Vault synced.[/green]")
+        except Exception as e:
+            from sable.platform.errors import redact_error
+            console.print(f"[yellow]Vault sync failed: {redact_error(str(e))}[/yellow]")

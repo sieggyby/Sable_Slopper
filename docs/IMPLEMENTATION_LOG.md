@@ -494,3 +494,47 @@ Every route calls `require_org_access(request, org, Action.xxx)`. Router-level `
 **Files:** `sable/vault/permissions.py`, `sable/serve/auth.py`, `sable/serve/routes/vault.py`, `sable/serve/routes/pulse.py`, `sable/serve/routes/meta.py`, `sable/serve/app.py`, `tests/serve/test_rbac.py`, `tests/serve/test_*.py` (bypass auth updates), `docs/ROLES.md`.
 
 Validation: 1179 passed, 0 ruff violations, 0 mypy errors.
+
+---
+
+## Weekly Automation & Operator Streamlining (2026-04-06)
+
+Reduces operator time from ~4 hours/week per 3-5 accounts to <1 hour/week per 5 accounts.
+
+### `sable weekly run`
+
+New `sable/weekly/` module with `WeeklyRunner` class orchestrating 5 steps:
+1. `pulse_track` — `snapshot_account()` per rostered account
+2. `meta_scan` — instantiate `Scanner`, run full scan
+3. `advise` — `generate_advise()` per account
+4. `calendar` — `build_calendar()` + save per account
+5. `vault_sync` — `platform_vault_sync(org)`
+
+Each step runs independently — failure in one doesn't block the rest. Cost delta measured via `get_weekly_spend()` before/after each step.
+
+CLI flags: `--org ORG` (single org), `--all` (discover all rostered orgs), `--dry-run` (print plan only), `--cost-estimate` (SocialData + Claude cost estimate without execution). `--org` and `--all` are mutually exclusive.
+
+**Files:** `sable/weekly/__init__.py`, `sable/weekly/runner.py`, `sable/weekly/cli.py`, `sable/cli.py`.
+**Tests:** 16 in `tests/weekly/test_runner.py`, 7 in `tests/weekly/test_cli.py`.
+
+### `sable weekly cron install`
+
+New `sable/weekly/cron.py` — launchd plist generator following `com.sable.serve.plist` pattern. Writes `~/Library/LaunchAgents/com.sable.weekly.plist` with `StartCalendarInterval` for Monday 06:00. Prints `launchctl load`/`unload` activation instructions.
+
+**Files:** `sable/weekly/cron.py`, `sable/weekly/cli.py`.
+
+### `sable clip review --org ORG`
+
+New `sable/clip/review.py` — interactive triage queue. `find_unreviewed_clips(org)` scans workspace for `.meta.json` / `_meta.json` files lacking `vault_note_id`. Operator can approve (stamps `vault_note_id`), skip, or delete (moves to `_rejected/` subdirectory). Auto-runs vault sync after approvals.
+
+**Files:** `sable/clip/review.py`, `sable/clip/cli.py`.
+**Tests:** 7 in `tests/clip/test_review.py`.
+
+### `GET /api/v1/cost/org/{org_id}/cost-forecast`
+
+New `sable/serve/routes/cost.py` — cost forecast endpoint. Returns `weekly_estimated_usd`, `monthly_estimated_usd`, `last_7d_actual_usd`, `budget_remaining_usd`, `top_cost_drivers`. Uses `require_org_access(request, org_id, Action.pulse_read)` for RBAC.
+
+**Files:** `sable/serve/routes/cost.py`, `sable/serve/app.py`.
+**Tests:** 4 in `tests/serve/test_cost_routes.py`.
+
+Validation: 1213 passed, 0 ruff violations, 0 mypy errors.

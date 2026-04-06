@@ -2,9 +2,9 @@
 
 ---
 
-## Validation Snapshot (2026-04-05)
+## Validation Snapshot (2026-04-06)
 
-- `./.venv/bin/python -m pytest -q` → `1179 passed`
+- `./.venv/bin/python -m pytest -q` → `1213 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
@@ -102,6 +102,16 @@ All critical, high, and medium findings from `codit.md` (2026-03-23 audit) resol
 ---
 
 ## Open Items
+
+### ~~SS-3: Weekly Automation & Operator Streamlining~~ — SHIPPED 2026-04-06
+
+- `sable weekly run --org ORG` — orchestrates pulse track → meta scan → advise → calendar → vault sync
+- `sable weekly run --all` — discovers all rostered orgs, runs weekly cycle for each
+- `--dry-run` and `--cost-estimate` flags for planning without execution
+- `sable weekly cron install` — launchd plist generator (Monday 06:00)
+- `sable clip review --org ORG` — interactive triage: approve/skip/delete unreviewed clips
+- `GET /api/v1/cost/org/{org_id}/cost-forecast` — cost forecast + budget status endpoint
+- 34 new tests (16 runner + 7 CLI + 7 clip review + 4 cost routes)
 
 ### ~~SS-2: Expose `sable serve` for SableWeb~~ — SHIPPED 2026-04-06
 

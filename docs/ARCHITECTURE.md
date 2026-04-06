@@ -74,12 +74,17 @@ sable/
 │   ├── prompts.py       ← intervention prompt templates
 │   └── cli.py           ← sable churn group
 │
+├── weekly/              ← automated weekly cycle orchestration
+│   ├── runner.py        ← WeeklyRunner: 5-step pipeline (pulse→meta→advise→calendar→vault)
+│   ├── cli.py           ← sable weekly run / cron install
+│   └── cron.py          ← launchd plist generation
+│
 ├── serve/               ← FastAPI backend (Phase 2)
 │   ├── app.py           ← app factory + rate limit middleware
 │   ├── auth.py          ← Bearer token auth (named tokens + legacy fallback)
 │   ├── rate_limit.py    ← sliding-window rate limiter (60 RPM default)
 │   ├── deps.py          ← DB connection helpers
-│   └── routes/          ← vault, pulse, meta endpoints
+│   └── routes/          ← vault, pulse, meta, cost endpoints
 │
 ├── pulse/               ← performance tracking + attribution
 │   ├── cli.py           ← sable pulse group (track, report, recommend, export, trends, account, attribution, link, outcomes, meta)
@@ -284,6 +289,7 @@ DB access for pulse/meta is direct via `sable/pulse/db.py` and `sable/pulse/meta
 
 ## Phase 2+ Additions
 
-- `sable/serve/` — FastAPI read-only API (Phase 2, complete). Bearer token auth, 7 endpoints. See `docs/COMMANDS.md` § serve.
-- `sable/vault/permissions.py` — RBAC implementation (currently a stub; see `docs/ROLES.md`)
+- `sable/serve/` — FastAPI read-only API (Phase 2, complete). Bearer token auth + RBAC, 8 endpoints + /health. See `docs/COMMANDS.md` § serve.
+- `sable/vault/permissions.py` — RBAC implementation with three roles (admin/creator/operator). See `docs/ROLES.md`.
+- `sable/weekly/` — automated weekly cycle orchestration (pulse track → meta scan → advise → calendar → vault sync). `--all` mode, `--dry-run`, `--cost-estimate`, launchd scheduling.
 - Postgres backend replacing local SQLite (Phase 3)

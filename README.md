@@ -27,7 +27,8 @@ High-volume crypto Twitter content production toolkit. CLI-driven, Claude-powere
 | `sable style-delta` | Posting style gap analysis: managed account vs top-performing watchlist |
 | `sable silence-gradient` | Pre-churn cadence signals: volume drop, engagement drop, format regression |
 | `sable churn` | Churn intervention playbook generation for at-risk community members |
-| `sable serve` | Read-only API server (FastAPI): pulse, meta, vault endpoints with Bearer auth |
+| `sable weekly` | Automated weekly cycle: pulse track → meta scan → advise → calendar → vault sync |
+| `sable serve` | Read-only API server (FastAPI): pulse, meta, vault, cost endpoints with Bearer auth + RBAC |
 | `sable org` / `sable entity` / `sable job` / `sable db` / `sable resume` | Platform management: orgs, entities, jobs, sable.db migrations |
 
 ## Quick Start

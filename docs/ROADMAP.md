@@ -16,6 +16,8 @@
 - `sable vault topic` — topic hub CRUD
 - `sable pulse meta` — content shape intelligence: format trend analysis, topic signals, watchlist management, Claude recommendations (see `docs/PULSE_META.md`)
 - `sable platform` layer — `sable.db` with 15-table schema, `sable/platform/` helpers, migration runner, 5 new CLI commands (`sable org`, `sable entity`, `sable job`, `sable db`, `sable resume`), 54 tests
+- `sable weekly` — automated weekly cycle: pulse track → meta scan → advise → calendar → vault sync. `--all`, `--dry-run`, `--cost-estimate` flags. `sable weekly cron install` for launchd scheduling (Monday 06:00).
+- `sable clip review` — interactive clip triage queue: approve/skip/delete unreviewed clips, auto vault sync after approvals.
 
 **Storage:** Local filesystem, Obsidian-compatible markdown vault at `~/sable-vault/`
 
@@ -45,7 +47,7 @@ Implemented in SableTracking (not in this repo directly):
 
 ## Phase 2 — FastAPI Backend (consumed by SableWeb)
 
-**Status: Complete** — `sable serve` + all Phase 2 CLI and hardening features shipped (SS-1 through SS-21, 1038 tests). Quick Cloudflare Tunnel validated 2026-04-04. Remaining: stable production URL (cheap domain, ~$10/yr), `vault/permissions.py` RBAC stub (see `docs/ROLES.md`).
+**Status: Complete** — `sable serve` + all Phase 2 CLI and hardening features shipped (SS-1 through SS-21, 1213 tests). Production URL live at `https://api.sable.tools` via Cloudflare named tunnel. RBAC shipped with 3 roles (admin/creator/operator). Cost forecast endpoint added 2026-04-06.
 
 **Target: Expose vault and pulse data to SableWeb's `/ops` surface via a read API**
 

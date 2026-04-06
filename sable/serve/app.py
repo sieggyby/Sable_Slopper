@@ -17,7 +17,7 @@ def create_app() -> FastAPI:
     """Build and return the FastAPI application."""
     app = FastAPI(title="Sable API", version="0.1.0")
 
-    from sable.serve.routes import vault, pulse, meta
+    from sable.serve.routes import vault, pulse, meta, cost
 
     # Rate limiter (in-process, no external deps)
     from sable.serve.auth import get_serve_cfg
@@ -55,6 +55,10 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         meta.router, prefix="/api/meta", tags=["meta"],
+        dependencies=[Depends(verify_token)],
+    )
+    app.include_router(
+        cost.router, prefix="/api/v1/cost", tags=["cost"],
         dependencies=[Depends(verify_token)],
     )
 
