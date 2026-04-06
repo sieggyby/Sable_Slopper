@@ -319,7 +319,7 @@ def vault_suggest(org, vault, tweet_text, tweet_url, account):
     if tweet_url and not tweet_text:
         with console.status("Fetching tweet..."):
             try:
-                tweet_text = fetch_tweet_text(tweet_url)
+                tweet_text = fetch_tweet_text(tweet_url, org=org)
             except Exception as e:
                 from sable.platform.errors import redact_error
                 console.print(f"[red]Failed to fetch tweet: {redact_error(str(e))}[/red]")

@@ -31,11 +31,14 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 **Phase 1 (CLI) is complete.** All commands implemented: vault, pulse, clip, meme, face, character-explainer, wojak, calendar, write, score, diagnose, advise, and more.
 All community intelligence features are shipped (FEATURE-10 through FEATURE-16, CHURN-1, CHURN-2).
 
-**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Test count: 1038.
+**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Codit audit remediation (all CRIT/HIGH/MED) complete. Test count: 1157.
 
 **Remaining Phase 2 work:**
 - Cloudflare Tunnel deployment for stable URL (quick tunnel validated 2026-04-04; see TODO.md § SS-2)
-- `sable/vault/permissions.py` — RBAC implementation (currently a stub; see `docs/ROLES.md`)
+
+**RBAC (shipped 2026-04-05):** Three roles (admin/creator/operator) with per-token org scoping.
+Operators see only their allowed orgs. Config in `~/.sable/config.yaml` under `serve.tokens`.
+See `docs/ROLES.md` for the permission matrix and config format.
 
 Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
 
@@ -126,6 +129,7 @@ Non-obvious decisions that reverse naive intuition — get these wrong and you r
 | `docs/QA_WORKFLOW.md` | Default hardening workflow |
 | `docs/THREAT_MODEL.md` | Adversarial testing lens |
 | `CLIP_LESSONS.md` | Tracked failures and fixes in the clip pipeline |
+| `codit.md` | Codex audit findings (2026-03-23) — all CRIT/HIGH/MED resolved |
 | `TODO.md` | Main development queue: audit remediation log, open hardening items, and completed feature history |
 | `AGENTS.md` | Instructions for Codex review role (QA layer) |
 | `docs/COMMANDS.md` | Full CLI command reference with flags and examples |

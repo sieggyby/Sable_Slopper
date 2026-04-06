@@ -1,6 +1,7 @@
 """Client handoff zip export."""
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Optional
 
 from sable.vault.notes import load_all_notes, read_note, write_note
+
+logger = logging.getLogger(__name__)
 
 
 _STRIP_FM_KEYS = {"meta_path", "media_path"}
@@ -56,8 +59,8 @@ def export_vault(
                         changed = True
                 if changed:
                     write_note(md_file, fm, body)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to strip frontmatter from %s: %s", md_file, e)
 
         # Optionally copy media files
         if include_media:

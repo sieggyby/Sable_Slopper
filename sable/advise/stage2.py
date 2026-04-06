@@ -20,6 +20,7 @@ Produce a markdown document with these sections (omit any section where data was
 Rules:
 - Be specific and actionable. Name actual topics, formats, entities.
 - If trend data is stale, note it as such.
+- If sample sizes are noted in the input data (e.g., "3 tweets", "2 authors"), explicitly mention the limited backing data when citing those signals. Do not present thin-sample findings as robust trends.
 - Keep total output under 1500 tokens.
 - No emojis. No preamble.
 """

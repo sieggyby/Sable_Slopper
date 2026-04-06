@@ -119,14 +119,14 @@ def score_uptake(
     uptake_score = unique_authors / total_authors if total_authors > 0 else 0.0
 
     # Velocity: authors per day since beat started
-    uptake_velocity = 0.0
+    uptake_velocity: float | None = None
     if beat.started_at:
         try:
             start_dt = datetime.fromisoformat(beat.started_at)
             if start_dt.tzinfo is None:
                 start_dt = start_dt.replace(tzinfo=timezone.utc)
             days_since = (datetime.now(timezone.utc) - start_dt).days
-            if days_since > 0:
+            if unique_authors >= 3 and days_since >= 2:
                 uptake_velocity = unique_authors / days_since
         except (ValueError, TypeError):
             logger.warning("Unparseable started_at for beat '%s': %s", beat.name, beat.started_at)

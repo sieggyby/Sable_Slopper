@@ -23,14 +23,12 @@ def scan_lexicon(
     days: int = 14,
     top_n: int = 20,
     conn: sqlite3.Connection | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """Scan scanned_tweets for community-exclusive vocabulary.
 
-    Returns list of dicts sorted by LSR descending:
-        [{"term": str, "mention_count": int, "unique_authors": int,
-          "total_authors": int, "lsr": float}, ...]
-
-    Returns empty list if minimum thresholds are not met.
+    Returns (terms, meta) where:
+        terms: list of dicts sorted by LSR descending
+        meta: {"corpus_tweets": int, "corpus_authors": int, "below_threshold": bool}
     """
     if conn is None:
         from sable.pulse.meta.db import get_conn
@@ -47,7 +45,7 @@ def scan_lexicon(
     ).fetchall()
 
     if not rows:
-        return []
+        return [], {"corpus_tweets": 0, "corpus_authors": 0, "below_threshold": True}
 
     # Count unique authors and tweets
     all_authors = set()
@@ -60,7 +58,7 @@ def scan_lexicon(
     total_tweets = len(tweet_dicts)
 
     if total_authors < MIN_AUTHORS or total_tweets < MIN_TWEETS:
-        return []
+        return [], {"corpus_tweets": total_tweets, "corpus_authors": total_authors, "below_threshold": True}
 
     # Extract terms from each tweet
     from sable.pulse.meta.topics import extract_terms, extract_repeated_ngrams
@@ -116,7 +114,7 @@ def scan_lexicon(
         })
 
     results.sort(key=lambda r: r["lsr"], reverse=True)
-    return results[:top_n]
+    return results[:top_n], {"corpus_tweets": total_tweets, "corpus_authors": total_authors, "below_threshold": False}
 
 
 def compute_lsr(unique_authors: int, total_authors: int, mention_count: int) -> float:

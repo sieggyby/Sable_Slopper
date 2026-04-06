@@ -376,6 +376,14 @@ def meta_scan(org, deep, full, cheap, dry_run, skip_if_fresh=None, resume_scan_i
         for failed_handle in result["failed_authors"]:
             console.print(f"  [yellow]  - {failed_handle}[/yellow]")
 
+    # HIGH-5: surface deep-mode outsider results with explicit transient marker
+    outsider = result.get("outsider_results", {})
+    if outsider:
+        total = sum(len(v) for v in outsider.values())
+        buckets = ", ".join(f"{k} ({len(v)})" for k, v in outsider.items())
+        console.print(f"[dim]Deep mode: {total} outsider tweet(s) classified — {buckets}[/dim]")
+        console.print("[dim]  ↳ Outsider results are transient (not stored in meta.db)[/dim]")
+
     # First-scan tip
     runs = meta_db.get_scan_runs(org, limit=5)
     if len(runs) <= 2:

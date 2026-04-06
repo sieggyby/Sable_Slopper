@@ -520,7 +520,8 @@ Set lands=false when the chosen variant cuts off before the rhetorical point is 
             evaluations = json.loads(raw2)
             if not isinstance(evaluations, list):
                 evaluations = []
-        except Exception:
+        except Exception as e:
+            _logger.warning("Clip evaluation retry failed, falling back to empty: %s", e)
             evaluations = []
 
     eval_map: dict[int, dict] = {}

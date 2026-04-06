@@ -90,6 +90,8 @@ Watchlist tweet cache and format-trend intelligence.
 | `schema_version` | Single-row version tracker |
 | `lexicon_terms` | Org-scoped glossary of community-specific terminology with LSR scores |
 | `author_cadence` | Per-author silence gradient signals (volume/engagement/format regression) |
+| `hook_pattern_cache` | Cached hook pattern JSON per org + format bucket |
+| `viral_anatomies` | Claude-generated anatomy of high-lift tweets |
 | `scan_checkpoints` | Per-author completion state within a scan run (resume support) |
 
 #### scanned_tweets (the big one)
@@ -155,12 +157,38 @@ prev_scan_mentions INTEGER,
 acceleration REAL DEFAULT 0.0
 ```
 
+#### hook_pattern_cache
+```sql
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+org TEXT NOT NULL,
+format_bucket TEXT NOT NULL,
+patterns_json TEXT NOT NULL,
+generated_at TEXT NOT NULL,
+UNIQUE(org, format_bucket)
+```
+Cached hook pattern analysis per org + format bucket. Written by `sable pulse meta hooks`.
+
+#### viral_anatomies
+```sql
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+org TEXT NOT NULL,
+tweet_id TEXT NOT NULL,
+author_handle TEXT NOT NULL,
+total_lift REAL NOT NULL,
+format_bucket TEXT NOT NULL,
+anatomy_json TEXT NOT NULL,
+analyzed_at TEXT NOT NULL,
+UNIQUE(org, tweet_id)
+```
+Claude-generated structural breakdown of high-lift tweets. Written by `sable pulse meta anatomy`.
+
 #### scan_checkpoints
 ```sql
 scan_id INTEGER NOT NULL,
 author_handle TEXT NOT NULL,
-completed_at TEXT,
-UNIQUE(scan_id, author_handle)
+completed_at TEXT DEFAULT (datetime('now')),
+tweets_collected INTEGER DEFAULT 0,
+PRIMARY KEY (scan_id, author_handle)
 ```
 Per-author completion tracking within a scan run. Used by `--resume SCAN_ID` to skip already-processed authors.
 

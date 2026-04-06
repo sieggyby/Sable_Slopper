@@ -5,8 +5,9 @@ import logging
 import sqlite3
 
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 
-from sable.serve.auth import resolve_client, verify_token
+from sable.serve.auth import resolve_client, verify_token  # noqa: F401 — verify_token used as Depends()
 from sable.serve.rate_limit import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,11 @@ def create_app() -> FastAPI:
         dependencies=[Depends(verify_token)],
     )
 
+    @app.exception_handler(Exception)
+    async def _global_exception_handler(request: Request, exc: Exception):
+        logger.error("Unhandled error on %s: %s", request.url.path, exc, exc_info=True)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
     @app.get("/health")
     def health():
         checks = _run_health_checks()
@@ -82,7 +88,8 @@ def _run_health_checks() -> dict[str, bool]:
             checks["pulse_db"] = True
         else:
             checks["pulse_db"] = False
-    except Exception:
+    except Exception as e:
+        logger.warning("Health check pulse_db probe failed: %s", e)
         checks["pulse_db"] = False
 
     # meta.db readable
@@ -95,14 +102,16 @@ def _run_health_checks() -> dict[str, bool]:
             checks["meta_db"] = True
         else:
             checks["meta_db"] = False
-    except Exception:
+    except Exception as e:
+        logger.warning("Health check meta_db probe failed: %s", e)
         checks["meta_db"] = False
 
     # vault path exists
     try:
         v = vault_dir()
         checks["vault"] = v.exists() and v.is_dir()
-    except Exception:
+    except Exception as e:
+        logger.warning("Health check vault probe failed: %s", e)
         checks["vault"] = False
 
     return checks

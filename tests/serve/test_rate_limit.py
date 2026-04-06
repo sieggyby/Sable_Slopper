@@ -90,3 +90,35 @@ def test_anonymous_does_not_consume_authenticated_budget():
     assert limiter.check("/api/vault/inventory/z") is not None
     # Authenticated client is unaffected
     assert limiter.check("/api/vault/inventory/x", client="alice") is None
+
+
+def test_lru_eviction_preserves_recently_used():
+    """T3-6: Fill 100 keys, touch key #1 recently, evict with key #101 — key #1 survives."""
+    from unittest.mock import patch
+    import time as time_mod
+    import sable.serve.rate_limit as rl
+
+    orig_max = rl._MAX_KEYS
+    rl._MAX_KEYS = 5  # small cap for test
+    try:
+        limiter = RateLimiter(requests_per_minute=100)
+        base = time_mod.monotonic()
+
+        # Fill 5 keys at time base
+        with patch("sable.serve.rate_limit.time.monotonic", return_value=base):
+            for i in range(5):
+                limiter.check(f"/api/route{i}")
+
+        # Touch key 0 at time base+10 (most recently used)
+        with patch("sable.serve.rate_limit.time.monotonic", return_value=base + 10):
+            limiter.check("/api/route0")
+
+        # Add key 5 — should evict the LRU key (one of route1-4), NOT route0
+        with patch("sable.serve.rate_limit.time.monotonic", return_value=base + 11):
+            limiter.check("/api/route5")
+
+        # route0 should still have its bucket
+        key0 = "__anonymous__:/api/route0"
+        assert key0 in limiter._timestamps
+    finally:
+        rl._MAX_KEYS = orig_max

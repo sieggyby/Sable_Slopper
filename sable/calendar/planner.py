@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from sable.shared.api import call_claude_json
 
@@ -88,8 +91,8 @@ def _get_posting_history(handle: str, days: int, conn: sqlite3.Connection) -> di
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             days_since_last[bucket] = (now - dt).days
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to parse last_posted_at for bucket %s: %s", bucket, e)
 
     return {
         "format_counts": format_counts,
@@ -153,7 +156,8 @@ def _get_format_trends(org: str, conn: sqlite3.Connection) -> dict[str, float]:
                  )""",
             (org,),
         ).fetchall()
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to query format_trends for org %s: %s", org, e)
         return {}
 
     result: dict[str, float] = {}
@@ -393,7 +397,8 @@ def _parse_calendar_response(
             generated_at=generated_at,
         )
 
-    except Exception:
+    except Exception as e:
+        logger.warning("Calendar response parsing failed, using fallback: %s", e)
         # Minimal fallback
         fallback_day = CalendarDay(
             date=now.strftime("%Y-%m-%d"),

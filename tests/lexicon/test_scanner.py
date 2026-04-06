@@ -85,31 +85,39 @@ def test_compute_lsr_zero_authors():
 # ---------------------------------------------------------------------------
 
 def test_scan_empty_org():
-    """Empty org returns empty list."""
+    """Empty org returns empty list with below_threshold metadata."""
     conn = _make_conn()
-    assert scan_lexicon("nonexistent", conn=conn) == []
+    terms, meta = scan_lexicon("nonexistent", conn=conn)
+    assert terms == []
+    assert meta["below_threshold"] is True
+    assert meta["corpus_tweets"] == 0
+    assert meta["corpus_authors"] == 0
 
 
 def test_scan_below_author_threshold():
-    """Fewer than MIN_AUTHORS returns empty."""
+    """Fewer than MIN_AUTHORS returns empty with metadata."""
     conn = _make_conn()
     # Insert 5 authors (below MIN_AUTHORS=10)
     for i in range(5):
         for j in range(12):
             _insert_tweet(conn, "org", f"@a{i}", "test $BTC", days_ago=j % 7)
-    result = scan_lexicon("org", conn=conn)
-    assert result == []
+    terms, meta = scan_lexicon("org", conn=conn)
+    assert terms == []
+    assert meta["below_threshold"] is True
+    assert meta["corpus_authors"] == 5
 
 
 def test_scan_below_tweet_threshold():
-    """Fewer than MIN_TWEETS returns empty."""
+    """Fewer than MIN_TWEETS returns empty with metadata."""
     conn = _make_conn()
     # Insert 12 authors but only 2 tweets each (24 < 50)
     for i in range(12):
         for j in range(2):
             _insert_tweet(conn, "org", f"@a{i}", "test $BTC", days_ago=j)
-    result = scan_lexicon("org", conn=conn)
-    assert result == []
+    terms, meta = scan_lexicon("org", conn=conn)
+    assert terms == []
+    assert meta["below_threshold"] is True
+    assert meta["corpus_tweets"] == 24
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +128,8 @@ def test_exclusivity_filters_generic_terms():
     """Terms appearing in >25% of authors are filtered out."""
     conn = _make_conn()
     _seed_corpus(conn)
-    result = scan_lexicon("test_org", conn=conn)
+    result, meta = scan_lexicon("test_org", conn=conn)
+    assert meta["below_threshold"] is False
     terms = [r["term"] for r in result]
     # $BTC appears in 80% of authors → should be filtered
     assert "$btc" not in terms or all(
@@ -133,7 +142,7 @@ def test_niche_terms_kept():
     """Terms within exclusivity bounds are kept."""
     conn = _make_conn()
     _seed_corpus(conn)
-    result = scan_lexicon("test_org", conn=conn)
+    result, _meta = scan_lexicon("test_org", conn=conn)
     # If any results exist, they must satisfy exclusivity bounds
     for r in result:
         assert r["unique_authors"] / r["total_authors"] <= MAX_AUTHOR_SHARE
@@ -149,7 +158,7 @@ def test_result_keys():
     """Each result has expected keys."""
     conn = _make_conn()
     _seed_corpus(conn)
-    result = scan_lexicon("test_org", conn=conn)
+    result, _meta = scan_lexicon("test_org", conn=conn)
     if result:
         r = result[0]
         assert "term" in r
@@ -163,7 +172,7 @@ def test_results_sorted_by_lsr():
     """Results are sorted by LSR descending."""
     conn = _make_conn()
     _seed_corpus(conn)
-    result = scan_lexicon("test_org", conn=conn)
+    result, _meta = scan_lexicon("test_org", conn=conn)
     if len(result) >= 2:
         for i in range(len(result) - 1):
             assert result[i]["lsr"] >= result[i + 1]["lsr"]
@@ -173,7 +182,7 @@ def test_top_n_limits_results():
     """top_n parameter limits result count."""
     conn = _make_conn()
     _seed_corpus(conn)
-    result = scan_lexicon("test_org", top_n=2, conn=conn)
+    result, _meta = scan_lexicon("test_org", top_n=2, conn=conn)
     assert len(result) <= 2
 
 

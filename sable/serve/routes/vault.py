@@ -4,10 +4,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
+from sable.serve.auth import require_org_access
 from sable.serve.deps import get_pulse_db, resolve_vault_path
 from sable.vault.notes import load_all_notes
+from sable.vault.permissions import Action
 from sable.roster.manager import list_accounts
 
 router = APIRouter()
@@ -26,8 +28,9 @@ def _age_days(produced_at: str | None) -> int:
 
 
 @router.get("/inventory/{org}")
-def vault_inventory(org: str):
+def vault_inventory(org: str, request: Request):
     """Vault content inventory — total produced, posted, unused, by-format breakdown."""
+    require_org_access(request, org, Action.vault_read)
     try:
         vault_path = resolve_vault_path(org)
     except Exception:
@@ -144,10 +147,12 @@ def vault_inventory(org: str):
 @router.get("/search/{org}")
 def vault_search(
     org: str,
+    request: Request,
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(10, ge=1, le=50),
 ):
     """Search vault content notes by keyword matching."""
+    require_org_access(request, org, Action.vault_read)
     try:
         vault_path = resolve_vault_path(org)
     except Exception:

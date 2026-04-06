@@ -497,6 +497,7 @@ def test_render_includes_insufficient_data_label():
         niche_trend_status=None,
         niche_confidence=None,
         post_count=1,
+        account_confidence="D",
         divergence_signal="NEUTRAL",
     )
     report = AccountFormatReport(
@@ -521,6 +522,7 @@ def test_render_shows_divergence_signal_when_niche_data_present():
         niche_trend_status="rising",
         niche_confidence="high",
         post_count=5,
+        account_confidence="C",
         divergence_signal="DOUBLE DOWN",
     )
     report = AccountFormatReport(
@@ -550,6 +552,61 @@ def test_render_shows_missing_niche_formats():
     rendered = render_account_report(report)
     assert "long_clip" in rendered
     assert "thread" in rendered
+
+
+def test_confidence_grade_d_for_2_posts():
+    """T1-3: 2-post bucket should show confidence D."""
+    entry = FormatLiftEntry(
+        format_bucket="thread",
+        account_lift=1.5,
+        niche_lift=None,
+        niche_trend_status=None,
+        niche_confidence=None,
+        post_count=2,
+        account_confidence="D",
+        divergence_signal="NEUTRAL",
+    )
+    report = AccountFormatReport(
+        handle="@alice", org="", days=30, total_posts=2,
+        entries=[entry], missing_niche_formats=[],
+        generated_at="2026-03-24T00:00:00+00:00",
+    )
+    rendered = render_account_report(report)
+    assert "[D]" in rendered
+
+
+def test_confidence_grade_a_for_25_posts():
+    """T1-3: 25-post bucket should show confidence A."""
+    entry = FormatLiftEntry(
+        format_bucket="thread",
+        account_lift=2.0,
+        niche_lift=None,
+        niche_trend_status=None,
+        niche_confidence=None,
+        post_count=25,
+        account_confidence="A",
+        divergence_signal="NEUTRAL",
+    )
+    report = AccountFormatReport(
+        handle="@alice", org="", days=30, total_posts=25,
+        entries=[entry], missing_niche_formats=[],
+        generated_at="2026-03-24T00:00:00+00:00",
+    )
+    rendered = render_account_report(report)
+    assert "[A]" in rendered
+
+
+def test_account_confidence_function():
+    """T1-3: _account_confidence grading thresholds."""
+    from sable.pulse.account_report import _account_confidence
+    assert _account_confidence(1) == "D"
+    assert _account_confidence(4) == "D"
+    assert _account_confidence(5) == "C"
+    assert _account_confidence(9) == "C"
+    assert _account_confidence(10) == "B"
+    assert _account_confidence(19) == "B"
+    assert _account_confidence(20) == "A"
+    assert _account_confidence(100) == "A"
 
 
 # ---------------------------------------------------------------------------

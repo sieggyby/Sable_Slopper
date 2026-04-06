@@ -147,6 +147,7 @@ def test_format_over_indexing(tmp_path):
         niche_trend_status=None,
         niche_confidence=None,
         post_count=8,
+        account_confidence="C",
         divergence_signal="NEUTRAL",
     )
     report = _make_format_report(total_posts=10, entries=[entry])
@@ -176,6 +177,7 @@ def test_format_execution_gap(tmp_path):
         niche_trend_status="rising",
         niche_confidence="B",
         post_count=8,
+        account_confidence="C",
         divergence_signal="EXECUTION GAP",
     )
     report = _make_format_report(total_posts=8, entries=[entry])
@@ -422,6 +424,7 @@ def test_all_clear(tmp_path):
                 niche_trend_status=None,
                 niche_confidence=None,
                 post_count=14,
+                account_confidence="B",
                 divergence_signal="NEUTRAL",
             ),
             FormatLiftEntry(
@@ -431,6 +434,7 @@ def test_all_clear(tmp_path):
                 niche_trend_status=None,
                 niche_confidence=None,
                 post_count=14,
+                account_confidence="B",
                 divergence_signal="NEUTRAL",
             ),
         ],

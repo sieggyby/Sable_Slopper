@@ -209,6 +209,8 @@ Schema v5 → v6. Write path owned by Cult Grader's `platform_sync.py`.
 | 2026-04-04 (SocialData hardening: cost breakdown, logging, cursor cycling, checkpoint/resume) | 921 | 0 | 0 |
 | 2026-04-04 (Production hardening Phase 1: SS-1, SS-3–SS-14) | 1008 | 0 | 2 pre-existing |
 | 2026-04-04 (Production hardening Phase 2: SS-15–SS-21 + QA) | 1038 | 0 | 2 pre-existing |
+| 2026-04-05 (AQ remediation batch: AQ-1–34 + QA) | 1091 | 0 | 0 |
+| 2026-04-05 (Full repo audit: T1-1–T3-10) | 1155 | 0 | 0 |
 
 ---
 
@@ -421,3 +423,151 @@ All 7 endpoints + /health documented with paths, params, response shapes, field 
 Round 2 confirmed all clean — 0 findings.
 
 ### Validation at completion: 1038 tests, ruff 0, mypy 2 (pre-existing)
+
+---
+
+## AQ Remediation Batch (2026-04-05)
+
+Full audit remediation pass across 9 batches (AQ-1 through AQ-34). Adversarial QA
+subagent gating with AGENTS.md lens. 2 critical, 3 high, 4 low findings caught and
+fixed in QA round. Final validation: 1091 tests, ruff 0, mypy 0.
+
+### Batch 1 — Silent Exception Hardening
+
+- **AQ-17:** Retry helper intermediate failure logging — `sable/shared/retry.py` now logs `logger.debug` on each non-final retry attempt (sync and async paths)
+- **AQ-18:** Clip selector eval retry fallback — `sable/clip/selector.py` logs `logger.warning` when batch eval retry exhausted, falls back to empty evaluations
+- **AQ-19:** Serve health check bare excepts — `sable/serve/app.py` health probes log `logger.warning` with exception detail on pulse_db, meta_db, vault failures
+- **AQ-20:** Advise cache date parse — `sable/advise/generate.py` catches `(ValueError, TypeError)` with `logger.warning` instead of silent pass
+- **AQ-21:** Vault export frontmatter strip — `sable/vault/export.py` logs `logger.warning` on strip failure instead of silent pass
+- **AQ-22:** Face track detection failure — `sable/clip/face_track.py` logs `logger.debug` on per-frame face detection failure
+
+### Batch 2 — SocialData Cost Logging
+
+- **AQ-6:** SocialData cost logging in vault suggest — `sable/vault/suggest.py:fetch_tweet_text()` now accepts `org` param, logs `$0.002` cost event with `call_type=socialdata_suggest` via `platform.cost.log_cost()`. `sable/vault/cli.py` threads org through.
+
+### Batch 3 — Scanner Transaction Atomicity
+
+- **AQ-9:** Batch upsert + atomic transactions — `sable/pulse/meta/db.py` gains `bulk_upsert_tweets()` operating on caller-provided connection for transaction scope. `sable/pulse/meta/scanner.py` accumulates author tweets into batch, wraps upsert + profile update + checkpoint in single `with conn:` block. Fixed `attrs_json` serialization bug: `isinstance(attrs, (list, dict))` in both `upsert_tweet()` and `bulk_upsert_tweets()`.
+
+### Batch 4 — Doc Corrections
+
+- **AQ-23:** `docs/COMMANDS.md` — Fixed serve port `8000` → `8420`
+- **AQ-24:** `docs/ENV_VARS.md` — Documented both `nano` (roster) and `vi` (narrative) EDITOR fallbacks
+- **AQ-25:** `docs/SCHEMA_INVENTORY.md` — Added `hook_pattern_cache` and `viral_anatomies` table definitions; fixed `scan_checkpoints` PRIMARY KEY and columns
+- **AQ-26:** `docs/CONFIG_REFERENCE.md` — Added vault config keys section and `max_analysis_cost` under pulse_meta
+
+### Batch 5 — New Test Coverage
+
+- **AQ-13:** Scanner transaction tests — `tests/pulse/meta/test_scanner_balance_exhausted.py`: `bulk_upsert_tweets` return count, transaction rollback on failure, checkpoint persistence
+- **AQ-14:** Serve auth success tests — `tests/serve/test_auth_success.py`: valid bearer token returns 200 on performance and posting-log endpoints
+- **AQ-15:** FFmpeg failure tests — `tests/clip/test_ffmpeg_failure.py`: CalledProcessError, TimeoutExpired, FileNotFoundError all raise RuntimeError
+- **AQ-16:** Brainrot exhaustion tests — `tests/clip/test_brainrot_exhaustion.py`: empty index, no matching energy, all files missing → returns None
+- **AQ-28:** Calendar planner tests — `tests/calendar_plan/test_calendar_build.py`: Claude response parsing, empty data graceful degradation, invalid JSON fallback
+- **AQ-29:** Pulse DB tests — `tests/pulse/test_pulse_db.py`: migrate, WAL mode, insert_post deduplication, handle normalization, thread columns
+- **AQ-30:** Vault notes core tests — `tests/vault/test_notes_core.py`: read/write note, read_frontmatter, load_all_notes with valid/invalid/empty frontmatter
+- **AQ-32:** Advise generate orchestration tests — `tests/advise/test_generate_orchestration.py`: dry_run, cache hit, unknown org, no roster entry, budget exceeded (degrade_mode=error)
+- **AQ-34:** Face library tests — `tests/face/test_library.py`: add/get/remove reference, missing file, consent filter, deduplication
+
+### QA Findings (caught by adversarial subagent)
+
+- **C-1 (Critical):** `upsert_tweet()` line 327 still had `isinstance(attrs, list)` — dict attrs from `classify_tweet()` caused `sqlite3.ProgrammingError`. Fixed to `isinstance(attrs, (list, dict))`.
+- **C-2 (Critical):** Test false confidence — `test_scanner_balance_exhausted` tested wrong function. Rewritten to validate `bulk_upsert_tweets` transactional integrity directly.
+- **H-1 (High):** Scanner empty `raw_tweets` branch skipped checkpoint — caused unnecessary re-fetches on resume. Fixed by adding `checkpoint_author` call + progress advance.
+- **H-2 (High):** AQ-20 used `logger.debug` instead of spec'd `logger.warning`. Fixed.
+- **H-3 (High):** Missing budget-exceeded test path. Added test with `degrade_mode: "error"` config mock.
+- **L-1 (Low):** `_row_to_tweet` bare `except Exception:` with no logging. Narrowed to `(json.JSONDecodeError, TypeError)` with warning.
+- **L-2–L-4 (Low):** Minor doc/assertion tightening in test files.
+
+### Validation at completion: 1091 tests, ruff 0, mypy 0
+
+---
+
+## Full Repo Audit Remediation (2026-04-05)
+
+Multi-dimensional audit across test coverage, cost/resource risks, security, resilience,
+schema drift, and output trustworthiness. 19 items identified and organized by AGENTS.md
+tier system. All 19 unblocked items implemented with adversarial QA gating.
+
+### Tier 1 — Breaks prod, leaks secrets, or burns money
+
+- **T1-1 (Critical):** Replicate API key env leak — `sable/face/swapper.py` was setting
+  `os.environ["REPLICATE_API_TOKEN"]` on every call. Fixed: `replicate.Client(api_token=...)`
+  returns isolated client. Test: `tests/face/test_swapper.py` verifies env untouched.
+
+- **T1-2 (Critical):** Strategy brief sample size disclosure — `sable/advise/stage1.py`
+  rendered pulse trends without sample counts. Fixed: 4 sites patched (topic rendering
+  includes author/mention counts, format rendering includes sample count, thin-sample
+  caveats in generate.py, stage2 contract rule). Tests: `tests/advise/test_sample_disclosure.py`.
+
+- **T1-3 (High):** Account format report confidence grade — `sable/pulse/account_report.py`
+  showed lift from 2-post samples with no quality signal. Fixed: `account_confidence` field
+  (A/B/C/D thresholds: 20/10/5) on `FormatLiftEntry`, grades rendered in output.
+
+### Tier 2 — Breaks maintainers
+
+- **T2-1:** pulse/meta/db.py tests — 14 tests in `tests/pulse/meta/test_meta_db.py` covering
+  migrate, upsert, query, checkpoint, scan_run, format_baseline functions.
+- **T2-2:** pulse/meta/scanner.py tests — 8 tests in `tests/pulse/meta/test_scanner.py` covering
+  tweet normalization, budget cap, empty author, balance exhausted, checkpoint resume.
+- **T2-3:** pulse/meta/cli.py tests — 5 tests in `tests/pulse/meta/test_meta_cli.py` covering
+  scan dry-run, empty watchlist, status with/without data, help text.
+- **T2-4:** ElevenLabs key loaded from `os.environ` instead of config —
+  `sable/character_explainer/tts/elevenlabs.py` now uses `require_key("elevenlabs_api_key")`.
+- **T2-5:** Vault notes TTL cache — `sable/vault/notes.py` gains module-level 5-min TTL cache
+  with `invalidate_notes_cache()`. Tests: `tests/vault/test_notes_cache.py`.
+- **T2-6:** face/optimize.py exception logging — 4 bare `except Exception` blocks now log
+  `logger.debug` with error details.
+
+### Tier 3 — Slows future work / test gaps
+
+- **T3-1:** calendar/planner.py tests — 6 tests in `tests/calendar_planner/test_planner.py`
+  covering parse, fallback, churn cap, render.
+- **T3-2:** shared/ffmpeg.py tests — 6 tests in `tests/shared/test_ffmpeg.py` covering
+  run() error handling and command construction for extract_clip/extract_audio.
+- **T3-3:** onboard/orchestrator.py tests — 3 tests in `tests/onboard/test_orchestrator.py`
+  covering YAML loading, missing file, malformed YAML.
+- **T3-4:** vault/cli.py tests — 3 tests in `tests/vault/test_vault_cli.py` covering
+  init, search, status commands.
+- **T3-5:** platform/cli.py tests — 3 tests in `tests/platform/test_platform_cli.py`
+  covering org list (empty/populated), db status.
+- **T3-6:** Rate limiter FIFO eviction → LRU — `sable/serve/rate_limit.py` eviction now
+  uses `min()` by last-request timestamp instead of insertion order.
+- **T3-7:** Global exception handler — `sable/serve/app.py` gains
+  `@app.exception_handler(Exception)` returning generic 500 with logged traceback.
+- **T3-8:** Write generator anatomy sample count — prompt block now includes
+  `{len(patterns)} highest-performing posts` with caveat language.
+- **T3-9:** Narrative velocity min sample guard — `sable/narrative/tracker.py` returns
+  `None` velocity when `unique_authors < 3` or `days_since < 2`. Model field updated
+  to `Optional[float]`.
+- **T3-10:** Lexicon scanner metadata return — `sable/lexicon/scanner.py` return type
+  changed from `list[dict]` to `tuple[list[dict], dict]` with corpus_tweets,
+  corpus_authors, below_threshold metadata. CLI caller updated.
+
+### QA Findings
+
+Adversarial QA subagent reviewed all 19 implementations. No Tier 1 or Tier 2 findings.
+
+### Validation at completion: 1155 tests, ruff 0, mypy 0
+
+---
+
+## Codit Audit Remediation (2026-04-05)
+
+Full remediation of `codit.md` (Codex audit dated 2026-03-23). All 5 critical, 7 high,
+and 12 medium findings resolved. Three adversarial QA passes confirmed zero remaining findings.
+
+### Key changes:
+- **CRIT-1:** `vault/platform_sync.py` — pulse report staging moved before Phase B renames,
+  closing the partial-sync window. `_cleanup_temps()` helper extracted. TOCTOU fix on pulse
+  source read.
+- **MED-5:** `vault/search.py` — `SearchResult.degraded` field signals keyword-fallback results.
+- **MED-10:** `pulse/meta/db.py` — `upsert_format_baseline` renamed to `insert_format_baseline`,
+  same-second duplicate prevention added. Backwards-compat alias retained.
+- **HIGH-5:** `pulse/meta/cli.py` — deep-mode outsider results now explicitly marked transient
+  in console output.
+
+Most findings (CRIT-2 through CRIT-5, HIGH-1 through HIGH-4, HIGH-6, HIGH-7, MED-1 through
+MED-4, MED-6 through MED-9, MED-11, MED-12) had already been resolved during prior AR-5
+remediation passes.
+
+### Validation at completion: 1157 tests, ruff 0, mypy 0

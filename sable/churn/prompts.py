@@ -16,6 +16,8 @@ Decay score: {decay_score}
 Last active: {last_active}
 Role: {role}
 Topics of interest: {topics}
+Total posts in analysis window: {total_posts}
+Days active in period: {days_active}
 Additional notes: {notes}
 
 Respond with a JSON object containing:

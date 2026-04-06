@@ -27,9 +27,7 @@ _MODEL_NAMES = ["facefusion", "yan-ops/faceswap", "omniedge/faceswap"]
 def _get_replicate():
     import replicate
     api_key = cfg.require_key("replicate_api_key")
-    import os
-    os.environ["REPLICATE_API_TOKEN"] = api_key
-    return replicate
+    return replicate.Client(api_token=api_key)
 
 
 def swap_image(

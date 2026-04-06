@@ -49,9 +49,12 @@ class RateLimiter:
             ts = self._timestamps.get(key)
             if ts is None:
                 if len(self._timestamps) >= _MAX_KEYS:
-                    # Evict oldest key (least recently created)
-                    oldest = next(iter(self._timestamps))
-                    del self._timestamps[oldest]
+                    # Evict least-recently-used key
+                    lru_key = min(
+                        self._timestamps,
+                        key=lambda k: self._timestamps[k][-1] if self._timestamps[k] else 0,
+                    )
+                    del self._timestamps[lru_key]
                 ts = deque()
                 self._timestamps[key] = ts
 

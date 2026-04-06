@@ -113,3 +113,19 @@ def test_anonymous_traffic_does_not_consume_auth_budget(monkeypatch):
         headers={"Authorization": "Bearer tok_alice"},
     )
     assert resp.status_code != 429
+
+
+def test_global_exception_handler_returns_500():
+    """T3-7: Unhandled exceptions return 500 with no traceback."""
+    app = create_app()
+
+    @app.get("/test/explode")
+    def explode():
+        raise ValueError("deliberate boom")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/test/explode")
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body == {"detail": "Internal server error"}
+    assert "deliberate boom" not in resp.text

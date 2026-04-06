@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -71,11 +70,8 @@ class ElevenLabsEngine(TTSEngine):
         original_text: Optional[str] = None,
         org_id: Optional[str] = None,
     ) -> TTSResult:
-        api_key = os.environ.get("ELEVENLABS_API_KEY", "")
-        if not api_key:
-            raise RuntimeError(
-                "ELEVENLABS_API_KEY environment variable not set."
-            )
+        from sable.config import require_key
+        api_key = require_key("elevenlabs_api_key")
 
         voice_id = character.elevenlabs_voice_id
         if not voice_id:

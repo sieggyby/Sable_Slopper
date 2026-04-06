@@ -28,6 +28,7 @@ class SearchResult:
     score: int
     reason: str
     note: dict
+    degraded: bool = False  # True when Claude ranking failed and keyword fallback was used
 
 
 def search_vault(
@@ -60,7 +61,7 @@ def search_vault(
             logger.warning("Claude ranking failed, using keyword fallback: %s", e, exc_info=True)
             prescored = keyword_prescore(query, candidates)
             return [
-                SearchResult(id=n.get("id", "?"), score=s, reason="keyword match", note=n)
+                SearchResult(id=n.get("id", "?"), score=s, reason="keyword match", note=n, degraded=True)
                 for n, s in prescored[:config.max_suggestions]
             ]
     else:
@@ -72,7 +73,7 @@ def search_vault(
             logger.warning("Claude ranking failed, using keyword fallback: %s", e, exc_info=True)
             # Fallback: return keyword-scored results
             return [
-                SearchResult(id=n.get("id", "?"), score=s, reason="keyword match", note=n)
+                SearchResult(id=n.get("id", "?"), score=s, reason="keyword match", note=n, degraded=True)
                 for n, s in prescored[:config.max_suggestions]
             ]
 

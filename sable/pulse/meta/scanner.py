@@ -7,6 +7,7 @@ from typing import Optional
 
 from sable.shared.handles import strip_handle, normalize_handle
 from sable.shared.socialdata import socialdata_get_async, BalanceExhaustedError
+from sable.pulse.meta.db import bulk_upsert_tweets, get_conn as _meta_get_conn
 
 _COST_PER_REQUEST = 0.002  # rough estimate per API call
 _MAX_TWEET_PAGES = 32      # 32 pages × 100 tweets = 3200 tweet ceiling
@@ -337,6 +338,10 @@ class Scanner:
                 break
 
             if not raw_tweets:
+                # Still checkpoint so resume doesn't re-fetch this author
+                self.db.checkpoint_author(scan_id, handle, tweets_collected=0)
+                if _progress_ctx and _progress_task is not None:
+                    _progress_ctx.advance(_progress_task)
                 continue
 
             # Normalise + classify
@@ -349,6 +354,8 @@ class Scanner:
             # Build author history from DB for normalization
             author_history = self.db.get_author_tweets(handle, self.org, limit=100)
 
+            # Classify + normalize all tweets for this author
+            author_batch: list[dict] = []
             for tweet in normalised:
                 tweets_collected += 1
 
@@ -381,28 +388,40 @@ class Scanner:
                     "author_quality_weight": normalized.author_quality.weight,
                 })
 
-                is_new = self.db.upsert_tweet(tweet)
-                if is_new:
-                    tweets_new += 1
-                    self._tweets_new += 1  # P2
-                    author_history.append(tweet)  # use new tweet in subsequent normalizations
+                author_batch.append(tweet)
+                author_history.append(tweet)  # use new tweet in subsequent normalizations
 
-            # Update author profile cursor (AR5-9: use integer comparison, not string max)
-            if normalised:
-                valid_ids = [int(t["tweet_id"]) for t in normalised
-                             if t.get("tweet_id") and str(t["tweet_id"]).isdigit()]
-                latest_id = str(max(valid_ids)) if valid_ids else None
-                if latest_id:
-                    self.db.upsert_author_profile(
-                        author_handle=handle,
-                        org=self.org,
-                        last_tweet_id=latest_id,
-                        tweet_count=len(normalised),
-                        last_seen=datetime.now(timezone.utc).isoformat(),
+            # AQ-9: Atomically insert all tweets + checkpoint in one transaction
+            if author_batch:
+                tx_conn = _meta_get_conn()
+                with tx_conn:
+                    batch_new = bulk_upsert_tweets(tx_conn, author_batch)
+                    tweets_new += batch_new
+                    self._tweets_new += batch_new
+
+                    # Update author profile cursor (AR5-9: use integer comparison, not string max)
+                    valid_ids = [int(t["tweet_id"]) for t in normalised
+                                 if t.get("tweet_id") and str(t["tweet_id"]).isdigit()]
+                    latest_id = str(max(valid_ids)) if valid_ids else None
+                    if latest_id:
+                        tx_conn.execute(
+                            """INSERT OR REPLACE INTO author_profiles
+                               (author_handle, org, last_tweet_id, tweet_count, last_seen)
+                               VALUES (?, ?, ?, ?, ?)""",
+                            (handle, self.org, latest_id, len(normalised),
+                             datetime.now(timezone.utc).isoformat()),
+                        )
+
+                    # Checkpoint: mark this author as processed for resume support
+                    tx_conn.execute(
+                        """INSERT OR REPLACE INTO scan_checkpoints
+                           (scan_id, author_handle, tweets_collected) VALUES (?, ?, ?)""",
+                        (scan_id, handle, len(normalised)),
                     )
-
-            # Checkpoint: mark this author as processed for resume support
-            self.db.checkpoint_author(scan_id, handle, tweets_collected=len(normalised) if normalised else 0)
+                tx_conn.close()
+            else:
+                # No tweets for this author — still checkpoint
+                self.db.checkpoint_author(scan_id, handle, tweets_collected=0)
 
             if _progress_ctx and _progress_task is not None:
                 _progress_ctx.advance(_progress_task)

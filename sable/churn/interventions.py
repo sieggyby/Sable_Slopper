@@ -77,6 +77,8 @@ def generate_playbook(
             role=member.get("role", "member"),
             topics=", ".join(member.get("topics", [])) if member.get("topics") else "none",
             notes=member.get("notes", ""),
+            total_posts=member.get("total_posts_in_window", "unknown"),
+            days_active=member.get("days_active", "unknown"),
         )
 
         try:

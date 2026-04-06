@@ -7,13 +7,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sable.serve.app import create_app
+from fastapi import Request
+
 from sable.serve.auth import verify_token
 from sable.roster.models import Account
+from sable.vault.permissions import ClientIdentity, Role
 from tests.serve.conftest import make_sqlite, PULSE_SCHEMA, META_SCHEMA
 
 
-def _bypass_auth():
-    pass
+def _bypass_auth(request: Request):
+    request.state.identity = ClientIdentity(name="test", role=Role.admin)
+    request.state.client_name = "test"
 
 
 _ACCOUNTS = [Account(handle="@test_acct", org="testorg")]
@@ -87,6 +91,10 @@ def test_performance_with_posts():
         assert data["sable_avg_engagement"] > 0
         assert len(data["by_format"]) == 1
         assert data["by_format"][0]["format"] == "meme"
+        # AQ-11: sample_sizes metadata included for trustworthiness
+        assert "sample_sizes" in data
+        assert data["sample_sizes"]["total_posts"] == 2
+        assert data["sample_sizes"]["sable_posts"] == 1
     finally:
         _stop(c)
 

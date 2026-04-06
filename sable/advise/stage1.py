@@ -164,6 +164,8 @@ def assemble_input(normalized_handle: str, org_id: str, platform_conn) -> dict:
                 })
 
             result["posts"] = posts
+            if not posts:
+                result["pulse_available"] = False
 
             # Freshness: latest snapshot taken_at for this handle
             latest_snap = pulse_conn.execute(
@@ -593,14 +595,14 @@ def render_summary(data: dict) -> str:
         if surging:
             lines.append("Surging topics (acceleration > 0, unique_authors >= 3, avg_lift >= 1.5):")
             for t in surging[:5]:
-                lines.append(f"  - {t['term']}: lift {t['avg_lift']:.2f}, acceleration {t['acceleration']:.2f}")
+                lines.append(f"  - {t['term']}: lift {t['avg_lift']:.2f}, acceleration {t['acceleration']:.2f} ({t['unique_authors']} authors, {t['mention_count']} mentions)")
         else:
             lines.append("Insufficient trend data.")
 
         if formats:
             lines.append("Top formats by lift:")
             for f in formats[:5]:
-                lines.append(f"  - {f['format_bucket']}: avg lift {f['avg_total_lift']:.2f}")
+                lines.append(f"  - {f['format_bucket']}: avg lift {f['avg_total_lift']:.2f} ({f['sample_count']} tweets)")
         lines.append("")
 
     # Entity graph

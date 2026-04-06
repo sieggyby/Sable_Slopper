@@ -67,19 +67,18 @@ class TestElevenLabsSynthesize:
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         engine = ElevenLabsEngine()
         char = _make_character()
-        with pytest.raises(RuntimeError, match="ELEVENLABS_API_KEY"):
-            engine.synthesize("hello", char, "/tmp")
+        with patch("sable.config.get", return_value=None):
+            with pytest.raises(RuntimeError, match="elevenlabs_api_key"):
+                engine.synthesize("hello", char, "/tmp")
 
-    def test_missing_voice_id_raises(self, monkeypatch):
-        monkeypatch.setenv("ELEVENLABS_API_KEY", "fake-key")
+    def test_missing_voice_id_raises(self):
         engine = ElevenLabsEngine()
         char = _make_character(elevenlabs_voice_id=None)
-        with pytest.raises(ValueError, match="elevenlabs_voice_id"):
-            engine.synthesize("hello", char, "/tmp")
+        with patch("sable.config.require_key", return_value="fake-key"):
+            with pytest.raises(ValueError, match="elevenlabs_voice_id"):
+                engine.synthesize("hello", char, "/tmp")
 
-    def test_successful_synthesis(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ELEVENLABS_API_KEY", "fake-key")
-
+    def test_successful_synthesis(self, tmp_path):
         fake_audio = b"RIFF" + b"\x00" * 100  # fake audio bytes
         fake_response = MagicMock()
         fake_response.status_code = 200
@@ -96,7 +95,8 @@ class TestElevenLabsSynthesize:
         with patch("sable.character_explainer.tts.elevenlabs._post_with_retry", return_value=fake_response), \
              patch("sable.character_explainer.tts.elevenlabs.subprocess.run") as mock_ffmpeg, \
              patch("sable.shared.ffmpeg.get_duration", return_value=2.5), \
-             patch("sable.character_explainer.tts.elevenlabs._log_elevenlabs_cost"):
+             patch("sable.character_explainer.tts.elevenlabs._log_elevenlabs_cost"), \
+             patch("sable.config.require_key", return_value="fake-key"):
 
             mock_ffmpeg.return_value = MagicMock(returncode=0)
 

@@ -1,5 +1,6 @@
 """Tests for platform vault sync."""
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -378,8 +379,8 @@ def test_vault_deletes_meta_report_when_source_missing(conn, vault_root, monkeyp
     assert not meta_report.exists(), "meta_report.md should be deleted when no source artifact"
 
 
-def test_vault_sync_writes_partial_sentinel_on_meta_report_failure(conn, vault_root, monkeypatch, tmp_path):
-    """A meta_report copy failure after phase-B renames must leave _PARTIAL_SYNC behind."""
+def test_vault_sync_meta_report_staging_failure_preserves_old_notes(conn, vault_root, monkeypatch, tmp_path):
+    """CRIT-1 fix: pulse report staging failure must NOT rename entity notes (pre-Phase B)."""
     monkeypatch.setattr("sable.vault.platform_sync._safe_vault_root", lambda org_id: vault_root)
 
     eid = _insert_entity(conn, display_name="Alice")
@@ -415,8 +416,64 @@ def test_vault_sync_writes_partial_sentinel_on_meta_report_failure(conn, vault_r
     with pytest.raises(RuntimeError, match="injected meta_report failure"):
         _do_sync(conn, org, vault_root, "job2")
 
-    assert entity_note_path.read_text() != content_before
-    assert "Bob" in entity_note_path.read_text()
+    # CRIT-1 fix: entity note must still be "Alice" — no Phase B renames happened
+    assert entity_note_path.read_text() == content_before
+    assert "Alice" in entity_note_path.read_text()
+    assert "Bob" not in entity_note_path.read_text()
+    # No _PARTIAL_SYNC sentinel — failure was before Phase B
+    assert not (vault_root / "_PARTIAL_SYNC").exists()
+    # No leaked temp files
+    leaked = list(vault_root.rglob(".tmp_new_*"))
+    assert leaked == [], f"Leaked temp files: {leaked}"
+
+
+def test_vault_sync_db_commit_failure_writes_sentinel(conn, vault_root, monkeypatch):
+    """After Phase B renames, a DB failure must leave _PARTIAL_SYNC sentinel."""
+    monkeypatch.setattr("sable.vault.platform_sync._safe_vault_root", lambda org_id: vault_root)
+
+    eid = _insert_entity(conn, display_name="Alice")
+    org = {"org_id": "testorg", "display_name": "Test Org"}
+    _do_sync(conn, org, vault_root, "job1")
+
+    conn.execute("UPDATE entities SET display_name=? WHERE entity_id=?", ("Updated", eid))
+    conn.commit()
+
+    # Inject failure by wrapping conn: simulate DB going away after Phase B renames.
+    # Both DELETE (Step 7) and INSERT (Step 8) should fail to accurately model a
+    # real connection failure, not just executemany.
+    class FailingConn:
+        """Proxy that fails on write-path DB operations after Phase B renames."""
+        def __init__(self, real):
+            self._real = real
+            self._renames_started = False
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def execute(self, sql, params=()):
+            # Once renames started, fail on DELETE/INSERT (write operations)
+            if self._renames_started and ("DELETE" in sql or "INSERT" in sql):
+                raise RuntimeError("injected DB commit failure")
+            return self._real.execute(sql, params)
+
+        def executemany(self, sql, params):
+            raise RuntimeError("injected DB commit failure")
+
+    wrapped = FailingConn(conn)
+
+    # Track when Phase B renames begin
+    real_replace = os.replace
+
+    def tracking_replace(src, dst):
+        wrapped._renames_started = True
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", tracking_replace)
+
+    with pytest.raises(RuntimeError, match="injected DB commit failure"):
+        _do_sync(wrapped, org, vault_root, "job2")
+
+    # Sentinel must exist because failure was after Phase B renames
     assert (vault_root / "_PARTIAL_SYNC").exists()
 
 

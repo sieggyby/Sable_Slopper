@@ -82,7 +82,8 @@ def compute_face_offset(
                 area = abs((right - left) * (bottom - top))
                 face_x_centers.append(x_center)
                 face_weights.append(area)
-            except Exception:
+            except Exception as e:
+                logger.debug("Face detection failed on frame %s: %s", frame_path, e)
                 continue
     finally:
         tmp_dir_obj.cleanup()

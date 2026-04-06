@@ -448,3 +448,49 @@ New `scan_checkpoints` table in meta.db. Scanner writes per-author checkpoint af
 **Files:** `sable/pulse/meta/scanner.py`, `sable/pulse/meta/db.py`, `sable/pulse/meta/cli.py`, `sable/pulse/cli.py`, `sable/clip/brainrot.py`.
 
 Validation: 921 passed, 0 ruff violations, 0 new mypy errors.
+
+---
+
+## Codit Audit Full Remediation (2026-04-05)
+
+Closed all remaining findings from the Codex audit (`codit.md`, 2026-03-23):
+
+- **CRIT-1:** Vault platform_sync partial-sync window — pulse report staging moved before Phase B renames. `_cleanup_temps()` helper extracted. TOCTOU fix on pulse source read. 2 new tests.
+- **HIGH-5:** Deep-mode outsider results now explicitly marked transient in console output.
+- **MED-5:** `SearchResult.degraded` field signals keyword-fallback results to callers.
+- **MED-10:** `upsert_format_baseline` renamed to `insert_format_baseline` with same-second dedup. 1 new test.
+
+Three adversarial QA passes confirmed zero remaining findings.
+
+**Files:** `sable/vault/platform_sync.py`, `sable/vault/search.py`, `sable/pulse/meta/db.py`, `sable/pulse/meta/cli.py`, `sable/pulse/meta/baselines.py`, `tests/vault/test_vault_sync.py`, `tests/vault/test_platform_sync.py`, `tests/pulse/meta/test_meta_db.py`.
+
+Validation: 1157 passed, 0 ruff violations, 0 mypy errors.
+
+---
+
+## RBAC for sable serve (2026-04-05)
+
+Role-based access control with per-operator org scoping on all serve API routes.
+
+### Roles + permission matrix
+Three roles: admin (unrestricted), creator (read+write, scoped), operator (read-only, scoped).
+Operators see only their configured `orgs` list. Fail-closed: no orgs = no access.
+See `docs/ROLES.md` for the full permission matrix.
+
+### Token config (backwards-compatible)
+Extended `serve.tokens` config to support dict entries with `role` + `orgs`. Legacy plain-string tokens treated as admin. Unknown roles default to operator (least privilege).
+
+### Route enforcement
+Every route calls `require_org_access(request, org, Action.xxx)`. Router-level `verify_token` dependency ensures all routes are authenticated. Empty-string token bypass prevented.
+
+### Security
+- Timing-safe token comparison (hmac.compare_digest)
+- Immutable `ClientIdentity.allowed_orgs` (tuple, not list)
+- Empty-string token guard on all config paths
+- 22 RBAC tests (unit + integration + edge cases)
+
+**QA:** Adversarial security audit found one MAJOR (empty-string token bypass on legacy path) — fixed before merge. Final audit clean.
+
+**Files:** `sable/vault/permissions.py`, `sable/serve/auth.py`, `sable/serve/routes/vault.py`, `sable/serve/routes/pulse.py`, `sable/serve/routes/meta.py`, `sable/serve/app.py`, `tests/serve/test_rbac.py`, `tests/serve/test_*.py` (bypass auth updates), `docs/ROLES.md`.
+
+Validation: 1179 passed, 0 ruff violations, 0 mypy errors.

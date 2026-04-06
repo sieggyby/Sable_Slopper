@@ -247,6 +247,15 @@ import logging as _logging
 _logger = _logging.getLogger(__name__)
 
 
+def _cleanup_temps(temp_writes: list[tuple[Path, Path]]) -> None:
+    """Best-effort removal of temp files from a staged write set."""
+    for tmp, _ in temp_writes:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def platform_vault_sync(org_id: str) -> dict:
     """
     Regenerate the Obsidian vault for org_id from sable.db.
@@ -442,23 +451,16 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
                                        json.dumps({"run_id": run_id}), 0))
 
     except Exception:
-        for tmp, _ in temp_writes:
-            try:
-                tmp.unlink(missing_ok=True)
-            except Exception:
-                pass
+        _cleanup_temps(temp_writes)
         raise
 
+    # --- Step 6: Stage pulse meta report into the same temp-write set (CRIT-1 fix) ---
+    pulse_dir = vault_root / "pulse"
+    pulse_dir.mkdir(parents=True, exist_ok=True)
+    meta_report_dest = pulse_dir / "meta_report.md"
+    _remove_pulse_dest = False
+
     try:
-        # --- Phase B: batch rename all temp files to their final paths ---
-        for tmp, final in temp_writes:
-            os.replace(str(tmp), str(final))
-
-        # --- Step 6: Copy latest pulse meta report (via temp file) ---
-        pulse_dir = vault_root / "pulse"
-        pulse_dir.mkdir(parents=True, exist_ok=True)
-        meta_report_dest = pulse_dir / "meta_report.md"
-
         pulse_meta_artifact = conn.execute(
             """SELECT * FROM artifacts WHERE org_id=? AND artifact_type='pulse_meta_report'
                ORDER BY created_at DESC LIMIT 1""",
@@ -467,17 +469,28 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
 
         if pulse_meta_artifact and pulse_meta_artifact["path"]:
             src = Path(pulse_meta_artifact["path"])
-            if src.exists():
+            try:
                 pulse_content = src.read_text(encoding="utf-8")
+            except (OSError, FileNotFoundError):
+                _remove_pulse_dest = True
+            else:
                 pulse_tmp = _write_to_temp(meta_report_dest, pulse_content)
                 temp_writes.append((pulse_tmp, meta_report_dest))
-                os.replace(str(pulse_tmp), str(meta_report_dest))
-            else:
-                meta_report_dest.unlink(missing_ok=True)
         else:
+            _remove_pulse_dest = True
+    except Exception:
+        _cleanup_temps(temp_writes)
+        raise
+
+    try:
+        # --- Phase B: batch rename ALL temp files (including pulse report) to final paths ---
+        for tmp, final in temp_writes:
+            os.replace(str(tmp), str(final))
+
+        if _remove_pulse_dest:
             meta_report_dest.unlink(missing_ok=True)
 
-        # --- Step 7: All generation succeeded — now delete old artifacts that were not regenerated ---
+        # --- Step 7: All generation + renames succeeded — delete old artifacts ---
         new_paths = {row[3] for row in new_artifact_rows}
         for fp in old_artifact_paths:
             if fp not in new_paths:
@@ -493,7 +506,7 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
                 old_artifact_ids
             )
 
-        # --- Step 8: Insert new artifact rows ---
+        # --- Step 8: Insert new artifact rows and commit ---
         conn.executemany(
             """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale)
                VALUES (?, ?, ?, ?, ?, ?)""",
@@ -501,11 +514,7 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
         )
         conn.commit()
     except Exception:
-        for tmp, _ in temp_writes:
-            try:
-                tmp.unlink(missing_ok=True)
-            except Exception:
-                pass
+        _cleanup_temps(temp_writes)
         _write_partial_sync_sentinel(vault_root)
         raise
 

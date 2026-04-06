@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from sable.shared.files import atomic_write as _atomic_write
+
 import click
 from rich.console import Console
 from rich.table import Table
@@ -108,7 +110,7 @@ def meme_generate(account, template, topic, vibe, output, style, dry_run, save_b
         "output": str(out_path),
         "assembled_at": datetime.now(timezone.utc).isoformat(),
     }
-    Path(str(out_path) + "_meta.json").write_text(_json.dumps(_meta, indent=2))
+    _atomic_write(Path(str(out_path) + "_meta.json"), _json.dumps(_meta, indent=2))
 
     console.print(f"\n[green]✓ Saved:[/green] {out_path}")
 
@@ -196,7 +198,7 @@ def meme_batch(account, count, topics, do_render, approve):
                 "output": str(out_path),
                 "assembled_at": datetime.now(timezone.utc).isoformat(),
             }
-            Path(str(out_path) + "_meta.json").write_text(_json.dumps(_meta, indent=2))
+            _atomic_write(Path(str(out_path) + "_meta.json"), _json.dumps(_meta, indent=2))
             console.print(f"  [green]✓[/green] {out_path}")
 
             # Register as platform artifact if org is resolvable

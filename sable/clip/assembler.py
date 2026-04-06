@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, cast
 
 from sable.shared.ffmpeg import extract_clip, stack_videos, encode_clip_only, require_ffmpeg
+from sable.shared.files import atomic_write
 from sable.clip.brainrot import pick as pick_brainrot, loop_to_duration
 from sable.clip.captions import generate_word_captions
 from sable.clip.thumbnail import generate_thumbnail
@@ -218,7 +219,6 @@ def assemble_clip(
     # Write sidecar metadata so bad brainrot can be traced later
     meta["assembled_at"] = datetime.now(timezone.utc).isoformat()
     meta_path = output_path.with_suffix(".meta.json")
-    with open(meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
+    atomic_write(meta_path, json.dumps(meta, indent=2))
 
     return meta

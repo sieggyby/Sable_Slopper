@@ -60,7 +60,7 @@ def narrative_score(org, beats_path, days, output_path):
             {
                 "beat": r.beat_name,
                 "uptake_score": round(r.uptake_score, 4),
-                "uptake_velocity": round(r.uptake_velocity, 4),
+                "uptake_velocity": round(r.uptake_velocity, 4) if r.uptake_velocity is not None else None,
                 "unique_authors": r.unique_authors,
                 "total_authors": r.total_authors,
                 "matching_tweets": r.matching_tweets,

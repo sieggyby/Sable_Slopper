@@ -7,6 +7,8 @@ from typing import Optional
 from sable.pulse.meta.normalize import AuthorNormalizedTweet
 from sable.pulse.meta.quality import aggregate_lifts
 
+_MIN_BASELINE_SAMPLES = 4  # minimum tweets to store a format baseline
+
 
 def compute_and_store_baseline(
     org: str,
@@ -26,7 +28,7 @@ def compute_and_store_baseline(
     avg_lift = aggregate_lifts(tweets, method=method)
     unique_authors = len({t.author_handle for t in tweets})
 
-    db.upsert_format_baseline(
+    db.insert_format_baseline(
         org=org,
         format_bucket=format_bucket,
         period_days=period_days,
@@ -72,7 +74,7 @@ def compute_baselines_from_db(
 
     Iterates all FORMAT_BUCKETS, fetches historical tweets from DB for each,
     aggregates lifts over long_days and short_days windows, stores the results
-    via db.upsert_format_baseline(), and returns a dict of
+    via db.insert_format_baseline(), and returns a dict of
     {format_bucket: (lift_30d, lift_7d)}. Either value is None if insufficient
     data exists for that window.
     """
@@ -92,15 +94,15 @@ def compute_baselines_from_db(
         lift_30d = None
         lift_7d = None
 
-        if tweets_long:
+        if len(tweets_long) >= _MIN_BASELINE_SAMPLES:
             lift_30d = aggregate_lifts(tweets_long, method=method)
             unique_authors = len({t.author_handle for t in tweets_long})
-            db.upsert_format_baseline(org, bucket, long_days, lift_30d, len(tweets_long), unique_authors)
+            db.insert_format_baseline(org, bucket, long_days, lift_30d, len(tweets_long), unique_authors)
 
-        if tweets_short:
+        if len(tweets_short) >= _MIN_BASELINE_SAMPLES:
             lift_7d = aggregate_lifts(tweets_short, method=method)
             unique_authors = len({t.author_handle for t in tweets_short})
-            db.upsert_format_baseline(org, bucket, short_days, lift_7d, len(tweets_short), unique_authors)
+            db.insert_format_baseline(org, bucket, short_days, lift_7d, len(tweets_short), unique_authors)
 
         result[bucket] = (lift_30d, lift_7d)
 

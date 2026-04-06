@@ -392,7 +392,7 @@ sable serve [--host HOST] [--port PORT] [--reload]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--host` | `127.0.0.1` | Bind address |
-| `--port` | `8000` | Bind port |
+| `--port` | `8420` | Bind port |
 | `--reload` | — | Auto-reload on code changes (dev mode) |
 
 Optional dependency: `pip install -e ".[serve]"`

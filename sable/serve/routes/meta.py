@@ -1,9 +1,11 @@
 """Meta API routes — topic signals, format baselines, watchlist health."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
+from sable.serve.auth import require_org_access
 from sable.serve.deps import get_meta_db
+from sable.vault.permissions import Action
 
 router = APIRouter()
 
@@ -13,8 +15,9 @@ _EXECUTION_GAP = 0.7
 
 
 @router.get("/topics/{org}")
-def topic_signals(org: str, limit: int = Query(20, ge=1, le=100)):
+def topic_signals(org: str, request: Request, limit: int = Query(20, ge=1, le=100)):
     """Top topic signals from the most recent successful scan."""
+    require_org_access(request, org, Action.meta_read)
     meta = get_meta_db()
 
     # Find latest successful scan
@@ -67,8 +70,9 @@ def topic_signals(org: str, limit: int = Query(20, ge=1, le=100)):
 
 
 @router.get("/baselines/{org}")
-def format_baselines(org: str):
+def format_baselines(org: str, request: Request):
     """Format baseline data — lift per format bucket from latest 30d window."""
+    require_org_access(request, org, Action.meta_read)
     meta = get_meta_db()
 
     rows = meta.execute(
@@ -129,8 +133,9 @@ def format_baselines(org: str):
 
 
 @router.get("/watchlist/{org}")
-def watchlist_health(org: str):
+def watchlist_health(org: str, request: Request):
     """Watchlist health diagnostics — coverage, staleness, scan history."""
+    require_org_access(request, org, Action.meta_read)
     meta = get_meta_db()
 
     # Total authors

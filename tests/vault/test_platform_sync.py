@@ -1,7 +1,11 @@
-"""Tests for platform_sync._build_entity_note source_time handling."""
+"""Tests for platform vault sync: entity note rendering and sync-window safety."""
 from __future__ import annotations
 
+import json
+import sqlite3
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from unittest.mock import patch
 
 
 def _make_entity(entity_id="e1", display_name="Test User", status="active"):

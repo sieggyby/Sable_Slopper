@@ -141,6 +141,29 @@ def test_missing_fields_use_defaults():
     assert results[0].handle == "@bob"
 
 
+def test_prompt_includes_data_quantity_fields():
+    """Member with total_posts and days_active → values appear in prompt."""
+    conn = _make_conn()
+    member = {
+        **SAMPLE_MEMBER,
+        "total_posts_in_window": 45,
+        "days_active": 7,
+    }
+    captured_prompt = None
+
+    def capture_claude(prompt, **kwargs):
+        nonlocal captured_prompt
+        captured_prompt = prompt
+        return CLAUDE_RESPONSE
+
+    with patch(_BUDGET), patch(_CLAUDE, side_effect=capture_claude):
+        generate_playbook("testorg", [member], conn)
+
+    assert captured_prompt is not None
+    assert "45" in captured_prompt
+    assert "7" in captured_prompt
+
+
 def test_sable_error_from_claude_propagates():
     """SableError raised during Claude call → propagates (not captured as error)."""
     conn = _make_conn()

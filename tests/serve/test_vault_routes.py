@@ -8,14 +8,18 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from fastapi import Request
+
 from sable.serve.app import create_app
 from sable.serve.auth import verify_token
 from sable.roster.models import Account
+from sable.vault.permissions import ClientIdentity, Role
 from tests.serve.conftest import make_sqlite, PULSE_SCHEMA
 
 
-def _bypass_auth():
-    pass
+def _bypass_auth(request: Request):
+    request.state.identity = ClientIdentity(name="test", role=Role.admin)
+    request.state.client_name = "test"
 
 
 _ACCOUNTS = [Account(handle="@test_acct", org="testorg")]

@@ -33,7 +33,15 @@ def require_ffprobe() -> str:
     return path
 
 
-def run(args: list[str], check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
+_SUBPROCESS_TIMEOUT = 300  # 5 minutes; override via timeout kwarg
+
+
+def run(
+    args: list[str],
+    check: bool = True,
+    capture: bool = False,
+    timeout: int = _SUBPROCESS_TIMEOUT,
+) -> subprocess.CompletedProcess:
     """Run an ffmpeg command. Raises RuntimeError with actionable message on failure."""
     try:
         result = subprocess.run(
@@ -41,8 +49,11 @@ def run(args: list[str], check: bool = True, capture: bool = False) -> subproces
             check=check,
             capture_output=capture,
             text=True,
+            timeout=timeout,
         )
         return result
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"FFmpeg timed out after {timeout}s. Input may be corrupt or duration miscalculated.")
     except subprocess.CalledProcessError as e:
         stderr = e.stderr or ""
         msg = _parse_ffmpeg_error(stderr)

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from sable.shared.paths import meta_db_path
 
@@ -186,6 +189,7 @@ def get_conn() -> sqlite3.Connection:
     path = meta_db_path()
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL").fetchone()
     return conn
 
 
@@ -323,7 +327,7 @@ def upsert_tweet(tweet: dict) -> bool:
         return False
 
     attrs = tweet.get("attributes", [])
-    attrs_json = json.dumps(attrs) if isinstance(attrs, list) else attrs
+    attrs_json = json.dumps(attrs) if isinstance(attrs, (list, dict)) else attrs
 
     with conn:
         conn.execute(
@@ -394,6 +398,92 @@ def upsert_tweet(tweet: dict) -> bool:
     return True
 
 
+def bulk_upsert_tweets(conn: sqlite3.Connection, tweets: list[dict]) -> int:
+    """Insert multiple tweets in a single transaction. Returns count of new tweets.
+
+    Caller is responsible for passing an open connection and managing the
+    transaction scope (e.g. wrapping this + checkpoint_author in ``with conn:``).
+    """
+    new_count = 0
+    for tweet in tweets:
+        existing = conn.execute(
+            "SELECT tweet_id FROM scanned_tweets WHERE tweet_id = ?",
+            (tweet["tweet_id"],),
+        ).fetchone()
+        if existing:
+            continue
+
+        attrs = tweet.get("attributes", [])
+        attrs_json = json.dumps(attrs) if isinstance(attrs, (list, dict)) else attrs
+
+        conn.execute(
+            """INSERT INTO scanned_tweets (
+                tweet_id, author_handle, text, posted_at, format_bucket, attributes_json,
+                likes, replies, reposts, quotes, bookmarks, video_views, video_duration,
+                is_quote_tweet, is_thread, thread_length, has_image, has_video, has_link,
+                author_followers,
+                author_median_likes, author_median_replies, author_median_reposts,
+                author_median_quotes, author_median_total, author_median_same_format,
+                likes_lift, replies_lift, reposts_lift, quotes_lift,
+                total_lift, format_lift,
+                author_quality_grade, author_quality_weight, format_lift_reliable,
+                scan_id, org
+            ) VALUES (
+                :tweet_id, :author_handle, :text, :posted_at, :format_bucket, :attributes_json,
+                :likes, :replies, :reposts, :quotes, :bookmarks, :video_views, :video_duration,
+                :is_quote_tweet, :is_thread, :thread_length, :has_image, :has_video, :has_link,
+                :author_followers,
+                :author_median_likes, :author_median_replies, :author_median_reposts,
+                :author_median_quotes, :author_median_total, :author_median_same_format,
+                :likes_lift, :replies_lift, :reposts_lift, :quotes_lift,
+                :total_lift, :format_lift,
+                :author_quality_grade, :author_quality_weight, :format_lift_reliable,
+                :scan_id, :org
+            )""",
+            {
+                "tweet_id": tweet["tweet_id"],
+                "author_handle": tweet["author_handle"],
+                "text": tweet.get("text", ""),
+                "posted_at": tweet.get("posted_at", ""),
+                "format_bucket": tweet.get("format_bucket"),
+                "attributes_json": attrs_json,
+                "likes": tweet.get("likes", 0),
+                "replies": tweet.get("replies", 0),
+                "reposts": tweet.get("reposts", 0),
+                "quotes": tweet.get("quotes", 0),
+                "bookmarks": tweet.get("bookmarks", 0),
+                "video_views": tweet.get("video_views", 0),
+                "video_duration": tweet.get("video_duration"),
+                "is_quote_tweet": int(tweet.get("is_quote_tweet", False)),
+                "is_thread": int(tweet.get("is_thread", False)),
+                "thread_length": tweet.get("thread_length", 1),
+                "has_image": int(tweet.get("has_image", False)),
+                "has_video": int(tweet.get("has_video", False)),
+                "has_link": int(tweet.get("has_link", False)),
+                "author_followers": tweet.get("author_followers", 0),
+                "author_median_likes": tweet.get("author_median_likes"),
+                "author_median_replies": tweet.get("author_median_replies"),
+                "author_median_reposts": tweet.get("author_median_reposts"),
+                "author_median_quotes": tweet.get("author_median_quotes"),
+                "author_median_total": tweet.get("author_median_total"),
+                "author_median_same_format": tweet.get("author_median_same_format"),
+                "likes_lift": tweet.get("likes_lift"),
+                "replies_lift": tweet.get("replies_lift"),
+                "reposts_lift": tweet.get("reposts_lift"),
+                "quotes_lift": tweet.get("quotes_lift"),
+                "total_lift": tweet.get("total_lift"),
+                "format_lift": tweet.get("format_lift"),
+                "author_quality_grade": tweet.get("author_quality_grade"),
+                "author_quality_weight": tweet.get("author_quality_weight"),
+                "format_lift_reliable": int(tweet.get("format_lift_reliable", False)),
+                "scan_id": tweet.get("scan_id"),
+                "org": tweet.get("org", ""),
+            },
+        )
+        new_count += 1
+    return new_count
+
+
 def get_author_tweets(author_handle: str, org: str, limit: int = 200) -> list[dict]:
     """Get historical tweets for an author (for building normalization baselines)."""
     conn = get_conn()
@@ -435,7 +525,8 @@ def _row_to_tweet(row) -> dict:
     attrs_json = d.get("attributes_json") or "[]"
     try:
         d["attributes"] = json.loads(attrs_json)
-    except Exception:
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning("Malformed attributes_json for tweet %s: %s", d.get("tweet_id", "?"), e)
         d["attributes"] = []
     d["is_quote_tweet"] = bool(d.get("is_quote_tweet", 0))
     d["is_thread"] = bool(d.get("is_thread", 0))
@@ -480,10 +571,21 @@ def upsert_author_profile(author_handle: str, org: str, last_tweet_id: str,
 # Format baselines
 # ---------------------------------------------------------------------------
 
-def upsert_format_baseline(org: str, format_bucket: str, period_days: int,
+def insert_format_baseline(org: str, format_bucket: str, period_days: int,
                             avg_total_lift: float, sample_count: int, unique_authors: int) -> None:
+    """Append a baseline snapshot. This is a history table — multiple rows per key are expected.
+
+    Same-second duplicates for (org, format_bucket, period_days) are replaced to prevent
+    unbounded accumulation from retries. Use ``prune_format_baselines()`` for retention.
+    """
     conn = get_conn()
     with conn:
+        conn.execute(
+            """DELETE FROM format_baselines
+               WHERE org = ? AND format_bucket = ? AND period_days = ?
+                 AND computed_at = datetime('now')""",
+            (org, format_bucket, period_days),
+        )
         conn.execute(
             """INSERT INTO format_baselines
                (org, format_bucket, period_days, avg_total_lift, sample_count, unique_authors)
@@ -491,6 +593,10 @@ def upsert_format_baseline(org: str, format_bucket: str, period_days: int,
             (org, format_bucket, period_days, avg_total_lift, sample_count, unique_authors),
         )
     conn.close()
+
+
+# Backwards-compatible alias
+upsert_format_baseline = insert_format_baseline
 
 
 def get_format_baselines_as_of(org: str, as_of: str, period_days: int = 7,

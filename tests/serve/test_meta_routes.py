@@ -6,13 +6,17 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from fastapi import Request
+
 from sable.serve.app import create_app
 from sable.serve.auth import verify_token
+from sable.vault.permissions import ClientIdentity, Role
 from tests.serve.conftest import make_sqlite, META_SCHEMA
 
 
-def _bypass_auth():
-    pass
+def _bypass_auth(request: Request):
+    request.state.identity = ClientIdentity(name="test", role=Role.admin)
+    request.state.client_name = "test"
 
 
 def _make_client(meta_db):

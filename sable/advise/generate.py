@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from sable.platform.db import get_db
 from sable.platform.errors import SableError, HANDLE_NOT_IN_ROSTER, NO_ORG_FOR_HANDLE, ORG_NOT_FOUND, BUDGET_EXCEEDED, BRIEF_CAP_EXCEEDED, redact_error
@@ -52,8 +55,8 @@ def _check_cache(conn, org_id: str, normalized_handle: str, force: bool) -> tupl
                     y, w, _ = dt.isocalendar()
                     if f"{y}-W{w:02d}" == current_week:
                         return True, row["path"]
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as e:
+                    logger.warning("Cache date parse failed for artifact %s: %s", row["artifact_id"], e)
         except (json.JSONDecodeError, KeyError):
             conn.execute("UPDATE artifacts SET stale=1 WHERE artifact_id=?", (row["artifact_id"],))
             continue
@@ -262,6 +265,16 @@ def generate_advise(
     if assembled.get("failed_sources"):
         failed = ", ".join(assembled["failed_sources"])
         caveat_lines.append(f"- **Data sources that failed during assembly:** {failed}")
+    # Thin-sample caveats
+    posts = assembled.get("posts", [])
+    if 0 < len(posts) < 10:
+        caveat_lines.append(f"- **Post performance** based on only {len(posts)} posts — treat trend claims as directional, not definitive.")
+    topics = assembled.get("topics", [])
+    if topics:
+        max_authors = max(t.get("unique_authors", 0) for t in topics)
+        if max_authors < 5:
+            caveat_lines.append(f"- **Topic signals** drawn from \u2264{max_authors} unique authors — may not represent community consensus.")
+
     if caveat_lines:
         caveat_block = "## Data Caveats\n\n" + "\n".join(caveat_lines) + "\n\n"
         brief_body = caveat_block + brief_body

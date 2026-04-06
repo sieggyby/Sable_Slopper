@@ -394,8 +394,9 @@ def generate_tweet_variants(
                         lines.append(f"  • [{p['total_lift']:.1f}x] " + " | ".join(parts))
                 if lines:
                     anatomy_block = (
-                        "\nStructural patterns from highest-performing content in this niche"
-                        " (use as inspiration, not templates):\n" + "\n".join(lines) + "\n"
+                        f"\nStructural patterns from {len(patterns)} highest-performing posts"
+                        f" in this niche (min lift 2.5x; use as inspiration, not templates):\n"
+                        + "\n".join(lines) + "\n"
                     )
 
         # Vault search suggestion (keyword hint, zero cost)

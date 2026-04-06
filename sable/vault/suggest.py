@@ -151,7 +151,7 @@ No extra text."""
     return suggestions
 
 
-def fetch_tweet_text(tweet_url: str) -> str:
+def fetch_tweet_text(tweet_url: str, org: str = "") -> str:
     """Fetch tweet text from a URL using SocialData API."""
     import re
     from sable.shared.socialdata import socialdata_get
@@ -163,4 +163,16 @@ def fetch_tweet_text(tweet_url: str) -> str:
     tweet_id = match.group(1)
 
     data = socialdata_get(f"/twitter/tweets/{tweet_id}", timeout=15)
+
+    # Log SocialData cost (AQ-6)
+    if org:
+        try:
+            from sable.platform.db import get_db
+            from sable.platform.cost import log_cost
+            conn = get_db()
+            log_cost(conn, org, "socialdata_suggest", 0.002, model="socialdata")
+            conn.close()
+        except Exception as e:
+            logger.debug("Non-fatal: could not log SocialData cost: %s", e)
+
     return data.get("full_text") or data.get("text") or ""

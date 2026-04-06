@@ -36,7 +36,7 @@ This is essential when running integration tests — without it, the test suite 
 
 | Variable | Used by | Notes |
 |----------|--------|-------|
-| `EDITOR` | `sable roster profile edit` | Falls back to `vi` if unset |
+| `EDITOR` | `sable roster profile edit`, `sable narrative edit` | Falls back to `nano` in roster, `vi` in narrative if unset |
 
 ## Cross-Tool Variables (SableTracking)
 

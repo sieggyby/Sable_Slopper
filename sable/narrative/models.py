@@ -19,6 +19,6 @@ class UptakeResult:
     unique_authors: int
     total_authors: int
     uptake_score: float      # unique_authors / total_authors
-    uptake_velocity: float   # unique_authors / days_since_start (0 if no start date)
+    uptake_velocity: float | None  # unique_authors / days_since_start (None if insufficient sample)
     matching_tweets: int
     keywords_matched: list[str] = field(default_factory=list)

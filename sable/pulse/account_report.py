@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 # Data models
 # ---------------------------------------------------------------------------
 
+def _account_confidence(count: int) -> str:
+    """Grade account-side confidence based on post count."""
+    if count >= 20:
+        return "A"
+    if count >= 10:
+        return "B"
+    if count >= 5:
+        return "C"
+    return "D"
+
+
 @dataclass
 class FormatLiftEntry:
     format_bucket: str
@@ -32,6 +43,7 @@ class FormatLiftEntry:
     niche_trend_status: Optional[str]     # None = no niche data available
     niche_confidence: Optional[str]       # None = no niche data available
     post_count: int
+    account_confidence: str               # A/B/C/D grade based on post_count
     divergence_signal: str  # DOUBLE DOWN / EXECUTION GAP / ACCOUNT DIFFERENTIATION / AVOID / NEUTRAL
 
 
@@ -296,6 +308,7 @@ def compute_account_format_lift(
             niche_trend_status=niche_trend_status,
             niche_confidence=niche_confidence,
             post_count=count,
+            account_confidence=_account_confidence(count),
             divergence_signal=signal,
         ))
 
@@ -342,9 +355,9 @@ def render_account_report(report: AccountFormatReport) -> str:
         bucket = entry.format_bucket
         if entry.account_lift is not None:
             bar = _lift_bar(entry.account_lift)
-            acc_str = f"{entry.account_lift:.1f}x"
+            acc_str = f"{entry.account_lift:.1f}x [{entry.account_confidence}]"
             if entry.niche_lift is not None:
-                niche_str = f"niche: {entry.niche_lift:.1f}x"
+                niche_str = f"niche: {entry.niche_lift:.1f}x [{entry.niche_confidence or '?'}]"
                 line = f"  {bucket:<18} {bar:<{_BAR_WIDTH}}  {acc_str}  {niche_str}  → {entry.divergence_signal}"
             else:
                 line = f"  {bucket:<18} {bar:<{_BAR_WIDTH}}  {acc_str}"

@@ -51,12 +51,17 @@ def lexicon_scan(org, days, top_n, no_interpret, dry_run):
         console.print(f"  Estimated Claude calls: {claude_calls}")
         return
 
-    terms = scan_lexicon(org=org, days=days, top_n=top_n, conn=conn)
+    terms, scan_meta = scan_lexicon(org=org, days=days, top_n=top_n, conn=conn)
     if not terms:
-        console.print(
-            f"[yellow]Insufficient data for org '{org}' — need ≥{MIN_AUTHORS} authors "
-            f"and ≥{MIN_TWEETS} tweets in the last {days} days.[/yellow]"
-        )
+        if scan_meta.get("below_threshold"):
+            console.print(
+                f"[yellow]Insufficient data for org '{org}' — have "
+                f"{scan_meta['corpus_authors']} authors (need ≥{MIN_AUTHORS}) and "
+                f"{scan_meta['corpus_tweets']} tweets (need ≥{MIN_TWEETS}) "
+                f"in the last {days} days.[/yellow]"
+            )
+        else:
+            console.print(f"[yellow]No community-specific terms found for org '{org}'.[/yellow]")
         return
 
     # Optionally interpret via Claude

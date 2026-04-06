@@ -5,9 +5,11 @@ import logging
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
+from sable.serve.auth import require_org_access
 from sable.serve.deps import get_pulse_db, get_meta_db
+from sable.vault.permissions import Action
 from sable.roster.manager import list_accounts
 
 logger = logging.getLogger(__name__)
@@ -25,8 +27,9 @@ def _engagement(snap: sqlite3.Row) -> int:
 
 
 @router.get("/performance/{org}")
-def pulse_performance(org: str, days: int = Query(30, ge=1, le=365)):
+def pulse_performance(org: str, request: Request, days: int = Query(30, ge=1, le=365)):
     """Content performance data for an org over the last N days."""
+    require_org_access(request, org, Action.pulse_read)
     pulse = get_pulse_db()
     accounts = list_accounts(org=org)
     if not accounts:
@@ -156,12 +159,20 @@ def pulse_performance(org: str, days: int = Query(30, ge=1, le=365)):
                 / (non_meta_eng / non_meta_count), 2
             ) if meta_informed_count and non_meta_count and non_meta_eng else 0,
         },
+        "sample_sizes": {
+            "total_posts": len(posts),
+            "sable_posts": len(sable_posts),
+            "organic_posts": len(organic_posts),
+            "meta_informed_posts": meta_informed_count,
+            "non_meta_posts": non_meta_count,
+        },
     }
 
 
 @router.get("/posting-log/{org}")
-def posting_log(org: str, days: int = Query(30, ge=1, le=365)):
+def posting_log(org: str, request: Request, days: int = Query(30, ge=1, le=365)):
     """Raw posting log for an org."""
+    require_org_access(request, org, Action.pulse_read)
     pulse = get_pulse_db()
     accounts = list_accounts(org=org)
     if not accounts:

@@ -1,8 +1,11 @@
 """Face detection pre-filter and perceptual hash dedup."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def has_face(image_path: str | Path) -> bool:
@@ -19,7 +22,8 @@ def has_face(image_path: str | Path) -> bool:
     except ImportError:
         # face_recognition not installed — skip pre-filter
         return True
-    except Exception:
+    except Exception as e:
+        logger.debug("Face detection failed for %s: %s", image_path, e)
         return True
 
 
@@ -32,7 +36,8 @@ def phash(image_path: str | Path) -> Optional[str]:
         return str(imagehash.phash(img))
     except ImportError:
         return None
-    except Exception:
+    except Exception as e:
+        logger.debug("Perceptual hash failed for %s: %s", image_path, e)
         return None
 
 
@@ -54,7 +59,8 @@ def dedup_frames(frame_paths: list[Path], threshold: int = 10) -> list[Path]:
     for path in frame_paths:
         try:
             h = imagehash.phash(Image.open(str(path)))
-        except Exception:
+        except Exception as e:
+            logger.debug("Dedup hash failed for frame %s: %s", path, e)
             result.append(path)
             continue
 
@@ -82,7 +88,8 @@ def filter_frames_with_faces(frame_paths: list[Path]) -> list[Path]:
             locs = face_recognition.face_locations(arr, model="hog")
             if locs:
                 result.append(path)
-        except Exception:
+        except Exception as e:
+            logger.debug("Face filter failed for frame %s: %s", path, e)
             result.append(path)  # include on error
 
     return result

@@ -163,23 +163,39 @@ All keys live under `serve:` in `config.yaml`.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `token` | string | — | Legacy single bearer token for all `/api/` endpoints. Fallback when `tokens` is not set |
-| `tokens` | dict | — | Named tokens (preferred). Keys are client names, values are tokens. Provides audit trail via `client_name` logging |
+| `tokens` | dict | — | Named tokens with RBAC. Values can be plain strings (admin) or dicts with `token`, `role`, and `orgs` |
 | `rate_limit_rpm` | int | `60` | Max requests per minute per path prefix. Returns 429 + Retry-After when exceeded |
 
 ```yaml
-# Preferred: named tokens (audit trail via client_name logging)
 serve:
   tokens:
-    sableweb: "token-for-web-frontend"
-    debug: "token-for-dev-testing"
-  rate_limit_rpm: 60
+    # Admin — full access, all orgs
+    sableweb:
+      token: "token-for-web-frontend"
+      role: admin
 
-# Legacy: single token (still supported as fallback)
-serve:
-  token: "your-secret-token-here"
+    # Operator — read-only, scoped to specific orgs
+    operator_jane:
+      token: "janes-token"
+      role: operator
+      orgs:
+        - tig_foundation
+        - multisynq
+
+    # Creator — read + write, scoped orgs
+    creator_bob:
+      token: "bobs-token"
+      role: creator
+      orgs:
+        - psy_protocol
+
+    # Legacy plain string — treated as admin (backwards compat)
+    debug: "token-for-dev-testing"
+
+  rate_limit_rpm: 60
 ```
 
-Named tokens are checked first via HMAC constant-time comparison. If none match, the legacy `token` is tried as fallback. The authenticated client name is logged on every request.
+Named tokens are checked first via HMAC constant-time comparison. If none match, the legacy `token` is tried as fallback. The authenticated client name and role are logged on every request. Operators with no `orgs` configured are denied access to all orgs (fail-closed). See `docs/ROLES.md` for the full permission matrix.
 
 ---
 
@@ -203,13 +219,42 @@ Raise these if voice scoring is missing nuance from longer-form content. Lower t
 
 ---
 
+## Vault Keys (top-level)
+
+These are top-level keys in `config.yaml`. They control vault search, enrichment, and export behavior via `load_vault_config()`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `vault_base_path` | path | `""` | Override vault directory (otherwise resolved via `paths.vault_dir()`) |
+| `vault_claude_model` | string | `""` | Claude model for vault operations. Falls back to `default_model` |
+| `vault_auto_enrich` | bool | `true` | Automatically enrich notes during sync |
+| `vault_enrich_batch_size` | int | `10` | Max notes per enrichment batch |
+| `vault_min_relevance_score` | int | `40` | Minimum score for vault search results |
+| `vault_max_suggestions` | int | `5` | Maximum reply suggestions returned |
+| `vault_draft_temperature` | float | `0.7` | Temperature for reply draft generation |
+| `vault_include_media_in_export` | bool | `false` | Include media files in `sable vault export` zip |
+
+### `pulse_meta` — additional key
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `max_analysis_cost` | float | `0.50` | Maximum USD for a single meta analysis step (separate from `max_cost_per_run` which covers the full scan) |
+
+---
+
 ## `serve` — Example in Full Config
 
 ```yaml
 serve:
   tokens:
-    sableweb: "token-for-web-frontend"
-    debug: "token-for-dev-testing"
+    sableweb:
+      token: "token-for-web-frontend"
+      role: admin
+    operator_jane:
+      token: "janes-token"
+      role: operator
+      orgs:
+        - tig_foundation
   rate_limit_rpm: 60
 ```
 

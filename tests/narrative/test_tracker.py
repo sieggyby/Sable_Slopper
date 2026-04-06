@@ -205,7 +205,7 @@ def test_uptake_velocity_with_start_date():
 
 
 def test_uptake_velocity_no_start_date():
-    """Velocity is 0 when no started_at."""
+    """Velocity is None when no started_at."""
     conn = _make_conn()
     _seed_corpus(conn)
 
@@ -213,7 +213,28 @@ def test_uptake_velocity_no_start_date():
     result = score_uptake(beat, "test_org", days=14, conn=conn)
 
     assert result is not None
-    assert result.uptake_velocity == 0.0
+    assert result.uptake_velocity is None
+
+
+def test_uptake_velocity_thin_sample_returns_none():
+    """T3-9: Velocity None when unique_authors < 3 or days_since < 2."""
+    conn = _make_conn()
+    # Seed 15 authors but only 1 mentions "rare_term"
+    for i in range(15):
+        for j in range(5):
+            if i == 0 and j == 0:
+                text = "discussing rare_term today"
+            else:
+                text = "Generic content"
+            _insert_tweet(conn, "test_org", f"@author_{i:03d}", text, days_ago=j)
+
+    start = (_NOW - timedelta(days=10)).strftime("%Y-%m-%d")
+    beat = NarrativeBeat(name="rare", keywords=["rare_term"], started_at=start)
+    result = score_uptake(beat, "test_org", days=14, conn=conn)
+
+    assert result is not None
+    assert result.unique_authors == 1  # < 3, so velocity should be None
+    assert result.uptake_velocity is None
 
 
 def test_keywords_matched_tracking():
