@@ -78,19 +78,27 @@ SableWeb (Next.js, separate repo) is the single web UI for both operators and cl
 - Cost logging decoupled from budget gating — `budget_check=False` parameter on `call_claude_with_usage()` lets write/score/clip log costs without triggering budget hard gates (P1-2)
 - Pulse freshness sync to `sync_runs` — pulse track/meta/recommend record sync metadata for SableWeb freshness display (P1-3)
 
-**Deployment:** `cloudflared` quick tunnel validated 2026-04-04 (temporary URL, no domain). Production setup needs a ~$10/yr domain via Cloudflare Registrar for a stable URL. SableWeb deploys to Vercel free tier. See `TODO.md` § SS-2 for full setup steps.
+**Deployment:** Hetzner CX21 VPS (178.156.204.125) deployed 2026-04-06. `sable-serve.service` + `cloudflared.service` + `sable-weekly.timer` running as systemd units. `api.sable.tools` via Cloudflare named tunnel. Previous Mac launchd services decommissioned. See `deploy/DEPLOY.md` for full setup and Postgres transition plan.
 
 ---
 
 ## Phase 3 — VPS Deployment
 
-**Target: Multi-client, always-on**
+**Status: Partially complete** — Hetzner CX21 deployed 2026-04-06. Postgres installed, awaiting migration.
 
-- Docker container + systemd service
-- Postgres backend (replace local SQLite for pulse + vault index)
+**Completed:**
+- Hetzner CX21 VPS (178.156.204.125, €4.51/mo)
+- systemd services: `sable-serve.service`, `sable-weekly.timer`, `cloudflared.service`
+- Data migrated from Mac (3 SQLite DBs, config, roster, profiles, vault)
+- Cloudflare tunnel moved from Mac to VPS
+- Postgres installed on same box (no additional cost)
+
+**Remaining:**
+- `sable.db` → Postgres migration (dialect adapter in `sable_platform/db/`, data migration via `pgloader`). See `deploy/DEPLOY.md` § Postgres Transition.
+- `pulse.db` + `meta.db` → Postgres (lower priority — embedded schemas, serve is read-only)
+- Docker container (deferred — systemd sufficient at current scale)
 - Multi-org vault storage (S3 or NFS)
 - Webhook receivers: pulse data push, tweet notification triggers
-- Scheduled sync: cron-triggered `vault sync` per org
 - Email/Slack notifications for gap alerts
 
 ---

@@ -117,9 +117,12 @@ All critical, high, and medium findings from `codit.md` (2026-03-23 audit) resol
 
 **Production URL:** `https://api.sable.tools` → `localhost:8420` via Cloudflare named tunnel `sable-serve`.
 
-Both services run as persistent launchd daemons (survive reboots):
-- `com.cloudflare.cloudflared` — system daemon, `/Library/LaunchDaemons/`
-- `com.sable.serve` — user agent, `~/Library/LaunchAgents/`
+Deployed on Hetzner CX21 VPS (178.156.204.125) as of 2026-04-06. Three systemd services:
+- `cloudflared.service` — Cloudflare tunnel (4 QUIC connections)
+- `sable-serve.service` — FastAPI + uvicorn (2 workers)
+- `sable-weekly.timer` — weekly automation (Monday 06:00 UTC)
+
+Previous Mac launchd services (`com.sable.serve`, `com.cloudflare.cloudflared`) decommissioned.
 
 **Consumer:** SableWeb content_performance, format_analysis, topic_trends, content_pipeline, vault sections.
 
@@ -134,11 +137,14 @@ Both services run as persistent launchd daemons (survive reboots):
 
 > All serve routes now enforce per-token role + org scoping. See `docs/ROLES.md`.
 
-### Phase 3 — VPS
+### Phase 3 — VPS (partially complete)
 
-- Docker + systemd, Postgres backend, multi-org S3 vault storage
+- ~~Hetzner CX21 deployment~~ **DEPLOYED 2026-04-06** — systemd services, Cloudflare tunnel, data migrated
+- ~~Scheduled sync via cron~~ **DEPLOYED 2026-04-06** — `sable-weekly.timer` (Monday 06:00 UTC)
+- Postgres migration — installed on VPS, dialect adapter + `sable.db` migration pending. See `deploy/DEPLOY.md`.
+- Docker container (deferred — systemd is sufficient at current scale)
+- Multi-org S3 vault storage (deferred)
 - Webhook receivers for pulse data push + tweet notifications
-- Scheduled sync via cron
 
 ### Phase 4 — Scale
 

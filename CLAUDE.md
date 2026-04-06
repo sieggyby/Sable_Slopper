@@ -34,13 +34,13 @@ Weekly automation shipped (2026-04-06): `sable weekly run` orchestrates the full
 
 **Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, vault, and cost data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 8 API endpoints + /health. Cost forecast endpoint (`GET /api/v1/cost/org/{org_id}/cost-forecast`) added 2026-04-06. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Codit audit remediation (all CRIT/HIGH/MED) complete. Test count: 1213.
 
-**Production URL:** `https://api.sable.tools` — Cloudflare named tunnel `sable-serve` → `localhost:8420`. Both `cloudflared` (system daemon) and `sable serve` (user agent) run as persistent launchd services.
+**Production URL:** `https://api.sable.tools` — Hetzner CX21 VPS (178.156.204.125). Cloudflare named tunnel `sable-serve` → `localhost:8420`. Both `cloudflared` and `sable serve` run as systemd services. Weekly automation runs via systemd timer (Monday 06:00 UTC). Postgres installed on the same box, pending migration from SQLite. See `deploy/DEPLOY.md` for full VPS setup and Postgres transition plan.
 
 **RBAC (shipped 2026-04-05):** Three roles (admin/creator/operator) with per-token org scoping.
 Operators see only their allowed orgs. Config in `~/.sable/config.yaml` under `serve.tokens`.
 See `docs/ROLES.md` for the permission matrix and config format.
 
-Phase 3 = VPS + Postgres. Phase 4 = multi-tenant. Both are future/speculative.
+**Phase 3 (VPS) is partially complete.** Hetzner CX21 deployed 2026-04-06. systemd services running (`sable-serve`, `sable-weekly.timer`, `cloudflared`). Postgres installed, awaiting `sable.db` migration (dialect adapter needed). See `deploy/DEPLOY.md`. Phase 4 = multi-tenant (future/speculative).
 
 ---
 
@@ -133,6 +133,7 @@ Non-obvious decisions that reverse naive intuition — get these wrong and you r
 | `TODO.md` | Main development queue: audit remediation log, open hardening items, and completed feature history |
 | `AGENTS.md` | Instructions for Codex review role (QA layer) |
 | `docs/COMMANDS.md` | Full CLI command reference with flags and examples |
+| `deploy/DEPLOY.md` | VPS deployment guide: Hetzner setup, data migration, Cloudflare tunnel, Postgres transition |
 | `docs/LOCAL_DEV.md` | Local dev setup, venv, test runner, env var patterns |
 | `docs/PROMPTS.md` | Claude prompt templates and prompt engineering notes |
 | `docs/IMPLEMENTATION_LOG.md` | Chronological record of shipped features and decisions |

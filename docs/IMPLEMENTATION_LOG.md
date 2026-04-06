@@ -538,3 +538,38 @@ New `sable/serve/routes/cost.py` — cost forecast endpoint. Returns `weekly_est
 **Tests:** 4 in `tests/serve/test_cost_routes.py`.
 
 Validation: 1213 passed, 0 ruff violations, 0 mypy errors.
+
+---
+
+## VPS Deployment — Hetzner CX21 (2026-04-06)
+
+Migrated production from local Mac launchd services to Hetzner CX21 VPS (178.156.204.125, €4.51/mo).
+
+### Infrastructure
+
+- Ubuntu 24.04, Python 3.12, ffmpeg
+- `sable-serve.service` — FastAPI + uvicorn, 2 workers, systemd hardened (NoNewPrivileges, ProtectSystem=strict)
+- `sable-weekly.timer` — fires Monday 06:00 UTC, runs `sable weekly run --all`
+- `cloudflared.service` — Cloudflare named tunnel `sable-serve` → `localhost:8420`, 4 QUIC connections
+- Postgres 16 installed on same box (no additional cost), `sable` user + database created, pending migration
+
+### Data migration
+
+SQLite databases (`pulse.db`, `meta.db`, `sable.db`), config, roster, profiles, and vault copied from Mac via scp/rsync. API keys moved from `config.yaml` to `/opt/sable/.env` (loaded via systemd `EnvironmentFile`).
+
+### Tunnel migration
+
+Reused existing tunnel credentials (`cert.pem` + tunnel JSON) — copied from `~/.cloudflared/` to `/etc/cloudflared/`. Same tunnel ID, no DNS changes needed. Mac launchd services (`com.sable.serve`, `com.cloudflare.cloudflared`) decommissioned.
+
+### Files
+
+New `deploy/` directory:
+- `DEPLOY.md` — full deployment guide + Postgres transition plan
+- `setup-vps.sh` — automated VPS setup script
+- `sable-serve.service` — systemd unit for API server
+- `sable-weekly.service` + `sable-weekly.timer` — systemd units for weekly automation
+- `.env.example` — template for API keys
+
+### Verification
+
+`curl https://api.sable.tools/health` → `{"status": "ok", "checks": {"pulse_db": true, "meta_db": true, "vault": true}}`

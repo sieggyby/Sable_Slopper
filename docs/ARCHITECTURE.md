@@ -292,4 +292,5 @@ DB access for pulse/meta is direct via `sable/pulse/db.py` and `sable/pulse/meta
 - `sable/serve/` — FastAPI read-only API (Phase 2, complete). Bearer token auth + RBAC, 8 endpoints + /health. See `docs/COMMANDS.md` § serve.
 - `sable/vault/permissions.py` — RBAC implementation with three roles (admin/creator/operator). See `docs/ROLES.md`.
 - `sable/weekly/` — automated weekly cycle orchestration (pulse track → meta scan → advise → calendar → vault sync). `--all` mode, `--dry-run`, `--cost-estimate`, launchd scheduling.
-- Postgres backend replacing local SQLite (Phase 3)
+- `deploy/` — VPS deployment: systemd units, setup script, Postgres transition guide. Production on Hetzner CX21 (178.156.204.125).
+- Postgres backend replacing local SQLite (Phase 3 — installed on VPS, migration pending)
