@@ -1,0 +1,23 @@
+[Unit]
+Description=Sable Weekly Automation Cycle
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=sable
+Group=sable
+WorkingDirectory=/opt/sable
+Environment=SABLE_HOME=/opt/sable/data
+Environment=SABLE_WORKSPACE=/opt/sable/workspace
+EnvironmentFile=/opt/sable/.env
+ExecStart=/opt/sable/venv/bin/sable --json-log weekly run --all
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sable-weekly
+TimeoutStartSec=3600
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sable/data /opt/sable/workspace /opt/sable/vault
+PrivateTmp=true

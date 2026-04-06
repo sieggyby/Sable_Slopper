@@ -1,0 +1,32 @@
+[Unit]
+Description=Sable API Server (FastAPI + uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=sable
+Group=sable
+WorkingDirectory=/opt/sable
+Environment=SABLE_HOME=/opt/sable/data
+Environment=SABLE_WORKSPACE=/opt/sable/workspace
+EnvironmentFile=/opt/sable/.env
+ExecStart=/opt/sable/venv/bin/python -m uvicorn sable.serve.app:create_app \
+    --host 127.0.0.1 \
+    --port 8420 \
+    --factory \
+    --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sable-serve
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sable/data /opt/sable/workspace /opt/sable/vault
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

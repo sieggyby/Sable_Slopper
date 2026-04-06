@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Sable weekly cycle every Monday at 06:00 UTC
+
+[Timer]
+OnCalendar=Mon *-*-* 06:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
