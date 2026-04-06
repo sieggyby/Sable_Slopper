@@ -33,8 +33,7 @@ All community intelligence features are shipped (FEATURE-10 through FEATURE-16, 
 
 **Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, and vault data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 7 API endpoints + /health. No Claude calls, no cost. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Codit audit remediation (all CRIT/HIGH/MED) complete. Test count: 1157.
 
-**Remaining Phase 2 work:**
-- Cloudflare Tunnel deployment for stable URL (quick tunnel validated 2026-04-04; see TODO.md § SS-2)
+**Production URL:** `https://api.sable.tools` — Cloudflare named tunnel `sable-serve` → `localhost:8420`. Both `cloudflared` (system daemon) and `sable serve` (user agent) run as persistent launchd services.
 
 **RBAC (shipped 2026-04-05):** Three roles (admin/creator/operator) with per-token org scoping.
 Operators see only their allowed orgs. Config in `~/.sable/config.yaml` under `serve.tokens`.

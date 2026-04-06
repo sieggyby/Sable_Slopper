@@ -103,23 +103,15 @@ All critical, high, and medium findings from `codit.md` (2026-03-23 audit) resol
 
 ## Open Items
 
-### SS-2: Expose `sable serve` for SableWeb [M]
+### ~~SS-2: Expose `sable serve` for SableWeb~~ — SHIPPED 2026-04-06
 
-**Current:** `sable serve` (FastAPI, 7 endpoints + /health, bearer token auth) is production-ready. Quick tunnel validated 2026-04-04 via `cloudflared tunnel --url http://localhost:8420`. Remaining: stable production URL.
+**Production URL:** `https://api.sable.tools` → `localhost:8420` via Cloudflare named tunnel `sable-serve`.
 
-**Plan (phased):**
+Both services run as persistent launchd daemons (survive reboots):
+- `com.cloudflare.cloudflared` — system daemon, `/Library/LaunchDaemons/`
+- `com.sable.serve` — user agent, `~/Library/LaunchAgents/`
 
-1. **Dev/testing (free, no domain) — VALIDATED:** `cloudflared tunnel --url http://localhost:8420` gives a temporary `https://xxxx.trycloudflare.com` URL. Good enough to validate the SableWeb → Slopper wiring end-to-end. URL changes on every restart — not for production.
-
-2. **Production (free Cloudflare account + ~$10/yr domain):** Register a cheap domain via Cloudflare Registrar, create a named tunnel (`cloudflared tunnel create sable-serve`), point a subdomain (e.g., `slopper.yourdomain.com`) at `localhost:8420`. Stable URL, HTTPS, free tier covers everything. Existing bearer token auth (`serve.tokens.sableweb`) provides service-to-service security.
-
-3. **Hosting:** Runs on local Mac for now. `sable serve` must be running + `cloudflared tunnel run` must be running. For persistence: `cloudflared service install` registers a launchd service. Move to VPS in Phase 3.
-
-**Prerequisites:** `brew install cloudflared` (done), free Cloudflare account. Domain purchase only needed for step 2.
-
-**Consumer:** SableWeb content_performance, format_analysis, topic_trends, content_pipeline, vault sections. SableWeb itself deploys to Vercel free tier — see SableWeb TODO § SW-DEPLOY.
-
-**Coordinates with:** SableWeb SW-SLOPPER (wiring the fetch layer) and SW-DEPLOY (Vercel deployment).
+**Consumer:** SableWeb content_performance, format_analysis, topic_trends, content_pipeline, vault sections.
 
 ---
 
