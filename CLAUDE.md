@@ -40,7 +40,7 @@ Weekly automation shipped (2026-04-06): `sable weekly run` orchestrates the full
 Operators see only their allowed orgs. Config in `~/.sable/config.yaml` under `serve.tokens`.
 See `docs/ROLES.md` for the permission matrix and config format.
 
-**Phase 3 (VPS) is partially complete.** Hetzner CX21 deployed 2026-04-06. systemd services running (`sable-serve`, `sable-weekly.timer`, `cloudflared`). Postgres installed, awaiting `sable.db` migration (dialect adapter needed). See `deploy/DEPLOY.md`. Phase 4 = multi-tenant (future/speculative).
+**Phase 3 (VPS) is partially complete.** Hetzner CX21 deployed 2026-04-06. systemd services running (`sable-serve`, `sable-weekly.timer`, `cloudflared`). Deploy scripts audited: yt-dlp added, log rotation configured (`deploy/logrotate.d/sable-serve`), smoke test added (`deploy/smoke-test.sh`). Postgres installed, awaiting `sable.db` migration (dialect adapter needed). See `deploy/DEPLOY.md`. Phase 4 = multi-tenant (future/speculative).
 
 ---
 

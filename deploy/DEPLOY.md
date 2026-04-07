@@ -24,9 +24,19 @@ ssh root@YOUR_VPS_IP
 bash /tmp/sable-deploy/setup-vps.sh
 ```
 
-The script installs Python 3.12, ffmpeg, cloudflared, Postgres, creates the `sable` user, clones the repo, builds a venv, and installs systemd units.
+The script installs Python 3.12, ffmpeg, yt-dlp, cloudflared, Postgres, creates the `sable` user, clones the repo, builds a venv, installs systemd units, and configures log rotation.
 
 After the script finishes, follow the printed checklist.
+
+### Smoke Test
+
+After setup and data migration, verify the deployment:
+
+```bash
+sudo -u sable bash /opt/sable/repo/deploy/smoke-test.sh
+```
+
+Checks: CLI importable, health endpoint, SQLite DBs readable, ffmpeg + yt-dlp available.
 
 ---
 
@@ -48,6 +58,9 @@ After the script finishes, follow the printed checklist.
 │   └── logs/
 ├── workspace/               ← SABLE_WORKSPACE (output, transcripts)
 └── vault/                   ← sable-vault (vault_base_path in config)
+
+/var/log/sable/              ← log rotation target (logrotate.d/sable-serve)
+/etc/logrotate.d/sable-serve ← weekly rotation, 4 weeks retained, compressed
 ```
 
 ---

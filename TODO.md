@@ -103,6 +103,28 @@ All critical, high, and medium findings from `codit.md` (2026-03-23 audit) resol
 
 ## Open Items
 
+### ~~SS-SEC: Verify .env security and create .env.example~~ — VERIFIED 2026-04-06
+
+`.env` was never committed (`git log --all --full-history -- .env` returns nothing). `.env.example` already exists in `deploy/.env.example` with placeholder values. `.gitignore` line 7 covers `.env`.
+
+---
+
+### ~~SS-VPS: Validate VPS deployment scripts~~ — SHIPPED 2026-04-06
+
+Audit completed. Fixes applied:
+- Added `yt-dlp` pip install to `setup-vps.sh` (was missing — clip pipeline would fail on VPS)
+- Added log rotation: `deploy/logrotate.d/sable-serve` + setup step in `setup-vps.sh`
+- Created `deploy/smoke-test.sh`: checks CLI, health endpoint, 3 SQLite DBs, ffmpeg, yt-dlp
+- Updated `deploy/DEPLOY.md` with smoke test instructions and file layout additions
+
+---
+
+### ~~SS-WEEKLY-ALL: Ensure `sable weekly run --all` covers all active accounts~~ — VERIFIED 2026-04-06
+
+Audit confirmed fully implemented: `discover_orgs()` finds active roster accounts, iterates orgs sequentially, runs 5-step pipeline (pulse→meta→advise→calendar→vault), continues on partial failure, exits 1 if any step fails. 19 tests cover CLI + runner. Open: `--skip-account` flag (low priority).
+
+---
+
 ### ~~SS-3: Weekly Automation & Operator Streamlining~~ — SHIPPED 2026-04-06
 
 - `sable weekly run --org ORG` — orchestrates pulse track → meta scan → advise → calendar → vault sync

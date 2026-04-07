@@ -46,6 +46,7 @@ fi
 python3.12 -m venv /opt/sable/venv
 /opt/sable/venv/bin/pip install --upgrade pip wheel
 /opt/sable/venv/bin/pip install -e '/opt/sable/repo[serve]'
+/opt/sable/venv/bin/pip install yt-dlp
 
 # Create data dirs
 mkdir -p /opt/sable/data /opt/sable/data/pulse /opt/sable/workspace /opt/sable/vault /opt/sable/data/logs
@@ -65,7 +66,14 @@ cp /tmp/sable-deploy/sable-weekly.service /etc/systemd/system/
 cp /tmp/sable-deploy/sable-weekly.timer /etc/systemd/system/
 systemctl daemon-reload
 
-echo "=== 6/8: Install cloudflared ==="
+echo "=== 6/9: Log rotation ==="
+mkdir -p /var/log/sable
+chown "$SABLE_USER:$SABLE_USER" /var/log/sable
+if [ -f /tmp/sable-deploy/logrotate.d/sable-serve ]; then
+    cp /tmp/sable-deploy/logrotate.d/sable-serve /etc/logrotate.d/sable-serve
+fi
+
+echo "=== 7/9: Install cloudflared ==="
 if ! command -v cloudflared &>/dev/null; then
     curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | gpg --dearmor -o /usr/share/keyrings/cloudflare-main.gpg
     echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
@@ -74,7 +82,7 @@ if ! command -v cloudflared &>/dev/null; then
     apt-get install -y -qq cloudflared
 fi
 
-echo "=== 7/8: Install Postgres (optional — skip if not ready) ==="
+echo "=== 8/9: Install Postgres (optional — skip if not ready) ==="
 if ! command -v psql &>/dev/null; then
     apt-get install -y -qq postgresql postgresql-contrib
     systemctl enable --now postgresql
@@ -87,7 +95,7 @@ if ! command -v psql &>/dev/null; then
     echo "  → Then set SABLE_DB_URL in $SABLE_HOME/.env"
 fi
 
-echo "=== 8/8: Summary ==="
+echo "=== 9/9: Summary ==="
 cat <<SUMMARY
 
   ┌───────────────────────────────────────────────────────┐
