@@ -30,7 +30,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,serve]"
 
       - name: Ruff lint
         run: ruff check .
