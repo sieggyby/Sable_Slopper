@@ -136,6 +136,7 @@ class TestExplainerOrgId:
             return "This is a test script about crypto."
 
         monkeypatch.setattr("sable.character_explainer.script.call_claude", fake_claude)
+        monkeypatch.setattr("sable.character_explainer.script.get_client", lambda: None)
 
         class FakeCharacter:
             id = "test_character"

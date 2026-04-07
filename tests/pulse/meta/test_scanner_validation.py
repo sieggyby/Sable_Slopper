@@ -177,10 +177,12 @@ def test_mixed_batch_skips_malformed():
     assert {r["tweet_id"] for r in valid} == {"111", "222"}
 
 
-def test_scanner_batch_warns_on_skipped_malformed_tweets(capsys):
+def test_scanner_batch_warns_on_skipped_malformed_tweets(capsys, monkeypatch):
     """Scanner.run emits a warning when malformed tweets are skipped in a batch."""
+    import sqlite3
     from unittest.mock import MagicMock, patch, AsyncMock
     from sable.pulse.meta.scanner import Scanner
+    from sable.pulse.meta.db import _SCHEMA
 
     good = _valid_raw_tweet(id_str="111")
     bad = _valid_raw_tweet(id_str="222")
@@ -196,6 +198,24 @@ def test_scanner_batch_warns_on_skipped_malformed_tweets(capsys):
     mock_db.upsert_tweet.return_value = True
     mock_db.upsert_author_profile.return_value = None
     mock_db.checkpoint_author.return_value = None
+
+    # Provide an in-memory meta.db so bulk_upsert_tweets works.
+    # Use shared cache so each _meta_get_conn() call returns a fresh
+    # connection to the same in-memory DB (scanner closes per-author).
+    _db_uri = "file:test_scanner_validation?mode=memory&cache=shared"
+    init_conn = sqlite3.connect(_db_uri, uri=True)
+    init_conn.row_factory = sqlite3.Row
+    for stmt in _SCHEMA.split(";"):
+        stmt = stmt.strip()
+        if stmt:
+            init_conn.execute(stmt)
+
+    def _fresh_conn():
+        c = sqlite3.connect(_db_uri, uri=True)
+        c.row_factory = sqlite3.Row
+        return c
+
+    monkeypatch.setattr("sable.pulse.meta.scanner._meta_get_conn", _fresh_conn)
 
     # Stub classify + normalize
     mock_lift = MagicMock()

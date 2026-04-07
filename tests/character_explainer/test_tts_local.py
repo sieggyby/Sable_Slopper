@@ -44,8 +44,11 @@ class TestLocalXTTSSynthesize:
     def test_missing_voice_sample_raises(self):
         engine = LocalXTTSEngine()
         char = _make_character(local_voice_sample_path=None)
-        with pytest.raises(ValueError, match="local_voice_sample_path"):
-            engine.synthesize("hello", char, "/tmp")
+        mock_f5 = MagicMock()
+        mock_sf = MagicMock()
+        with patch.dict("sys.modules", {"f5_tts": mock_f5, "f5_tts.api": mock_f5, "soundfile": mock_sf}):
+            with pytest.raises(ValueError, match="local_voice_sample_path"):
+                engine.synthesize("hello", char, "/tmp")
 
     def test_voice_sample_not_found_raises(self, tmp_path):
         engine = LocalXTTSEngine()

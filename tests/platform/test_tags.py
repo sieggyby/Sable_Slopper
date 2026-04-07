@@ -15,8 +15,9 @@ def test_add_and_get_active_tag(org_conn):
 
 def test_append_history_tag_accumulates(org_conn):
     eid = create_entity(org_conn, "testorg")
-    add_tag(org_conn, eid, "cultist_candidate")
-    add_tag(org_conn, eid, "cultist_candidate")
+    # Use a non-replace tag so both remain active
+    add_tag(org_conn, eid, "mentioned_in_report")
+    add_tag(org_conn, eid, "mentioned_in_report")
     tags = get_active_tags(org_conn, eid)
     assert len(tags) == 2
 

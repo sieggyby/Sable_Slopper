@@ -95,6 +95,7 @@ class TestElevenLabsSynthesize:
         with patch("sable.character_explainer.tts.elevenlabs._post_with_retry", return_value=fake_response), \
              patch("sable.character_explainer.tts.elevenlabs.subprocess.run") as mock_ffmpeg, \
              patch("sable.shared.ffmpeg.get_duration", return_value=2.5), \
+             patch("sable.shared.ffmpeg.require_ffmpeg", return_value="/usr/bin/ffmpeg"), \
              patch("sable.character_explainer.tts.elevenlabs._log_elevenlabs_cost"), \
              patch("sable.config.require_key", return_value="fake-key"):
 

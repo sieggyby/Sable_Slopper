@@ -9,13 +9,35 @@ import pytest
 
 def _make_scanner(monkeypatch, watchlist, deep=False):
     """Build a Scanner with mocked DB and SocialData."""
+    import sqlite3
     from sable.pulse.meta.scanner import Scanner
+    from sable.pulse.meta.db import _SCHEMA
 
     db = MagicMock()
     db.get_author_profile.return_value = None
     db.get_author_tweets.return_value = []
     db.upsert_tweet.return_value = True
     db.upsert_author_profile.return_value = None
+    db.get_completed_authors.return_value = set()
+    db.checkpoint_author.return_value = None
+
+    # Provide an in-memory meta.db so bulk_upsert_tweets works.
+    # Use shared cache so each _meta_get_conn() call returns a fresh
+    # connection to the same in-memory DB (scanner closes per-author).
+    _db_uri = "file:test_scanner_cost?mode=memory&cache=shared"
+    init_conn = sqlite3.connect(_db_uri, uri=True)
+    init_conn.row_factory = sqlite3.Row
+    for stmt in _SCHEMA.split(";"):
+        stmt = stmt.strip()
+        if stmt:
+            init_conn.execute(stmt)
+
+    def _fresh_conn():
+        c = sqlite3.connect(_db_uri, uri=True)
+        c.row_factory = sqlite3.Row
+        return c
+
+    monkeypatch.setattr("sable.pulse.meta.scanner._meta_get_conn", _fresh_conn)
 
     scanner = Scanner(
         org="test_org",
