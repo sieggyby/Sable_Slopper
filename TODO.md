@@ -163,7 +163,8 @@ Previous Mac launchd services (`com.sable.serve`, `com.cloudflare.cloudflared`) 
 
 - ~~Hetzner CX21 deployment~~ **DEPLOYED 2026-04-06** — systemd services, Cloudflare tunnel, data migrated
 - ~~Scheduled sync via cron~~ **DEPLOYED 2026-04-06** — `sable-weekly.timer` (Monday 06:00 UTC)
-- Postgres migration — installed on VPS, dialect adapter + `sable.db` migration pending. See `deploy/DEPLOY.md`.
+- Postgres migration for `sable.db` — **Upstream ready (2026-04-08).** SablePlatform Phases 0–7 complete: SQLAlchemy Core + Alembic + `SABLE_DATABASE_URL` support. Slopper's `sable/platform/` re-export facades work unchanged through CompatConnection. To activate: set `SABLE_DATABASE_URL=postgresql://...` on VPS, run `alembic upgrade head` in SablePlatform, migrate data. Slopper needs no code changes for sable.db access.
+- Postgres migration for `pulse.db` / `meta.db` — separate concern (Slopper's own databases, not SablePlatform). Dialect adapter needed. See `deploy/DEPLOY.md`.
 - Docker container (deferred — systemd is sufficient at current scale)
 - Multi-org S3 vault storage (deferred)
 - Webhook receivers for pulse data push + tweet notifications
