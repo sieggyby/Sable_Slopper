@@ -573,3 +573,20 @@ New `deploy/` directory:
 ### Verification
 
 `curl https://api.sable.tools/health` → `{"status": "ok", "checks": {"pulse_db": true, "meta_db": true, "vault": true}}`
+
+---
+
+## Named Params Conversion for sable.db Queries (2026-04-08)
+
+Converted `?`-positional SQL params to `:named` params in Slopper's direct `conn.execute()`
+calls targeting `sable.db`, for forward-compat with SablePlatform's SQLAlchemy Core migration.
+
+**Files changed:**
+- `sable/platform/artifacts.py` — 1 INSERT query (`:org_id`, `:artifact_type`, `:path`, `:metadata_json`)
+- `sable/platform/cli.py` — 14 queries across `org_create`, `org_status`, `org_set_config`, `entity_search`, `entity_show`, `job_list`
+
+**Not touched:** `pulse.db` and `meta.db` queries via direct `sqlite3.connect()` (different databases, out of scope).
+
+**Note:** `org_set_config` uses `datetime('now')` which is SQLite-specific — marked with TODO for Postgres transition.
+
+Validation: 1117 passed, 96 failed (pre-existing upstream), ruff 0, mypy 0.

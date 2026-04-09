@@ -30,16 +30,16 @@ def org_create(org_id, name, discord_server_id, twitter_handle):
 
     try:
         conn = get_db()
-        existing = conn.execute("SELECT 1 FROM orgs WHERE org_id=?", (org_id,)).fetchone()
+        existing = conn.execute("SELECT 1 FROM orgs WHERE org_id=:org_id", {"org_id": org_id}).fetchone()
         if existing:
             raise SableError(ORG_EXISTS, f"Org '{org_id}' already exists")
         with conn:
             conn.execute(
                 """
                 INSERT INTO orgs (org_id, display_name, discord_server_id, twitter_handle)
-                VALUES (?, ?, ?, ?)
+                VALUES (:org_id, :display_name, :discord_server_id, :twitter_handle)
                 """,
-                (org_id, name, discord_server_id, twitter_handle),
+                {"org_id": org_id, "display_name": name, "discord_server_id": discord_server_id, "twitter_handle": twitter_handle},
             )
         click.echo(f"Created org '{org_id}' ({name})")
     except SableError as e:
@@ -72,17 +72,17 @@ def org_status(org_id):
 
     try:
         conn = get_db()
-        org = conn.execute("SELECT * FROM orgs WHERE org_id=?", (org_id,)).fetchone()
+        org = conn.execute("SELECT * FROM orgs WHERE org_id=:org_id", {"org_id": org_id}).fetchone()
         if not org:
             raise SableError(ORG_NOT_FOUND, f"Org '{org_id}' not found")
 
         entity_count = conn.execute(
-            "SELECT COUNT(*) FROM entities WHERE org_id=? AND status != 'archived'", (org_id,)
+            "SELECT COUNT(*) FROM entities WHERE org_id=:org_id AND status != 'archived'", {"org_id": org_id}
         ).fetchone()[0]
 
         last_diag = conn.execute(
-            "SELECT started_at, status, overall_grade, fit_score FROM diagnostic_runs WHERE org_id=? ORDER BY started_at DESC LIMIT 1",
-            (org_id,),
+            "SELECT started_at, status, overall_grade, fit_score FROM diagnostic_runs WHERE org_id=:org_id ORDER BY started_at DESC LIMIT 1",
+            {"org_id": org_id},
         ).fetchone()
 
         spend = get_weekly_spend(conn, org_id)
@@ -90,13 +90,13 @@ def org_status(org_id):
 
         # Cross-store freshness
         last_tracking_sync = conn.execute(
-            "SELECT MAX(completed_at) FROM sync_runs WHERE org_id=? AND sync_type='sable_tracking'",
-            (org_id,),
+            "SELECT MAX(completed_at) FROM sync_runs WHERE org_id=:org_id AND sync_type=:sync_type",
+            {"org_id": org_id, "sync_type": "sable_tracking"},
         ).fetchone()[0]
 
         last_vault_sync = conn.execute(
-            "SELECT MAX(created_at) FROM artifacts WHERE org_id=? AND artifact_type='vault_index'",
-            (org_id,),
+            "SELECT MAX(created_at) FROM artifacts WHERE org_id=:org_id AND artifact_type=:artifact_type",
+            {"org_id": org_id, "artifact_type": "vault_index"},
         ).fetchone()[0]
 
         # Pulse freshness (read-only, best-effort)
@@ -165,15 +165,16 @@ def org_set_config(org_id, key, value):
 
     try:
         conn = get_db()
-        row = conn.execute("SELECT config_json FROM orgs WHERE org_id=?", (org_id,)).fetchone()
+        row = conn.execute("SELECT config_json FROM orgs WHERE org_id=:org_id", {"org_id": org_id}).fetchone()
         if not row:
             raise SableError(ORG_NOT_FOUND, f"Org '{org_id}' not found")
         cfg = json.loads(row["config_json"] or "{}")
         cfg[key] = value
         with conn:
             conn.execute(
-                "UPDATE orgs SET config_json=?, updated_at=datetime('now') WHERE org_id=?",
-                (json.dumps(cfg), org_id),
+                # TODO: datetime('now') is SQLite-specific — replace for Postgres
+                "UPDATE orgs SET config_json=:config_json, updated_at=datetime('now') WHERE org_id=:org_id",
+                {"config_json": json.dumps(cfg), "org_id": org_id},
             )
         click.echo(f"Set {key}={value!r} on org '{org_id}'")
     except SableError as e:
@@ -204,12 +205,12 @@ def entity_search(org_id, query):
         SELECT DISTINCT e.entity_id, e.display_name, e.status, e.org_id
         FROM entities e
         LEFT JOIN entity_handles h ON e.entity_id = h.entity_id
-        WHERE e.org_id = ?
-          AND (e.display_name LIKE ? OR h.handle LIKE ?)
+        WHERE e.org_id = :org_id
+          AND (e.display_name LIKE :like OR h.handle LIKE :like)
           AND e.status != 'archived'
         LIMIT 50
         """,
-        (org_id, like, like),
+        {"org_id": org_id, "like": like},
     ).fetchall()
 
     if not rows:
@@ -230,13 +231,13 @@ def entity_show(entity_id):
 
     try:
         conn = get_db()
-        row = conn.execute("SELECT * FROM entities WHERE entity_id=?", (entity_id,)).fetchone()
+        row = conn.execute("SELECT * FROM entities WHERE entity_id=:entity_id", {"entity_id": entity_id}).fetchone()
         if not row:
             raise SableError("ENTITY_NOT_FOUND", f"Entity '{entity_id}' not found")
 
         handles = conn.execute(
-            "SELECT platform, handle, is_primary FROM entity_handles WHERE entity_id=? ORDER BY platform, handle",
-            (entity_id,),
+            "SELECT platform, handle, is_primary FROM entity_handles WHERE entity_id=:entity_id ORDER BY platform, handle",
+            {"entity_id": entity_id},
         ).fetchall()
         tags = get_active_tags(conn, entity_id)
 
@@ -295,13 +296,13 @@ def job_list(org_id, status):
     conn = get_db()
     if status:
         rows = conn.execute(
-            "SELECT * FROM jobs WHERE org_id=? AND status=? ORDER BY created_at DESC",
-            (org_id, status),
+            "SELECT * FROM jobs WHERE org_id=:org_id AND status=:status ORDER BY created_at DESC",
+            {"org_id": org_id, "status": status},
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM jobs WHERE org_id=? ORDER BY created_at DESC LIMIT 50",
-            (org_id,),
+            "SELECT * FROM jobs WHERE org_id=:org_id ORDER BY created_at DESC LIMIT 50",
+            {"org_id": org_id},
         ).fetchall()
 
     if not rows:

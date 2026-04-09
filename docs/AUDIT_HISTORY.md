@@ -571,3 +571,40 @@ MED-4, MED-6 through MED-9, MED-11, MED-12) had already been resolved during pri
 remediation passes.
 
 ### Validation at completion: 1157 tests, ruff 0, mypy 0
+
+---
+
+## Completed Items Moved from TODO.md (2026-04-08)
+
+The following completed items were removed from `TODO.md` to reduce stale bulk.
+Full details for each are in `docs/IMPLEMENTATION_LOG.md`.
+
+- **SS-SEC:** `.env` security verified — never committed, `.gitignore` covers it, `deploy/.env.example` exists. (2026-04-06)
+- **SS-VPS:** VPS deployment scripts audited — yt-dlp added, log rotation configured, smoke test created. (2026-04-06)
+- **SS-WEEKLY-ALL:** `sable weekly run --all` verified — `discover_orgs()` iterates all active roster accounts, 19 tests. (2026-04-06)
+- **SS-3:** Weekly automation shipped — `sable weekly run` (5-step pipeline), `sable clip review`, cost-forecast endpoint, 34 tests. (2026-04-06)
+- **SS-2:** `sable serve` shipped — FastAPI on Hetzner CX21 VPS, Cloudflare tunnel, systemd services. (2026-04-06)
+- **Phase 2 RBAC:** `vault/permissions.py` + org-scoping shipped. (2026-04-05)
+- **Phase 3 VPS:** Hetzner CX21 deployed, `sable-weekly.timer` running. (2026-04-06)
+- **Full Repo Audit (T1-1 through T3-10):** All 19 items closed 2026-04-05.
+- **Codit Audit Remediation (CRIT/HIGH/MED):** All findings closed 2026-04-05.
+
+---
+
+## Named Params Conversion for sable.db Queries (2026-04-08)
+
+Converted all `?`-positional SQL params to `:named` params with dict args in Slopper's
+two files that have direct `conn.execute()` calls targeting `sable.db`:
+
+- `sable/platform/artifacts.py` — 1 INSERT query
+- `sable/platform/cli.py` — 14 queries (SELECT, INSERT, UPDATE)
+
+Mechanical conversion only — no SQL logic changes. Forward-compat for when SablePlatform's
+`CompatConnection` retires `?`-positional support. `pulse.db` and `meta.db` queries via
+direct `sqlite3.connect()` were not touched (out of scope).
+
+Added `TODO` comment on `datetime('now')` SQLite-specific call in `org_set_config`.
+
+Adversarial QA audit (AGENTS.md framework): clean — no missed conversions, no scope creep.
+
+### Validation: 1117 passed, 96 failed (pre-existing upstream), ruff 0, mypy 0

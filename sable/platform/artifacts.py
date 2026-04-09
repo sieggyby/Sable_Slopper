@@ -26,8 +26,8 @@ def register_content_artifact(
             conn.execute(
                 """INSERT INTO artifacts
                    (org_id, artifact_type, path, metadata_json, stale, degraded)
-                   VALUES (?, ?, ?, ?, 0, 0)""",
-                (org_id, artifact_type, path, json.dumps(metadata or {})),
+                   VALUES (:org_id, :artifact_type, :path, :metadata_json, 0, 0)""",
+                {"org_id": org_id, "artifact_type": artifact_type, "path": path, "metadata_json": json.dumps(metadata or {})},
             )
     except Exception as e:
         logger.warning("Failed to register artifact for org %s: %s", org_id, e)

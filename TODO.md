@@ -2,84 +2,13 @@
 
 ---
 
-## Validation Snapshot (2026-04-06)
+## Validation Snapshot (2026-04-08)
 
-- `./.venv/bin/python -m pytest -q` → `1213 passed`
+- `./.venv/bin/python -m pytest -q` → `1117 passed, 96 failed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
 
----
-
-## Full Repo Audit (2026-04-05) — COMPLETED
-
-All 19 unblocked items (T1-1 through T3-10) implemented, QA-gated, and closed.
-See `docs/AUDIT_HISTORY.md` § "Full Repo Audit Remediation" for details.
-
-### Resolved Items (T1-1 through T3-10)
-
-All 19 items below were implemented, QA-gated, and closed 2026-04-05.
-Full details in `docs/AUDIT_HISTORY.md` § "Full Repo Audit Remediation."
-
-**Tier 1 (Critical/High):**
-- ~~T1-1: Replicate API key env leak — `replicate.Client(api_token=...)` replaces `os.environ` set~~
-- ~~T1-2: Strategy brief sample size disclosure — 4 sites patched + stage2 contract rule~~
-- ~~T1-3: Account format report confidence grade — `account_confidence` field (A/B/C/D)~~
-
-**Tier 2 (High/Medium):**
-- ~~T2-1: pulse/meta/db.py tests — 14 tests in `tests/pulse/meta/test_meta_db.py`~~
-- ~~T2-2: pulse/meta/scanner.py tests — 8 tests in `tests/pulse/meta/test_scanner.py`~~
-- ~~T2-3: pulse/meta/cli.py tests — 5 tests in `tests/pulse/meta/test_meta_cli.py`~~
-- ~~T2-4: ElevenLabs key via `require_key()` — removed `os.environ.get`~~
-- ~~T2-5: Vault notes TTL cache — 5-min TTL, invalidation on write~~
-- ~~T2-6: face/optimize.py exception logging — 4 sites now log `logger.debug`~~
-
-**Tier 3 (Medium/Low):**
-- ~~T3-1: calendar/planner.py tests — 6 tests in `tests/calendar_planner/test_planner.py`~~
-- ~~T3-2: shared/ffmpeg.py tests — 6 tests in `tests/shared/test_ffmpeg.py`~~
-- ~~T3-3: onboard/orchestrator.py tests — 3 tests in `tests/onboard/test_orchestrator.py`~~
-- ~~T3-4: vault/cli.py tests — 3 tests in `tests/vault/test_vault_cli.py`~~
-- ~~T3-5: platform/cli.py tests — 3 tests in `tests/platform/test_platform_cli.py`~~
-- ~~T3-6: Rate limiter LRU eviction — `min()` by last-request time~~
-- ~~T3-7: Global exception handler — `@app.exception_handler(Exception)` on serve~~
-- ~~T3-8: Write generator anatomy sample count — `{len(patterns)} posts` in prompt~~
-- ~~T3-9: Narrative velocity min sample guard — `unique_authors >= 3`, `days_since >= 2`~~
-- ~~T3-10: Lexicon scanner metadata return — `tuple[list[dict], dict]` with corpus stats~~
-
----
-
-### Codit Audit Remediation (2026-04-05) — COMPLETED
-
-All critical, high, and medium findings from `codit.md` (2026-03-23 audit) resolved:
-
-**Critical (5/5 closed):**
-- ~~CRIT-1: vault/platform_sync.py partial-sync window — pulse report staging moved before Phase B renames~~
-- ~~CRIT-2: roster/manager.py concurrent writes — fcntl lock + atomic_write~~
-- ~~CRIT-3: vault/notes.py non-atomic writes — atomic_write()~~
-- ~~CRIT-4: shared/paths.py vault_dir path traversal — org slug regex~~
-- ~~CRIT-5: platform/merge.py NoneType crash — SableError guard~~
-
-**High (7/7 closed):**
-- ~~HIGH-1: Failed scan rows under-report cost/novelty — Scanner instance attrs~~
-- ~~HIGH-2: Claude calls bypass budget/cost — centralized in shared/api.py~~
-- ~~HIGH-3: Failed author fetches silently excluded — tracked + reported~~
-- ~~HIGH-4: String max() on tweet IDs — integer comparison~~
-- ~~HIGH-5: Deep-mode outsider tweets ephemeral — CLI help + console transient marker~~
-- ~~HIGH-6: FFmpeg subtitle path injection — _validate_subtitle_path()~~
-- ~~HIGH-7: Migration failure partial schema — transactional migrations in SablePlatform~~
-
-**Medium (10 fixed, 2 partial):**
-- ~~MED-1: Analysis phase cost guard — max_analysis_cost cap~~
-- ~~MED-2: Fallback analysis not marked — degraded frontmatter field~~
-- ~~MED-3: Whisper model caching — _MODEL_CACHE~~
-- ~~MED-4: Broad exception swallowing — now logs which source failed (partial: still degrades)~~
-- ~~MED-5: Claude search fallback silent — SearchResult.degraded flag~~
-- ~~MED-6: Corrupted cache rows — stale marking on bad artifacts~~
-- ~~MED-7: Clip selector JSON parse — logging + retry~~
-- ~~MED-8: Naive UTC datetime — timezone-aware in SablePlatform~~
-- ~~MED-9: Lookback string comparison — _parse_twitter_date returns None~~
-- ~~MED-10: Format baselines duplicate rows — insert_format_baseline + same-second dedup~~
-- ~~MED-11: Entity set no size guard — paginated LIMIT 500 OFFSET~~
-- ~~MED-12: Hardcoded pricing — centralized in shared/pricing.py~~
+**96 failures are upstream:** SablePlatform's SQLAlchemy Core migration wraps SQL in `text()`, which raises `TypeError: execute() argument 1 must be str, not TextClause` when called against Slopper test fixtures using raw `sqlite3.Connection`. Affected test files: `tests/advise/`, `tests/onboard/`, `tests/org_status/`, `tests/platform/`, `tests/pulse/test_outcomes.py`, `tests/pulse/test_sync_runs.py`. Fix requires updating Slopper test fixtures to use SablePlatform's `CompatConnection` or aligning on raw sqlite3 connections in the shared modules.
 
 ---
 
@@ -103,67 +32,20 @@ All critical, high, and medium findings from `codit.md` (2026-03-23 audit) resol
 
 ## Open Items
 
-### ~~SS-SEC: Verify .env security and create .env.example~~ — VERIFIED 2026-04-06
+### SS-COMPAT: Fix 96 test failures from SablePlatform SQLAlchemy migration [HIGH priority, BLOCKED]
 
-`.env` was never committed (`git log --all --full-history -- .env` returns nothing). `.env.example` already exists in `deploy/.env.example` with placeholder values. `.gitignore` line 7 covers `.env`.
-
----
-
-### ~~SS-VPS: Validate VPS deployment scripts~~ — SHIPPED 2026-04-06
-
-Audit completed. Fixes applied:
-- Added `yt-dlp` pip install to `setup-vps.sh` (was missing — clip pipeline would fail on VPS)
-- Added log rotation: `deploy/logrotate.d/sable-serve` + setup step in `setup-vps.sh`
-- Created `deploy/smoke-test.sh`: checks CLI, health endpoint, 3 SQLite DBs, ffmpeg, yt-dlp
-- Updated `deploy/DEPLOY.md` with smoke test instructions and file layout additions
+- **Root cause:** SablePlatform Phases 0–7 converted `sable/platform/` modules to use `text()` wrapped SQL via SQLAlchemy Core. Slopper test fixtures still pass raw `sqlite3.Connection` objects, which choke on `TextClause` arguments.
+- **Affected:** `tests/advise/`, `tests/onboard/`, `tests/org_status/`, `tests/platform/`, `tests/pulse/test_outcomes.py`, `tests/pulse/test_sync_runs.py` (96 tests total)
+- **Fix options:** (a) Update Slopper test fixtures to use SablePlatform's `CompatConnection`, or (b) have SablePlatform modules detect raw sqlite3 connections and unwrap `text()`.
+- **Blocked on:** Decision on which side owns the fix (Slopper fixtures vs SablePlatform compat layer).
 
 ---
 
-### ~~SS-WEEKLY-ALL: Ensure `sable weekly run --all` covers all active accounts~~ — VERIFIED 2026-04-06
-
-Audit confirmed fully implemented: `discover_orgs()` finds active roster accounts, iterates orgs sequentially, runs 5-step pipeline (pulse→meta→advise→calendar→vault), continues on partial failure, exits 1 if any step fails. 19 tests cover CLI + runner. Open: `--skip-account` flag (low priority).
-
----
-
-### ~~SS-3: Weekly Automation & Operator Streamlining~~ — SHIPPED 2026-04-06
-
-- `sable weekly run --org ORG` — orchestrates pulse track → meta scan → advise → calendar → vault sync
-- `sable weekly run --all` — discovers all rostered orgs, runs weekly cycle for each
-- `--dry-run` and `--cost-estimate` flags for planning without execution
-- `sable weekly cron install` — launchd plist generator (Monday 06:00)
-- `sable clip review --org ORG` — interactive triage: approve/skip/delete unreviewed clips
-- `GET /api/v1/cost/org/{org_id}/cost-forecast` — cost forecast + budget status endpoint
-- 34 new tests (16 runner + 7 CLI + 7 clip review + 4 cost routes)
-
-### ~~SS-2: Expose `sable serve` for SableWeb~~ — SHIPPED 2026-04-06
-
-**Production URL:** `https://api.sable.tools` → `localhost:8420` via Cloudflare named tunnel `sable-serve`.
-
-Deployed on Hetzner CX21 VPS (178.156.204.125) as of 2026-04-06. Three systemd services:
-- `cloudflared.service` — Cloudflare tunnel (4 QUIC connections)
-- `sable-serve.service` — FastAPI + uvicorn (2 workers)
-- `sable-weekly.timer` — weekly automation (Monday 06:00 UTC)
-
-Previous Mac launchd services (`com.sable.serve`, `com.cloudflare.cloudflared`) decommissioned.
-
-**Consumer:** SableWeb content_performance, format_analysis, topic_trends, content_pipeline, vault sections.
-
----
-
-## Phase 2+ (Deferred)
-
-### Phase 2 remaining
-
-- ~~`sable/vault/permissions.py` — RBAC implementation~~ **SHIPPED 2026-04-05**
-- ~~Org-scoping in serve routes — token-to-org binding~~ **SHIPPED 2026-04-05**
-
-> All serve routes now enforce per-token role + org scoping. See `docs/ROLES.md`.
+## Phase 3+ (Deferred)
 
 ### Phase 3 — VPS (partially complete)
 
-- ~~Hetzner CX21 deployment~~ **DEPLOYED 2026-04-06** — systemd services, Cloudflare tunnel, data migrated
-- ~~Scheduled sync via cron~~ **DEPLOYED 2026-04-06** — `sable-weekly.timer` (Monday 06:00 UTC)
-- Postgres migration for `sable.db` — **Upstream ready (2026-04-08).** SablePlatform Phases 0–7 complete: SQLAlchemy Core + Alembic + `SABLE_DATABASE_URL` support. Slopper's `sable/platform/` re-export facades work unchanged through CompatConnection. To activate: set `SABLE_DATABASE_URL=postgresql://...` on VPS, run `alembic upgrade head` in SablePlatform, migrate data. Slopper needs no code changes for sable.db access.
+- Postgres migration for `sable.db` — **Upstream ready (2026-04-08).** SablePlatform Phases 0–7 complete: SQLAlchemy Core + Alembic + `SABLE_DATABASE_URL` support. Slopper's `sable/platform/` re-export facades work unchanged through CompatConnection. To activate: set `SABLE_DATABASE_URL=postgresql://...` on VPS, run `alembic upgrade head` in SablePlatform, migrate data.
 - Postgres migration for `pulse.db` / `meta.db` — separate concern (Slopper's own databases, not SablePlatform). Dialect adapter needed. See `deploy/DEPLOY.md`.
 - Docker container (deferred — systemd is sufficient at current scale)
 - Multi-org S3 vault storage (deferred)
@@ -224,6 +106,8 @@ Previous Mac launchd services (`com.sable.serve`, `com.cloudflare.cloudflared`) 
 - `meta.db` table definitions go in `sable/pulse/meta/db.py`'s `_SCHEMA` string (not
   migration files), even when a different module owns the read/write logic. The owning
   module imports `meta_db_path()` and connects directly.
+- `sable.db` queries via `get_db()` use `:named` params with dict args (not `?` with tuples).
+  `pulse.db` and `meta.db` queries via direct `sqlite3.connect()` still use `?`-positional.
 
 ### Validation checklist
 
