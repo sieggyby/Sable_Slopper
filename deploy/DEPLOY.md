@@ -51,9 +51,9 @@ Checks: CLI importable, health endpoint, SQLite DBs readable, ffmpeg + yt-dlp av
 │   ├── config.yaml          ← serve tokens, rate limit, etc.
 │   ├── roster.yaml
 │   ├── profiles/
-│   ├── pulse.db             ← (kept until Postgres migration)
-│   ├── pulse/meta.db        ← (kept until Postgres migration)
-│   ├── sable.db             ← (kept until Postgres migration)
+│   ├── pulse.db             ← SQLite (active)
+│   ├── pulse/meta.db        ← SQLite (active)
+│   ├── sable.db             ← SQLite backup (Postgres is primary since 2026-04-09)
 │   ├── brainrot/
 │   └── logs/
 ├── workspace/               ← SABLE_WORKSPACE (output, transcripts)
@@ -172,7 +172,7 @@ sudo systemctl restart sable-serve
 
 ## Postgres Transition
 
-Postgres runs on the same CX22 — no additional cost. The migration converts `sable.db` (the cross-tool platform store) first, since it's the most valuable for concurrent access and SableWeb queries. `pulse.db` and `meta.db` can follow later or stay SQLite.
+Postgres runs on the same CX22 — no additional cost.
 
 ### Why Postgres
 
@@ -184,161 +184,17 @@ Postgres runs on the same CX22 — no additional cost. The migration converts `s
 | Size limit | Practical limit ~10 GB | Effectively unlimited |
 | JSON queries | Limited `json_extract` | Full `jsonb` operators, indexes |
 
-At current scale SQLite is fine. Postgres becomes worth it when:
-- Multiple services write concurrently (SableWeb mutations, weekly automation, manual CLI)
-- You want SableWeb to query the DB directly instead of through the REST API
-- You add a second VPS or container
+### Phase 1: sable.db → Postgres — COMPLETE (2026-04-09)
 
-### Phase 1: sable.db → Postgres
+All 36 tables migrated. Both `sable-serve` and `sable-weekly` systemd services now use Postgres.
 
-This is the only DB that SablePlatform manages with versioned migrations. The other two (pulse.db, meta.db) use `CREATE TABLE IF NOT EXISTS` schemas embedded in Python.
+- **Migration tool:** `sable-platform migrate to-postgres` (handles Alembic schema creation, data copy, sequence reset, and validation)
+- **SablePlatform location:** `/opt/sable/platform`
+- **Connection string:** `SABLE_DATABASE_URL=postgresql://sable:...@127.0.0.1:5432/sable?sslmode=disable` in `/opt/sable/.env`
+- **Superuser:** Temporarily granted to `sable` role for migration, then revoked
+- **SQLite backup:** Original `sable.db` retained on disk at `/opt/sable/data/sable.db`
 
-**Step 1: Schema translation**
-
-SablePlatform's 30 migrations are SQLite DDL. Create a Postgres-compatible `init.sql`:
-
-```sql
--- deploy/postgres/init.sql
--- Translated from sable_platform/db/migrations/*.sql
-
-CREATE TABLE IF NOT EXISTS orgs (
-    org_id TEXT PRIMARY KEY,
-    display_name TEXT,
-    discord_server_id TEXT,
-    twitter_handle TEXT,
-    config_json JSONB,            -- JSONB instead of TEXT
-    status TEXT DEFAULT 'active',
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS entities (
-    entity_id TEXT PRIMARY KEY,
-    org_id TEXT REFERENCES orgs(org_id),
-    display_name TEXT,
-    entity_type TEXT,
-    status TEXT DEFAULT 'active',
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- ... (all 15+ tables from sable.db)
--- Full schema derived from: sable_platform/db/migrations/
-```
-
-**Step 2: Code changes (sable_platform)**
-
-The connection factory in `sable_platform/db/connection.py` currently returns a `sqlite3.Connection`. Add a Postgres path:
-
-```python
-# sable_platform/db/connection.py — sketch
-import os
-
-def get_db():
-    db_url = os.environ.get("SABLE_DB_URL")
-    if db_url and db_url.startswith("postgresql://"):
-        return _get_pg_connection(db_url)
-    return _get_sqlite_connection()
-
-def _get_pg_connection(url: str):
-    import psycopg2
-    import psycopg2.extras
-    conn = psycopg2.connect(url)
-    conn.autocommit = False
-    # Return a wrapper that matches the sqlite3.Row interface
-    # or use psycopg2.extras.RealDictCursor
-    return conn
-
-def _get_sqlite_connection():
-    # ... existing code ...
-```
-
-**Key SQL differences to handle:**
-
-| SQLite | Postgres | Where |
-|--------|----------|-------|
-| `datetime('now')` | `now()` | Defaults, WHERE clauses |
-| `datetime('now', '-7 days')` | `now() - interval '7 days'` | Cost queries, freshness |
-| `json_extract(col, '$.key')` | `col->>'key'` | config_json queries |
-| `INTEGER PRIMARY KEY AUTOINCREMENT` | `SERIAL PRIMARY KEY` | All tables |
-| `?` parameter | `%s` parameter | All queries |
-| `GROUP_CONCAT` | `string_agg` | A few reports |
-| `conn.row_factory = sqlite3.Row` | `RealDictCursor` | Connection setup |
-
-**Approach: dialect adapter**
-
-Rather than rewriting every query, create a thin adapter:
-
-```python
-# sable_platform/db/dialect.py
-class SQLDialect:
-    """Abstract query differences between SQLite and Postgres."""
-    def __init__(self, backend: str):  # "sqlite" or "postgres"
-        self.backend = backend
-
-    def now(self) -> str:
-        return "datetime('now')" if self.backend == "sqlite" else "now()"
-
-    def interval(self, days: int) -> str:
-        if self.backend == "sqlite":
-            return f"datetime('now', '-{days} days')"
-        return f"now() - interval '{days} days'"
-
-    def param(self) -> str:
-        return "?" if self.backend == "sqlite" else "%s"
-
-    def json_extract(self, col: str, key: str) -> str:
-        if self.backend == "sqlite":
-            return f"json_extract({col}, '$.{key}')"
-        return f"{col}->>'{key}'"
-```
-
-Thread the dialect through query-building functions. Most queries are simple SELECTs/INSERTs that need only the parameter style changed.
-
-**Step 3: Data migration**
-
-```bash
-# On the VPS — one-shot SQLite → Postgres dump
-pip install pgloader  # or use the apt package
-
-pgloader sqlite:///opt/sable/data/sable.db \
-         postgresql://sable:changeme@localhost/sable
-```
-
-Or manual:
-```bash
-# Dump SQLite as SQL inserts
-sqlite3 /opt/sable/data/sable.db .dump > /tmp/sable_dump.sql
-
-# Clean up SQLite-isms (BEGIN TRANSACTION, etc.), then:
-psql -U sable -d sable -f /tmp/sable_dump.sql
-```
-
-**Step 4: Switch over**
-
-```bash
-# In /opt/sable/.env, uncomment:
-SABLE_DB_URL=postgresql://sable:changeme@localhost:5432/sable
-
-# Restart
-systemctl restart sable-serve
-curl https://api.sable.tools/health
-```
-
-**Step 5: Add psycopg2 to dependencies**
-
-```toml
-# pyproject.toml
-[project.optional-dependencies]
-postgres = ["psycopg2-binary>=2.9"]
-serve = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.32",
-]
-```
-
-Install: `pip install -e ".[serve,postgres]"`
-
-### Phase 2: pulse.db + meta.db → Postgres (later)
+### Phase 2: pulse.db + meta.db → Postgres (deferred)
 
 These two are harder because:
 - Schemas are embedded `_SCHEMA` strings, not migration files
@@ -348,7 +204,7 @@ These two are harder because:
 When you're ready:
 1. Create Postgres schemas matching `sable/pulse/db.py:_SCHEMA` and `sable/pulse/meta/db.py:_SCHEMA`
 2. Refactor `pulse/db.py` and `pulse/meta/db.py` to use a connection factory that respects `PULSE_DB_URL` / `META_DB_URL` env vars
-3. Migrate data with `pgloader`
+3. Migrate data (the `sable-platform migrate to-postgres` pattern may be adaptable)
 4. All three databases can share one Postgres instance (different schemas or just different table prefixes)
 
 This is lower priority — SQLite handles the pulse/meta read patterns well, and the serve API is read-only.
@@ -385,6 +241,6 @@ curl -s https://api.sable.tools/health | jq .
 # Disk usage
 du -sh /opt/sable/data/ /opt/sable/vault/ /opt/sable/workspace/
 
-# Postgres stats (after migration)
+# Postgres stats
 sudo -u postgres psql -c "SELECT pg_database_size('sable');"
 ```

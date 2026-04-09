@@ -32,12 +32,12 @@
 
 ## Open Items
 
-### SS-COMPAT: Fix 96 test failures from SablePlatform SQLAlchemy migration [HIGH priority, BLOCKED]
+### SS-COMPAT: Fix 96 test failures from SablePlatform SQLAlchemy migration [HIGH priority]
 
 - **Root cause:** SablePlatform Phases 0–7 converted `sable/platform/` modules to use `text()` wrapped SQL via SQLAlchemy Core. Slopper test fixtures still pass raw `sqlite3.Connection` objects, which choke on `TextClause` arguments.
 - **Affected:** `tests/advise/`, `tests/onboard/`, `tests/org_status/`, `tests/platform/`, `tests/pulse/test_outcomes.py`, `tests/pulse/test_sync_runs.py` (96 tests total)
-- **Fix options:** (a) Update Slopper test fixtures to use SablePlatform's `CompatConnection`, or (b) have SablePlatform modules detect raw sqlite3 connections and unwrap `text()`.
-- **Blocked on:** Decision on which side owns the fix (Slopper fixtures vs SablePlatform compat layer).
+- **Recommended fix:** Update Slopper test fixtures to use SablePlatform's `CompatConnection`. This is the right approach because `CompatConnection` already handles both `?`-positional and `:named` params, so fixtures will work with both SQLite (tests) and Postgres (production).
+- **Not recommended:** Having SablePlatform detect raw sqlite3 connections — that pushes test concerns into production code.
 
 ---
 
@@ -45,7 +45,7 @@
 
 ### Phase 3 — VPS (partially complete)
 
-- Postgres migration for `sable.db` — **Upstream ready (2026-04-08).** SablePlatform Phases 0–7 complete: SQLAlchemy Core + Alembic + `SABLE_DATABASE_URL` support. Slopper's `sable/platform/` re-export facades work unchanged through CompatConnection. To activate: set `SABLE_DATABASE_URL=postgresql://...` on VPS, run `alembic upgrade head` in SablePlatform, migrate data.
+- Postgres migration for `sable.db` — **DONE (2026-04-09).** All 36 tables migrated via `sable-platform migrate to-postgres`. Both `sable-serve` and `sable-weekly` running on Postgres. SQLite `sable.db` retained as backup.
 - Postgres migration for `pulse.db` / `meta.db` — separate concern (Slopper's own databases, not SablePlatform). Dialect adapter needed. See `deploy/DEPLOY.md`.
 - Docker container (deferred — systemd is sufficient at current scale)
 - Multi-org S3 vault storage (deferred)

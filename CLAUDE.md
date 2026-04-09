@@ -34,20 +34,20 @@ Weekly automation shipped (2026-04-06): `sable weekly run` orchestrates the full
 
 **Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, vault, and cost data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 8 API endpoints + /health. Cost forecast endpoint (`GET /api/v1/cost/org/{org_id}/cost-forecast`) added 2026-04-06. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Codit audit remediation (all CRIT/HIGH/MED) complete. Test count: 1213 (96 currently failing due to upstream SablePlatform SQLAlchemy migration — see TODO.md SS-COMPAT).
 
-**Production URL:** `https://api.sable.tools` — Hetzner CX21 VPS (178.156.204.125). Cloudflare named tunnel `sable-serve` → `localhost:8420`. Both `cloudflared` and `sable serve` run as systemd services. Weekly automation runs via systemd timer (Monday 06:00 UTC). Postgres installed on the same box, pending migration from SQLite. See `deploy/DEPLOY.md` for full VPS setup and Postgres transition plan.
+**Production URL:** `https://api.sable.tools` — Hetzner CX21 VPS (178.156.204.125). Cloudflare named tunnel `sable-serve` → `localhost:8420`. Both `cloudflared` and `sable serve` run as systemd services. Weekly automation runs via systemd timer (Monday 06:00 UTC). Postgres is LIVE for `sable.db` (migrated 2026-04-09). See `deploy/DEPLOY.md` for full VPS setup.
 
 **RBAC (shipped 2026-04-05):** Three roles (admin/creator/operator) with per-token org scoping.
 Operators see only their allowed orgs. Config in `~/.sable/config.yaml` under `serve.tokens`.
 See `docs/ROLES.md` for the permission matrix and config format.
 
-**Phase 3 (VPS) is partially complete.** Hetzner CX21 deployed 2026-04-06. systemd services running (`sable-serve`, `sable-weekly.timer`, `cloudflared`). Deploy scripts audited: yt-dlp added, log rotation configured (`deploy/logrotate.d/sable-serve`), smoke test added (`deploy/smoke-test.sh`). Postgres installed; SablePlatform SQLAlchemy Core migration complete (Phases 0–7) — `sable.db` Postgres activation requires setting `SABLE_DATABASE_URL` and running `alembic upgrade head`. `pulse.db`/`meta.db` Postgres migration is a separate concern (dialect adapter needed). See `deploy/DEPLOY.md`. Phase 4 = multi-tenant (future/speculative).
+**Phase 3 (VPS) is partially complete.** Hetzner CX21 deployed 2026-04-06. systemd services running (`sable-serve`, `sable-weekly.timer`, `cloudflared`). Deploy scripts audited: yt-dlp added, log rotation configured (`deploy/logrotate.d/sable-serve`), smoke test added (`deploy/smoke-test.sh`). **`sable.db` is on Postgres (migrated 2026-04-09)** — SablePlatform installed at `/opt/sable/platform`, migration via `sable-platform migrate to-postgres`. SQLite `sable.db` retained on disk as backup. `pulse.db`/`meta.db` remain SQLite (Slopper's own databases, dialect adapter needed for future migration). See `deploy/DEPLOY.md`. Phase 4 = multi-tenant (future/speculative).
 
 ---
 
 ## Architecture Decisions (not obvious from code)
 
-- **Three SQLite databases, no ORM.** `pulse.db` (performance + posting log), `meta.db`
-  (watchlist tweet cache + format intelligence), and `sable.db` (platform cross-tool store).
+- **Three databases, no ORM.** `pulse.db` (performance + posting log, SQLite), `meta.db`
+  (watchlist tweet cache + format intelligence, SQLite), and `sable.db` (platform cross-tool store, **Postgres** since 2026-04-09).
   Hand-written SQL + dataclasses throughout. `sable db migrate` runs
   all migrations (001–006) via `ensure_schema()`.
   See `docs/SCHEMA_INVENTORY.md` for full table and model inventory.
