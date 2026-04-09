@@ -11,6 +11,7 @@ from typing import Optional
 import yaml
 
 from sable.platform.db import get_db
+from sable_platform.db.compat import get_dialect, now_offset
 from sable.platform.errors import (
     SableError, ORG_NOT_FOUND, ORG_EXISTS, INVALID_CONFIG, SLUG_ORG_CONFLICT,
     AMBIGUOUS_INPUT, AWAITING_OPERATOR_INPUT, redact_error,
@@ -37,7 +38,7 @@ def _load_prospect_yaml(path: Path) -> dict:
 
 def _step_create_org(conn, job_id: str, step_id: int, org_id: str, prospect: dict) -> None:
     """Step 1: Create org if it doesn't exist."""
-    existing = conn.execute("SELECT 1 FROM orgs WHERE org_id=?", (org_id,)).fetchone()
+    existing = conn.execute("SELECT 1 FROM orgs WHERE org_id=:org_id", {"org_id": org_id}).fetchone()
     if existing:
         complete_step(conn, step_id, output={"skipped": True, "reason": "org already exists"})
         return
@@ -47,8 +48,8 @@ def _step_create_org(conn, job_id: str, step_id: int, org_id: str, prospect: dic
     twitter_handle = prospect.get("twitter_handle")
 
     conn.execute(
-        "INSERT INTO orgs (org_id, display_name, discord_server_id, twitter_handle) VALUES (?, ?, ?, ?)",
-        (org_id, display_name, discord_server_id, twitter_handle)
+        "INSERT INTO orgs (org_id, display_name, discord_server_id, twitter_handle) VALUES (:org_id, :display_name, :discord_server_id, :twitter_handle)",
+        {"org_id": org_id, "display_name": display_name, "discord_server_id": discord_server_id, "twitter_handle": twitter_handle}
     )
     conn.commit()
     complete_step(conn, step_id, output={"created": True})
@@ -57,12 +58,13 @@ def _step_create_org(conn, job_id: str, step_id: int, org_id: str, prospect: dic
 def _step_run_cult_doctor(conn, job_id: str, step_id: int, org_id: str, prospect_yaml_path: Path) -> None:
     """Step 2: Run Cult Doctor pipeline as subprocess (skip if recent run exists)."""
     # Check for recent run (within 30 days)
+    dialect = get_dialect(conn)
     recent = conn.execute(
-        """SELECT 1 FROM diagnostic_runs
-           WHERE org_id=? AND status='completed'
-             AND started_at >= datetime('now', '-30 days')
+        f"""SELECT 1 FROM diagnostic_runs
+           WHERE org_id=:org_id AND status='completed'
+             AND started_at >= {now_offset('-30 days', dialect)}
            LIMIT 1""",
-        (org_id,)
+        {"org_id": org_id}
     ).fetchone()
 
     if recent:
@@ -93,8 +95,8 @@ def _step_run_cult_doctor(conn, job_id: str, step_id: int, org_id: str, prospect
 def _step_verify_entities(conn, job_id: str, step_id: int, org_id: str) -> None:
     """Step 3: Verify entities were created by Cult Doctor sync."""
     diag_run = conn.execute(
-        "SELECT 1 FROM diagnostic_runs WHERE org_id=? AND status='completed' LIMIT 1",
-        (org_id,)
+        "SELECT 1 FROM diagnostic_runs WHERE org_id=:org_id AND status='completed' LIMIT 1",
+        {"org_id": org_id}
     ).fetchone()
 
     if not diag_run:
@@ -102,7 +104,7 @@ def _step_verify_entities(conn, job_id: str, step_id: int, org_id: str) -> None:
         raise SableError(INVALID_CONFIG, "No completed diagnostic run found for org. Ensure sable_org is set in prospect config.")
 
     entity_count = conn.execute(
-        "SELECT COUNT(*) FROM entities WHERE org_id=?", (org_id,)
+        "SELECT COUNT(*) FROM entities WHERE org_id=:org_id", {"org_id": org_id}
     ).fetchone()[0]
 
     if entity_count == 0:
@@ -144,7 +146,7 @@ def _step_seed_roster(
     elif interactive and not yes and not sys.stdin.isatty():
         # Non-TTY: pause
         conn.execute(
-            "UPDATE job_steps SET status='awaiting_input' WHERE step_id=?", (step_id,)
+            "UPDATE job_steps SET status='awaiting_input' WHERE step_id=:step_id", {"step_id": step_id}
         )
         conn.commit()
         raise SableError(AWAITING_OPERATOR_INPUT, "Step 4 awaiting operator input (stdin not a TTY)")
@@ -206,8 +208,8 @@ def _step_seed_watchlist(
         # Try from diagnostic_runs result_json
         diag_row = conn.execute(
             """SELECT result_json, checkpoint_path FROM diagnostic_runs
-               WHERE org_id=? AND status='completed' ORDER BY started_at DESC LIMIT 1""",
-            (org_id,)
+               WHERE org_id=:org_id AND status='completed' ORDER BY started_at DESC LIMIT 1""",
+            {"org_id": org_id}
         ).fetchone()
 
         if diag_row:
@@ -272,7 +274,7 @@ def _step_seed_watchlist(
             return
     elif interactive and not yes and not sys.stdin.isatty():
         conn.execute(
-            "UPDATE job_steps SET status='awaiting_input' WHERE step_id=?", (step_id,)
+            "UPDATE job_steps SET status='awaiting_input' WHERE step_id=:step_id", {"step_id": step_id}
         )
         conn.commit()
         raise SableError(AWAITING_OPERATOR_INPUT, "Step 5 awaiting operator input (stdin not a TTY)")
@@ -332,8 +334,8 @@ def run_onboard(
 
     # Check for slug conflict (different org using the same slug)
     existing_with_slug = conn.execute(
-        """SELECT org_id FROM diagnostic_runs WHERE project_slug=? AND org_id != ? LIMIT 1""",
-        (project_slug, org_id)
+        """SELECT org_id FROM diagnostic_runs WHERE project_slug=:project_slug AND org_id != :org_id LIMIT 1""",
+        {"project_slug": project_slug, "org_id": org_id}
     ).fetchone()
     if existing_with_slug:
         raise SableError(SLUG_ORG_CONFLICT,
@@ -342,7 +344,7 @@ def run_onboard(
     interactive = not non_interactive
 
     # Check if org already exists for job creation
-    org_exists = conn.execute("SELECT 1 FROM orgs WHERE org_id=?", (org_id,)).fetchone()
+    org_exists = conn.execute("SELECT 1 FROM orgs WHERE org_id=:org_id", {"org_id": org_id}).fetchone()
     job_org_id = org_id if org_exists else "system"
 
     # Create the job
@@ -361,7 +363,7 @@ def run_onboard(
     def _run_step(name, fn):
         sid = step_ids[name]
         # Check if already completed (for resume)
-        row = conn.execute("SELECT status FROM job_steps WHERE step_id=?", (sid,)).fetchone()
+        row = conn.execute("SELECT status FROM job_steps WHERE step_id=:step_id", {"step_id": sid}).fetchone()
         if row and row["status"] == "completed":
             return
         start_step(conn, sid)
@@ -374,8 +376,8 @@ def run_onboard(
 
         checkpoint_path = None
         diag_row = conn.execute(
-            "SELECT checkpoint_path FROM diagnostic_runs WHERE org_id=? AND status='completed' ORDER BY started_at DESC LIMIT 1",
-            (org_id,)
+            "SELECT checkpoint_path FROM diagnostic_runs WHERE org_id=:org_id AND status='completed' ORDER BY started_at DESC LIMIT 1",
+            {"org_id": org_id}
         ).fetchone()
         if diag_row:
             checkpoint_path = diag_row["checkpoint_path"]
@@ -385,15 +387,15 @@ def run_onboard(
         _run_step("initial_vault_sync", lambda c, j, s: _step_initial_vault_sync(c, j, s, org_id))
 
         conn.execute(
-            "UPDATE jobs SET status='completed', completed_at=datetime('now') WHERE job_id=?",
-            (job_id,)
+            "UPDATE jobs SET status='completed', completed_at=CURRENT_TIMESTAMP WHERE job_id=:job_id",
+            {"job_id": job_id}
         )
         conn.commit()
 
     except SableError:
         conn.execute(
-            "UPDATE jobs SET status='failed', completed_at=datetime('now') WHERE job_id=?",
-            (job_id,)
+            "UPDATE jobs SET status='failed', completed_at=CURRENT_TIMESTAMP WHERE job_id=:job_id",
+            {"job_id": job_id}
         )
         conn.commit()
         raise

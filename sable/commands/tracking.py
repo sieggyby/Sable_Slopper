@@ -33,7 +33,7 @@ def tracking_sync(org_id):
     conn = get_db()
 
     # Verify org exists
-    org = conn.execute("SELECT 1 FROM orgs WHERE org_id=?", (org_id,)).fetchone()
+    org = conn.execute("SELECT 1 FROM orgs WHERE org_id=:org_id", {"org_id": org_id}).fetchone()
     if not org:
         click.echo(f"Error [ORG_NOT_FOUND]: Org '{org_id}' not found in sable.db", err=True)
         sys.exit(1)
@@ -46,8 +46,8 @@ def tracking_sync(org_id):
         counts = asyncio.run(sync_to_platform(org_id))
         complete_step(conn, step_id, output=counts)
         conn.execute(
-            "UPDATE jobs SET status='completed', completed_at=datetime('now'), result_json=? WHERE job_id=?",
-            (json.dumps(counts), job_id)
+            "UPDATE jobs SET status='completed', completed_at=CURRENT_TIMESTAMP, result_json=:result_json WHERE job_id=:job_id",
+            {"result_json": json.dumps(counts), "job_id": job_id}
         )
         conn.commit()
         click.echo(
@@ -61,8 +61,8 @@ def tracking_sync(org_id):
         _err = redact_error(str(e))
         fail_step(conn, step_id, _err)
         conn.execute(
-            "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (_err, job_id)
+            "UPDATE jobs SET status='failed', completed_at=CURRENT_TIMESTAMP, error_message=:error_message WHERE job_id=:job_id",
+            {"error_message": _err, "job_id": job_id}
         )
         conn.commit()
         click.echo(f"Error [{e.code}]: {redact_error(e.message)}", err=True)
@@ -72,8 +72,8 @@ def tracking_sync(org_id):
         _err = redact_error(str(e))
         fail_step(conn, step_id, _err)
         conn.execute(
-            "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (_err, job_id)
+            "UPDATE jobs SET status='failed', completed_at=CURRENT_TIMESTAMP, error_message=:error_message WHERE job_id=:job_id",
+            {"error_message": _err, "job_id": job_id}
         )
         conn.commit()
         click.echo(f"Error: {redact_error(str(e))}", err=True)

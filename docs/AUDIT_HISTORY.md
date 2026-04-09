@@ -608,3 +608,23 @@ Added `TODO` comment on `datetime('now')` SQLite-specific call in `org_set_confi
 Adversarial QA audit (AGENTS.md framework): clean — no missed conversions, no scope creep.
 
 ### Validation: 1117 passed, 96 failed (pre-existing upstream), ruff 0, mypy 0
+
+---
+
+## SS-DIALECT: Dialect-Agnostic SQL Conversion (2026-04-08)
+
+Converted all SQLite-specific SQL in Slopper's sable.db query paths to dialect-agnostic SQL,
+preparing for Postgres migration. Four files changed:
+
+- `sable/commands/tracking.py` — 3 `datetime('now')` → `CURRENT_TIMESTAMP`, 4 `?` → `:named`
+- `sable/onboard/orchestrator.py` — 2 `datetime('now')` → `CURRENT_TIMESTAMP`, 1 `datetime('now', '-30 days')` → `now_offset()`, ~15 `?` → `:named`
+- `sable/platform/cli.py` — 1 `datetime('now')` → `CURRENT_TIMESTAMP` (already used `:named`), removed TODO comment
+- `sable/vault/platform_sync.py` — 3 `datetime('now')` → `CURRENT_TIMESTAMP`, ~11 `?` → `:named`, dynamic IN clauses and executemany converted
+
+Rules followed: only sable.db queries changed; pulse.db/meta.db queries left untouched.
+
+Adversarial QA audit (AGENTS.md Tier 1-3 framework): no actionable findings. frozenset
+iteration order in dynamic IN clause noted as cosmetic (T2). Remaining `datetime('now')`
+in advise/write modules noted as out-of-scope follow-up (T3).
+
+### Validation: 1117 passed, 96 failed (pre-existing SS-COMPAT), ruff 0, mypy 0

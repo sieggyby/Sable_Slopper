@@ -172,8 +172,7 @@ def org_set_config(org_id, key, value):
         cfg[key] = value
         with conn:
             conn.execute(
-                # TODO: datetime('now') is SQLite-specific — replace for Postgres
-                "UPDATE orgs SET config_json=:config_json, updated_at=datetime('now') WHERE org_id=:org_id",
+                "UPDATE orgs SET config_json=:config_json, updated_at=CURRENT_TIMESTAMP WHERE org_id=:org_id",
                 {"config_json": json.dumps(cfg), "org_id": org_id},
             )
         click.echo(f"Set {key}={value!r} on org '{org_id}'")

@@ -275,7 +275,7 @@ def platform_vault_sync(org_id: str) -> dict:
         sentinel.unlink(missing_ok=True)
 
     # Verify org
-    org = conn.execute("SELECT * FROM orgs WHERE org_id=?", (org_id,)).fetchone()
+    org = conn.execute("SELECT * FROM orgs WHERE org_id=:org_id", {"org_id": org_id}).fetchone()
     if not org:
         raise SableError(ORG_NOT_FOUND, f"Org '{org_id}' not found in sable.db")
     org = dict(org)
@@ -291,8 +291,8 @@ def platform_vault_sync(org_id: str) -> dict:
         stats = _do_sync(conn, org, vault_root, job_id)
         complete_step(conn, step_id, output=stats)
         conn.execute(
-            "UPDATE jobs SET status='completed', completed_at=datetime('now'), result_json=? WHERE job_id=?",
-            (json.dumps(stats), job_id)
+            "UPDATE jobs SET status='completed', completed_at=CURRENT_TIMESTAMP, result_json=:result_json WHERE job_id=:job_id",
+            {"result_json": json.dumps(stats), "job_id": job_id}
         )
         conn.commit()
         return stats
@@ -301,8 +301,8 @@ def platform_vault_sync(org_id: str) -> dict:
         _err = redact_error(str(e))
         fail_step(conn, step_id, _err)
         conn.execute(
-            "UPDATE jobs SET status='failed', completed_at=datetime('now'), error_message=? WHERE job_id=?",
-            (_err, job_id)
+            "UPDATE jobs SET status='failed', completed_at=CURRENT_TIMESTAMP, error_message=:error_message WHERE job_id=:job_id",
+            {"error_message": _err, "job_id": job_id}
         )
         conn.commit()
         raise
@@ -312,9 +312,11 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
     org_id = org["org_id"]
 
     # --- Step 1: Record old vault artifacts — defer deletion until after generation succeeds ---
+    _type_params = {f"t{i}": t for i, t in enumerate(_VAULT_ARTIFACT_TYPES)}
+    _type_placeholders = ", ".join(f":{k}" for k in _type_params)
     old_artifacts = conn.execute(
-        f"SELECT * FROM artifacts WHERE org_id=? AND artifact_type IN ({','.join(['?']*len(_VAULT_ARTIFACT_TYPES))})",
-        [org_id, *list(_VAULT_ARTIFACT_TYPES)]
+        f"SELECT * FROM artifacts WHERE org_id=:org_id AND artifact_type IN ({_type_placeholders})",
+        {"org_id": org_id, **_type_params}
     ).fetchall()
 
     old_artifact_ids = []
@@ -331,8 +333,8 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
     _offset = 0
     while True:
         page = [dict(r) for r in conn.execute(
-            "SELECT * FROM entities WHERE org_id=? AND status != 'archived' ORDER BY display_name LIMIT ? OFFSET ?",
-            (org_id, _page_size, _offset)
+            "SELECT * FROM entities WHERE org_id=:org_id AND status != 'archived' ORDER BY display_name LIMIT :limit OFFSET :offset",
+            {"org_id": org_id, "limit": _page_size, "offset": _offset}
         ).fetchall()]
         entities.extend(page)
         if len(page) < _page_size:
@@ -348,28 +350,28 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
     for e in entities:
         eid = e["entity_id"]
         entity_handles_map[eid] = [dict(r) for r in conn.execute(
-            "SELECT * FROM entity_handles WHERE entity_id=? ORDER BY platform",
-            (eid,)
+            "SELECT * FROM entity_handles WHERE entity_id=:entity_id ORDER BY platform",
+            {"entity_id": eid}
         ).fetchall()]
 
         entity_tags_map[eid] = [dict(r) for r in conn.execute(
             """SELECT * FROM entity_tags
-               WHERE entity_id=? AND is_current=1 AND (expires_at IS NULL OR expires_at > datetime('now'))
+               WHERE entity_id=:entity_id AND is_current=1 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
                ORDER BY added_at""",
-            (eid,)
+            {"entity_id": eid}
         ).fetchall()]
 
         entity_notes_map[eid] = [dict(r) for r in conn.execute(
-            "SELECT * FROM entity_notes WHERE entity_id=? ORDER BY created_at",
-            (eid,)
+            "SELECT * FROM entity_notes WHERE entity_id=:entity_id ORDER BY created_at",
+            {"entity_id": eid}
         ).fetchall()]
 
         # content_items: get url from metadata_json
         content_rows = conn.execute(
             "SELECT *, COALESCE(posted_at, created_at) AS source_time "
-            "FROM content_items WHERE entity_id=? "
+            "FROM content_items WHERE entity_id=:entity_id "
             "ORDER BY COALESCE(posted_at, created_at) DESC LIMIT 50",
-            (eid,)
+            {"entity_id": eid}
         ).fetchall()
         items = []
         for row in content_rows:
@@ -385,17 +387,17 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
     # Diagnostic runs
     diag_runs = [dict(r) for r in conn.execute(
         """SELECT * FROM diagnostic_runs
-           WHERE org_id=? AND status='completed'
+           WHERE org_id=:org_id AND status='completed'
            ORDER BY started_at DESC""",
-        (org_id,)
+        {"org_id": org_id}
     ).fetchall()]
 
     # Artifact counts for index
     total_artifacts = conn.execute(
-        "SELECT COUNT(*) FROM artifacts WHERE org_id=?", (org_id,)
+        "SELECT COUNT(*) FROM artifacts WHERE org_id=:org_id", {"org_id": org_id}
     ).fetchone()[0]
     stale_artifacts = conn.execute(
-        "SELECT COUNT(*) FROM artifacts WHERE org_id=? AND stale=1", (org_id,)
+        "SELECT COUNT(*) FROM artifacts WHERE org_id=:org_id AND stale=1", {"org_id": org_id}
     ).fetchone()[0]
 
     new_artifact_rows = []
@@ -462,9 +464,9 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
 
     try:
         pulse_meta_artifact = conn.execute(
-            """SELECT * FROM artifacts WHERE org_id=? AND artifact_type='pulse_meta_report'
+            """SELECT * FROM artifacts WHERE org_id=:org_id AND artifact_type='pulse_meta_report'
                ORDER BY created_at DESC LIMIT 1""",
-            (org_id,)
+            {"org_id": org_id}
         ).fetchone()
 
         if pulse_meta_artifact and pulse_meta_artifact["path"]:
@@ -500,17 +502,18 @@ def _do_sync(conn, org: dict, vault_root: Path, job_id: str) -> dict:
                     pass
 
         if old_artifact_ids:
-            placeholders = ",".join("?" * len(old_artifact_ids))
+            _del_params = {f"aid{i}": aid for i, aid in enumerate(old_artifact_ids)}
+            _del_placeholders = ", ".join(f":{k}" for k in _del_params)
             conn.execute(
-                f"DELETE FROM artifacts WHERE artifact_id IN ({placeholders})",
-                old_artifact_ids
+                f"DELETE FROM artifacts WHERE artifact_id IN ({_del_placeholders})",
+                _del_params
             )
 
         # --- Step 8: Insert new artifact rows and commit ---
         conn.executemany(
             """INSERT INTO artifacts (org_id, job_id, artifact_type, path, metadata_json, stale)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            new_artifact_rows
+               VALUES (:org_id, :job_id, :artifact_type, :path, :metadata_json, :stale)""",
+            [{"org_id": r[0], "job_id": r[1], "artifact_type": r[2], "path": r[3], "metadata_json": r[4], "stale": r[5]} for r in new_artifact_rows]
         )
         conn.commit()
     except Exception:
