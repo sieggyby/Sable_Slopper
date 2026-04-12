@@ -32,7 +32,7 @@ See `README.md` for full command reference. See `docs/ARCHITECTURE.md` for modul
 All community intelligence features are shipped (FEATURE-10 through FEATURE-16, CHURN-1, CHURN-2).
 Weekly automation shipped (2026-04-06): `sable weekly run` orchestrates the full weekly cycle (pulse track → meta scan → advise → calendar → vault sync) with `--all`, `--dry-run`, `--cost-estimate`. Clip review triage (`sable clip review`) and launchd scheduling (`sable weekly cron install`) also shipped.
 
-**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, vault, and cost data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 8 API endpoints + /health. Cost forecast endpoint (`GET /api/v1/cost/org/{org_id}/cost-forecast`) added 2026-04-06. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Codit audit remediation (all CRIT/HIGH/MED) complete. Test count: 1213 (96 currently failing due to upstream SablePlatform SQLAlchemy migration — see TODO.md SS-COMPAT).
+**Phase 2 (`sable serve`) is complete.** Read-only FastAPI backend exposing pulse, meta, vault, and cost data over HTTP. Named token auth (SS-17), rate limiting (SS-15), health dependency checks (SS-16), 8 API endpoints + /health. Cost forecast endpoint (`GET /api/v1/cost/org/{org_id}/cost-forecast`) added 2026-04-06. Optional dep: `pip install -e ".[serve]"`. Production hardening (SS-1 through SS-21) complete. Codit audit remediation (all CRIT/HIGH/MED) complete. Test count: 1213 (all passing). SS-COMPAT resolved 2026-04-11 — test fixtures migrated to CompatConnection.
 
 **Production URL:** `https://api.sable.tools` — Hetzner CX21 VPS (178.156.204.125). Cloudflare named tunnel `sable-serve` → `localhost:8420`. Both `cloudflared` and `sable serve` run as systemd services. Weekly automation runs via systemd timer (Monday 06:00 UTC). Postgres is LIVE for `sable.db` (migrated 2026-04-09). See `deploy/DEPLOY.md` for full VPS setup.
 
@@ -64,6 +64,12 @@ See `docs/ROLES.md` for the permission matrix and config format.
   `sable/pulse/meta/db.py`) opens its own `sqlite3` connection directly. `sable/platform/db.py`
   provides `get_db()` for `sable.db` only. `sable.db` queries use `:named` params with
   dict args; `pulse.db`/`meta.db` queries use `?`-positional with tuples.
+
+- **Test fixtures use CompatConnection for sable.db.** `tests/conftest.py` provides
+  `sable_conn` and `sable_org_conn` fixtures backed by in-memory SQLAlchemy engines
+  wrapped in `CompatConnection`. This is required because SablePlatform's modules use
+  `text()` wrapped SQL. Migration-specific tests use `migration_conn` (raw `sqlite3`).
+  `pulse.db`/`meta.db` test fixtures remain raw `sqlite3.connect()`.
 
 - **`org` is a plain string in pulse/meta/vault, and a table in `sable.db`.** The `orgs` table
   now exists in `sable.db`; pulse/meta/vault still use plain string org grouping.

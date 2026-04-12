@@ -2,39 +2,27 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from unittest.mock import patch, MagicMock
 
 import pytest
+from sqlalchemy import create_engine
+
+from sable_platform.db.compat_conn import CompatConnection
+from sable_platform.db.schema import metadata as sa_metadata
 
 
-def _make_sable_db(conn: sqlite3.Connection):
-    """Create minimal sable.db schema for outcomes."""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS orgs (
-            org_id TEXT PRIMARY KEY,
-            name TEXT
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS outcomes (
-            outcome_id TEXT PRIMARY KEY,
-            org_id TEXT NOT NULL,
-            entity_id TEXT,
-            action_id TEXT,
-            outcome_type TEXT NOT NULL,
-            description TEXT,
-            metric_name TEXT,
-            metric_before REAL,
-            metric_after REAL,
-            metric_delta REAL,
-            data_json TEXT,
-            recorded_by TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute("INSERT OR IGNORE INTO orgs (org_id, name) VALUES ('psy', 'PSY Protocol')")
+def _make_conn(org_id="psy", org_name="PSY Protocol"):
+    """Create an in-memory CompatConnection with full sable.db schema."""
+    engine = create_engine("sqlite:///:memory:")
+    sa_metadata.create_all(engine)
+    sa_conn = engine.connect()
+    conn = CompatConnection(sa_conn)
+    conn.execute(
+        "INSERT INTO orgs (org_id, display_name) VALUES (?, ?)",
+        (org_id, org_name),
+    )
     conn.commit()
+    return conn
 
 
 def _make_posts():
@@ -69,9 +57,7 @@ SNAPSHOTS = {
 
 def test_sync_creates_outcomes_per_type():
     """One outcome per content type + one aggregate."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    _make_sable_db(conn)
+    conn = _make_conn()
 
     with patch("sable.pulse.db.get_posts_for_account", return_value=_make_posts()), \
          patch("sable.pulse.db.get_latest_snapshot", side_effect=lambda pid: SNAPSHOTS.get(pid, {})):
@@ -95,9 +81,7 @@ def test_sync_creates_outcomes_per_type():
 
 def test_sync_no_posts_returns_zero():
     """No posts → zero outcomes, no crash."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    _make_sable_db(conn)
+    conn = _make_conn()
 
     with patch("sable.pulse.db.get_posts_for_account", return_value=[]):
         from sable.pulse.outcomes import sync_content_outcomes
@@ -108,9 +92,7 @@ def test_sync_no_posts_returns_zero():
 
 def test_sync_no_snapshots_returns_zero():
     """Posts with no snapshots → zero outcomes."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    _make_sable_db(conn)
+    conn = _make_conn()
 
     with patch("sable.pulse.db.get_posts_for_account", return_value=_make_posts()), \
          patch("sable.pulse.db.get_latest_snapshot", return_value={}):
@@ -122,9 +104,7 @@ def test_sync_no_snapshots_returns_zero():
 
 def test_sync_zero_views_no_division_error():
     """Posts with 0 views → engagement calculated without division error."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    _make_sable_db(conn)
+    conn = _make_conn()
 
     posts = [{"id": "1", "sable_content_type": "text", "text": "t", "posted_at": "2026-04-01"}]
     snap = _make_snapshot("1", likes=5, retweets=0, replies=0, quotes=0, views=0)
@@ -144,9 +124,7 @@ def test_sync_zero_views_no_division_error():
 
 def test_sync_delta_from_prior_outcome():
     """Second sync picks up prior metric_after as metric_before."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    _make_sable_db(conn)
+    conn = _make_conn()
 
     posts = [{"id": "1", "sable_content_type": "text", "text": "t", "posted_at": "2026-04-01"}]
     snap = _make_snapshot("1", likes=10, views=1000)
@@ -176,9 +154,7 @@ def test_sync_delta_from_prior_outcome():
 
 def test_sync_data_json_contains_handle():
     """data_json includes handle and content type info."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    _make_sable_db(conn)
+    conn = _make_conn()
 
     posts = [{"id": "1", "sable_content_type": "meme", "text": "m", "posted_at": "2026-04-01"}]
     snap = _make_snapshot("1")
@@ -199,9 +175,7 @@ def test_sync_data_json_contains_handle():
 
 def test_sync_recorded_by():
     """All outcomes have recorded_by='pulse_outcomes'."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    _make_sable_db(conn)
+    conn = _make_conn()
 
     posts = [{"id": "1", "sable_content_type": "text", "text": "t", "posted_at": "2026-04-01"}]
     snap = _make_snapshot("1")

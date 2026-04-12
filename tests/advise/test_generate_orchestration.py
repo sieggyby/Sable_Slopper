@@ -1,20 +1,25 @@
 """AQ-32: Advise generate orchestration tests — cache, budget, dry_run."""
 from __future__ import annotations
 
-import sqlite3
 from unittest.mock import patch, MagicMock
 
 import pytest
+from sqlalchemy import create_engine
 
-from sable.platform.db import ensure_schema
+from sable_platform.db.compat_conn import CompatConnection
+from sable_platform.db.schema import metadata as sa_metadata
 from sable.platform.errors import SableError
 
 
 def _make_conn():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    ensure_schema(conn)
-    conn.execute("INSERT INTO orgs (org_id, display_name) VALUES ('testorg', 'Test')")
+    engine = create_engine("sqlite:///:memory:")
+    sa_metadata.create_all(engine)
+    sa_conn = engine.connect()
+    conn = CompatConnection(sa_conn)
+    conn.execute(
+        "INSERT INTO orgs (org_id, display_name) VALUES (?, ?)",
+        ("testorg", "Test"),
+    )
     conn.commit()
     return conn
 

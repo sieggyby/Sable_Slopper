@@ -5,31 +5,16 @@ from unittest.mock import patch, MagicMock
 import pytest
 from click.testing import CliRunner
 
-from sable.platform.db import ensure_schema
-
 
 # ─────────────────────────────────────────────────────────────────────
-# Fixtures
+# Helpers
 # ─────────────────────────────────────────────────────────────────────
-
-@pytest.fixture
-def sable_conn():
-    """In-memory sable.db with schema."""
-    c = sqlite3.connect(":memory:")
-    c.row_factory = sqlite3.Row
-    ensure_schema(c)
-    c.execute("INSERT INTO orgs (org_id, display_name) VALUES ('testorg', 'Test Org')")
-    c.commit()
-    yield c
-    c.close()
-
 
 class _NoCloseConn:
     """Wrapper that suppresses .close() so test fixtures survive production code."""
 
     def __init__(self, real):
         self._real = real
-        self.row_factory = real.row_factory
 
     def execute(self, *a, **kw):
         return self._real.execute(*a, **kw)
@@ -54,14 +39,14 @@ def _mock_account(handle="@alice", org="testorg"):
 # Test 1: pulse track writes sync_runs row
 # ─────────────────────────────────────────────────────────────────────
 
-def test_pulse_track_writes_sync_run(sable_conn):
+def test_pulse_track_writes_sync_run(sable_org_conn):
     """pulse track records a sync_runs row with sync_type='pulse_track'."""
     from sable.pulse.cli import pulse_group
     from sable.roster.models import Roster
 
     mock_roster = Roster(accounts=[_mock_account()])
     fake_tweets = [{"id": "1", "text": "hi"}] * 5
-    wrapper = _NoCloseConn(sable_conn)
+    wrapper = _NoCloseConn(sable_org_conn)
 
     runner = CliRunner()
     with patch("sable.pulse.tracker.snapshot_account", return_value=fake_tweets), \
@@ -72,7 +57,7 @@ def test_pulse_track_writes_sync_run(sable_conn):
 
     assert result.exit_code == 0, result.output
 
-    row = sable_conn.execute(
+    row = sable_org_conn.execute(
         "SELECT * FROM sync_runs WHERE sync_type='pulse_track'"
     ).fetchone()
     assert row is not None
@@ -85,7 +70,7 @@ def test_pulse_track_writes_sync_run(sable_conn):
 # Test 2: pulse track skips sync when no org
 # ─────────────────────────────────────────────────────────────────────
 
-def test_pulse_track_no_org_skips_sync_run(sable_conn):
+def test_pulse_track_no_org_skips_sync_run(sable_org_conn):
     """pulse track skips sync_runs write when handle has no org."""
     from sable.pulse.cli import pulse_group
     from sable.roster.models import Roster
@@ -101,7 +86,7 @@ def test_pulse_track_no_org_skips_sync_run(sable_conn):
 
     assert result.exit_code == 0, result.output
 
-    row = sable_conn.execute(
+    row = sable_org_conn.execute(
         "SELECT * FROM sync_runs WHERE sync_type='pulse_track'"
     ).fetchone()
     assert row is None
@@ -111,7 +96,7 @@ def test_pulse_track_no_org_skips_sync_run(sable_conn):
 # Test 3: pulse track skips sync when not in roster
 # ─────────────────────────────────────────────────────────────────────
 
-def test_pulse_track_not_in_roster_skips_sync_run(sable_conn):
+def test_pulse_track_not_in_roster_skips_sync_run(sable_org_conn):
     """pulse track skips sync_runs write when handle not in roster."""
     from sable.pulse.cli import pulse_group
     from sable.roster.models import Roster
@@ -127,7 +112,7 @@ def test_pulse_track_not_in_roster_skips_sync_run(sable_conn):
 
     assert result.exit_code == 0, result.output
 
-    row = sable_conn.execute(
+    row = sable_org_conn.execute(
         "SELECT * FROM sync_runs WHERE sync_type='pulse_track'"
     ).fetchone()
     assert row is None
@@ -163,7 +148,7 @@ def test_pulse_track_sync_failure_nonfatal():
 # Test 5: meta scan writes sync_runs row
 # ─────────────────────────────────────────────────────────────────────
 
-def test_meta_scan_writes_sync_run(sable_conn):
+def test_meta_scan_writes_sync_run(sable_org_conn):
     """pulse meta scan records a sync_runs row with sync_type='pulse_meta_scan'."""
     from sable.pulse.meta.cli import meta_group
 
@@ -175,7 +160,7 @@ def test_meta_scan_writes_sync_run(sable_conn):
     }
     mock_scanner = MagicMock()
     mock_scanner.return_value.run.return_value = scan_result
-    wrapper = _NoCloseConn(sable_conn)
+    wrapper = _NoCloseConn(sable_org_conn)
 
     # Mock meta_db functions that meta_scan calls
     mock_meta_db = MagicMock()
@@ -195,7 +180,7 @@ def test_meta_scan_writes_sync_run(sable_conn):
 
     assert result.exit_code == 0, result.output
 
-    row = sable_conn.execute(
+    row = sable_org_conn.execute(
         "SELECT * FROM sync_runs WHERE sync_type='pulse_meta_scan'"
     ).fetchone()
     assert row is not None

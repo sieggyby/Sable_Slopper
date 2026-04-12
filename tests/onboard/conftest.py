@@ -1,20 +1,13 @@
 """Shared fixtures for onboard tests."""
-import sqlite3
-import uuid
 from pathlib import Path
+
 import pytest
 import yaml
 
-from sable.platform.db import ensure_schema
-
 
 @pytest.fixture
-def conn():
-    c = sqlite3.connect(":memory:")
-    c.row_factory = sqlite3.Row
-    ensure_schema(c)
-    yield c
-    c.close()
+def conn(sable_conn):
+    return sable_conn
 
 
 @pytest.fixture
@@ -34,8 +27,6 @@ def prospect_yaml(tmp_path):
 
 
 @pytest.fixture
-def org_conn(conn):
+def org_conn(sable_org_conn):
     """Connection with testorg already created."""
-    conn.execute("INSERT INTO orgs (org_id, display_name) VALUES ('testorg', 'Test Org')")
-    conn.commit()
-    return conn
+    return sable_org_conn

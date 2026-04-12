@@ -9,23 +9,23 @@ from unittest.mock import patch
 
 import pytest
 
-from sable.platform.db import ensure_schema
-
 
 # ─────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def conn():
-    c = sqlite3.connect(":memory:")
-    c.row_factory = sqlite3.Row
-    ensure_schema(c)
-    c.execute("INSERT INTO orgs (org_id, display_name) VALUES ('testorg', 'Test Org')")
-    c.execute("INSERT INTO orgs (org_id, display_name) VALUES ('otherog', 'Other Org')")
-    c.commit()
-    yield c
-    c.close()
+def conn(sable_conn):
+    sable_conn.execute(
+        "INSERT INTO orgs (org_id, display_name) VALUES (?, ?)",
+        ("testorg", "Test Org"),
+    )
+    sable_conn.execute(
+        "INSERT INTO orgs (org_id, display_name) VALUES (?, ?)",
+        ("otherog", "Other Org"),
+    )
+    sable_conn.commit()
+    return sable_conn
 
 
 def _make_assembled_base(org_id="testorg", handle="alice"):

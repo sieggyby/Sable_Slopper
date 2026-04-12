@@ -569,7 +569,6 @@ def test_assemble_input_content_items_failure_marks_platform_degraded(conn, tmp_
     class _FailOnContentItems:
         def __init__(self, real_conn):
             self._real = real_conn
-            self.row_factory = real_conn.row_factory
 
         def execute(self, sql, *args, **kwargs):
             if "content_items" in sql:
@@ -666,7 +665,6 @@ class _FailAfterNConn:
         self._c = real_conn
         self._commits = 0
         self._fail_after = fail_after
-        self.row_factory = real_conn.row_factory
 
     def execute(self, *a, **kw):
         return self._c.execute(*a, **kw)

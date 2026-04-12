@@ -2,13 +2,11 @@
 
 ---
 
-## Validation Snapshot (2026-04-08)
+## Validation Snapshot (2026-04-11)
 
-- `./.venv/bin/python -m pytest -q` → `1117 passed, 96 failed`
+- `./.venv/bin/python -m pytest -q` → `1213 passed`
 - `./.venv/bin/ruff check .` → 0
 - `./.venv/bin/mypy sable` → 0
-
-**96 failures are upstream:** SablePlatform's SQLAlchemy Core migration wraps SQL in `text()`, which raises `TypeError: execute() argument 1 must be str, not TextClause` when called against Slopper test fixtures using raw `sqlite3.Connection`. Affected test files: `tests/advise/`, `tests/onboard/`, `tests/org_status/`, `tests/platform/`, `tests/pulse/test_outcomes.py`, `tests/pulse/test_sync_runs.py`. Fix requires updating Slopper test fixtures to use SablePlatform's `CompatConnection` or aligning on raw sqlite3 connections in the shared modules.
 
 ---
 
@@ -27,17 +25,6 @@
 - **Context:** `sable/advise/stage1.py:467-472` queries `language_arc_phase`, `emergent_cultural_terms_json`, `mantra_candidates_json` from `diagnostic_runs`. No migration adds them. Code has defensive `except` that logs debug and returns "".
 - **Status:** BENIGN (code is defensive). Blocked on `--community-voice` feature stabilization.
 - **Fix (when ready):** Add migration 023 to SablePlatform adding the 3 TEXT columns to `diagnostic_runs`.
-
----
-
-## Open Items
-
-### SS-COMPAT: Fix 96 test failures from SablePlatform SQLAlchemy migration [HIGH priority]
-
-- **Root cause:** SablePlatform Phases 0–7 converted `sable/platform/` modules to use `text()` wrapped SQL via SQLAlchemy Core. Slopper test fixtures still pass raw `sqlite3.Connection` objects, which choke on `TextClause` arguments.
-- **Affected:** `tests/advise/`, `tests/onboard/`, `tests/org_status/`, `tests/platform/`, `tests/pulse/test_outcomes.py`, `tests/pulse/test_sync_runs.py` (96 tests total)
-- **Recommended fix:** Update Slopper test fixtures to use SablePlatform's `CompatConnection`. This is the right approach because `CompatConnection` already handles both `?`-positional and `:named` params, so fixtures will work with both SQLite (tests) and Postgres (production).
-- **Not recommended:** Having SablePlatform detect raw sqlite3 connections — that pushes test concerns into production code.
 
 ---
 
@@ -108,6 +95,15 @@
   module imports `meta_db_path()` and connects directly.
 - `sable.db` queries via `get_db()` use `:named` params with dict args (not `?` with tuples).
   `pulse.db` and `meta.db` queries via direct `sqlite3.connect()` still use `?`-positional.
+
+### Test fixtures
+
+- `sable.db` test fixtures use `CompatConnection` backed by in-memory SQLAlchemy engine
+  (see `tests/conftest.py`). Use `sable_conn` for bare connection, `sable_org_conn` for
+  connection with `testorg` pre-inserted.
+- Migration-specific tests use `migration_conn` (raw `sqlite3` + `ensure_schema`)
+  since they test the migration machinery itself.
+- `pulse.db` and `meta.db` test fixtures remain raw `sqlite3.connect()`.
 
 ### Validation checklist
 

@@ -628,3 +628,46 @@ iteration order in dynamic IN clause noted as cosmetic (T2). Remaining `datetime
 in advise/write modules noted as out-of-scope follow-up (T3).
 
 ### Validation: 1117 passed, 96 failed (pre-existing SS-COMPAT), ruff 0, mypy 0
+
+---
+
+## SS-COMPAT: Fix 96 Test Failures from SablePlatform SQLAlchemy Migration (2026-04-11)
+
+SablePlatform's SQLAlchemy Core migration wrapped all SQL in `text()`, which raised
+`TypeError: execute() argument 1 must be str, not TextClause` when called against
+Slopper test fixtures using raw `sqlite3.Connection`. 96 tests across 5 directories
+were affected.
+
+**Fix:** Replaced raw `sqlite3.Connection` test fixtures with `CompatConnection`-wrapped
+SQLAlchemy connections, matching the pattern used in SablePlatform's own test suite.
+
+**Files changed:**
+
+- `tests/conftest.py` (NEW) — shared `sable_conn` / `sable_org_conn` fixtures using
+  `CompatConnection` + `sa_metadata.create_all()`
+- `tests/platform/conftest.py` — delegates to shared fixtures; added `migration_conn`
+  for migration-specific tests
+- `tests/advise/conftest.py` — delegates to shared `sable_org_conn`
+- `tests/onboard/conftest.py` — delegates to shared fixtures
+- `tests/org_status/conftest.py` — delegates to shared fixtures
+- `tests/platform/test_migration.py` — switched to `migration_conn` (raw sqlite3 +
+  `ensure_schema`) since these tests validate the migration machinery itself
+- `tests/advise/test_org_flag.py` — replaced local raw sqlite3 fixture with `sable_conn`
+- `tests/advise/test_advise.py` — removed `row_factory` access from wrapper classes
+  (`_FailOnContentItems`, `_FailAfterNConn`) since `CompatConnection` handles row
+  wrapping internally
+- `tests/advise/test_generate_orchestration.py` — replaced `_make_conn()` inline helper
+  with `CompatConnection` version
+- `tests/pulse/test_outcomes.py` — replaced inline `sqlite3.connect()` with
+  `CompatConnection` helper using `sa_metadata.create_all()`
+- `tests/pulse/test_sync_runs.py` — switched to shared `sable_org_conn` fixture;
+  removed `row_factory` from `_NoCloseConn` wrapper
+
+**Design decisions:**
+- Used `sa_metadata.create_all()` (not `ensure_schema()`) for in-memory test databases,
+  matching SablePlatform's own test pattern
+- Did not enable `PRAGMA foreign_keys=ON` in test fixtures (original fixtures never had
+  it, and some tests depend on FK-less behavior for mocking)
+- Migration tests retain raw sqlite3 via dedicated `migration_conn` fixture
+
+### Validation: 1213 passed, 0 failed, ruff 0, mypy 0
