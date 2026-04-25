@@ -188,6 +188,10 @@ def library_remove(name):
         console.print(f"[red]Not found: {name}[/red]")
 
 
+from sable.face.local.cli import local_group as _local_group
+face_group.add_command(_local_group)
+
+
 @face_group.command("audit-log")
 @click.option("--limit", default=20, show_default=True)
 def audit_log(limit):

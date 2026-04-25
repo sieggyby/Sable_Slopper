@@ -52,6 +52,14 @@ def face_library_dir() -> Path:
     return d
 
 
+def face_local_workspace(handle: str = "_default", slug: str = "default") -> Path:
+    """Per-account, per-video working area for the local face-swap pipeline."""
+    handle = strip_handle(handle) if handle != "_default" else "_default"
+    d = workspace() / "face_local" / f"@{handle}" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def audit_dir() -> Path:
     d = sable_home() / "audit"
     d.mkdir(parents=True, exist_ok=True)

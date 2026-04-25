@@ -236,14 +236,27 @@ sable meme batch --account @tig_intern --count 5 --render
 
 ## Face
 
+Two paths, same reference library:
+
+- **`sable face swap`** — Replicate-backed, runs on the VPS, no extra setup beyond `REPLICATE_API_TOKEN`.
+- **`sable face local …`** — operator-laptop-only, shells out to a local FaceFusion install. Higher quality, slower (~5–20 min per clip), and requires a one-time setup. See [`docs/FACE_LOCAL_SETUP.md`](docs/FACE_LOCAL_SETUP.md).
+
 ```bash
-# Add reference face with consent
+# Add reference face with consent (used by both paths)
 sable face library add photo.jpg --name tig --consent
 
-# Swap face
+# Hosted swap
 sable face swap target.jpg --account @tig_intern --dry-run
 sable face swap viral_clip.mp4 --account @tig_intern --quality medium
+
+# Local swap (after running through docs/FACE_LOCAL_SETUP.md once)
+sable face local preflight                              # smoke-check the install
+sable face local extract https://youtu.be/...           # pull candidate frames
+sable face local filter https://youtu.be/... -r seed.png  # identity-filter
+sable face local swap reference.png target.mp4 -o out.mp4
 ```
+
+Tracked failure modes and tuning recipes for both paths are in [`FACE_SWAP_LESSONS.md`](FACE_SWAP_LESSONS.md).
 
 ## Pulse
 

@@ -91,6 +91,14 @@ See `docs/ROLES.md` for the permission matrix and config format.
 - **yt-dlp is integrated.** `sable clip process` accepts YouTube URLs directly. No manual
   download step needed.
 
+- **Two face-swap paths share one reference library.** `sable face swap` (in `sable/face/swapper.py`)
+  is Replicate-backed and runs on the VPS. `sable face local …` (in `sable/face/local/`) is
+  operator-laptop-only and shells out to a local FaceFusion install (Apple Silicon / CoreML);
+  too slow and RAM-hungry for the VPS by design. Both read from `~/.sable/face_library/`.
+  Heavy ML imports in `sable/face/local/` are deferred inside function bodies so `sable face local
+  --help` works without the `[face-local]` extras installed. Setup at `docs/FACE_LOCAL_SETUP.md`,
+  failure-mode notes at `FACE_SWAP_LESSONS.md`.
+
 - **SocialData is the Twitter data provider** (`$0.002/request`). Not the Twitter API.
   Cost guardrail: soft warning at $3/run, monthly ceiling ~$200.
 
@@ -136,6 +144,8 @@ Non-obvious decisions that reverse naive intuition — get these wrong and you r
 | `docs/QA_WORKFLOW.md` | Default hardening workflow |
 | `docs/THREAT_MODEL.md` | Adversarial testing lens |
 | `CLIP_LESSONS.md` | Tracked failures and fixes in the clip pipeline |
+| `FACE_SWAP_LESSONS.md` | Tracked failures, fixes, and recipes for the face-swap pipeline (hosted Replicate path + local FaceFusion/roop path) |
+| `docs/FACE_LOCAL_SETUP.md` | Setup + walkthrough for `sable face local` (operator-laptop-only FaceFusion path) |
 | `codit.md` | Codex audit findings (2026-03-23) — all CRIT/HIGH/MED resolved |
 | `TODO.md` | Main development queue: audit remediation log, open hardening items, and completed feature history |
 | `AGENTS.md` | Instructions for Codex review role (QA layer) |

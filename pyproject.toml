@@ -27,6 +27,14 @@ face = [
     "face-recognition>=1.3",
     "imagehash>=4.3",
 ]
+face-local = [
+    "insightface>=0.7",
+    "opencv-python>=4.9",
+    "scikit-image>=0.22",
+    "numpy>=1.26",
+    "yt-dlp>=2024.3",
+    "onnxruntime>=1.17",
+]
 pulse = [
     "python-Levenshtein>=0.23",
 ]
